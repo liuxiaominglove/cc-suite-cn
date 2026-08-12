@@ -1,0 +1,10 @@
+{
+  "name": "cc-suite-pe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "zsh -c 'source ~/.zshrc && node --test scripts/review-runner.test.mjs'",
+    "test:unit": "node --test scripts/review-runner.test.mjs",
+    "test:e2e": "zsh -c 'source ~/.zshrc && node --test scripts/review-e2e.test.mjs'"
+  }
+}

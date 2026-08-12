@@ -1,0 +1,10 @@
+node_modules/
+.opencode/node_modules/
+.pnpm-store/
+.cache/
+*.log
+.env
+.DS_Store
+nlpm-history.json
+.claude/
+.codebuddy/
