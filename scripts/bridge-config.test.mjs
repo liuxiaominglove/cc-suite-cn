@@ -22,3 +22,20 @@ describe("buildBridgeConfig", () => {
     assert.equal(bridge.env.OPC_BRIDGE_GATE, "open");
   });
 });
+
+describe("buildBridgeConfig (callback controls)", () => {
+  it("sets OPC_MAX_CALLBACKS when maxCallbacks provided", () => {
+    const cfg = buildBridgeConfig({ gate: "open", maxCallbacks: 5 });
+    assert.equal(cfg.mcpServers.bridge.env.OPC_MAX_CALLBACKS, "5");
+  });
+
+  it("sets OPC_CALLBACK_LOG when callbackLog provided", () => {
+    const cfg = buildBridgeConfig({ gate: "open", callbackLog: "/tmp/cb.jsonl" });
+    assert.equal(cfg.mcpServers.bridge.env.OPC_CALLBACK_LOG, "/tmp/cb.jsonl");
+  });
+
+  it("has no env when gate closed and no extras", () => {
+    const cfg = buildBridgeConfig({ gate: "closed" });
+    assert.equal(cfg.mcpServers.bridge.env, undefined);
+  });
+});

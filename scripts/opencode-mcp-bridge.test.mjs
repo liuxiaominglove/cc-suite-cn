@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { runOpencode, setSpawn, checkGate, createServer } from "./opencode-mcp-bridge.mjs";
+import { runOpencode, setSpawn, checkGate, createServer, checkCallbackLimit, appendCallback, readCallbacks } from "./opencode-mcp-bridge.mjs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
@@ -139,6 +139,59 @@ describe("createServer (delegate_to_opencode)", () => {
     const client = await makeClient(createServer({ env: { OPC_BRIDGE_GATE: "open" } }));
     const result = await client.callTool({ name: "delegate_to_opencode", arguments: {} });
     assert.equal(result.isError, true);
+    await client.close();
+  });
+});
+
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+describe("checkCallbackLimit", () => {
+  it("allows when count is below max", () => {
+    assert.equal(checkCallbackLimit(0, 5), true);
+    assert.equal(checkCallbackLimit(4, 5), true);
+  });
+
+  it("refuses when count reaches max", () => {
+    assert.equal(checkCallbackLimit(5, 5), false);
+    assert.equal(checkCallbackLimit(6, 5), false);
+  });
+});
+
+describe("appendCallback / readCallbacks", () => {
+  it("appends and reads callback entries", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cb-test-"));
+    const log = join(dir, "cb.jsonl");
+    await appendCallback(log, { timestamp: "t1", task: "a" });
+    await appendCallback(log, { timestamp: "t2", task: "b" });
+    const entries = await readCallbacks(log);
+    assert.equal(entries.length, 2);
+    assert.equal(entries[0].task, "a");
+    assert.equal(entries[1].task, "b");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("returns [] when log missing", async () => {
+    const entries = await readCallbacks("/nonexistent/cb.jsonl");
+    assert.deepEqual(entries, []);
+  });
+});
+
+describe("createServer callback limit", () => {
+  it("allows up to max callbacks then refuses", async () => {
+    let calls = 0;
+    const run = async () => { calls += 1; return { ok: true, output: "ok" }; };
+    const client = await makeClient(createServer({ runOpencodeFn: run, env: { OPC_BRIDGE_GATE: "open", OPC_MAX_CALLBACKS: "5" } }));
+    for (let i = 0; i < 5; i++) {
+      const r = await client.callTool({ name: "delegate_to_opencode", arguments: { task: `t${i}` } });
+      const text = r.content.map((c) => c.text).join("");
+      assert.ok(!text.includes("上限"), `第 ${i + 1} 次应被允许`);
+    }
+    const r6 = await client.callTool({ name: "delegate_to_opencode", arguments: { task: "t5" } });
+    const text6 = r6.content.map((c) => c.text).join("");
+    assert.ok(text6.includes("上限"), "第 6 次应被拒");
+    assert.equal(calls, 5);
     await client.close();
   });
 });

@@ -33,6 +33,9 @@
 | P6-0: acceptEdits 拦 MCP 工具（命门） | `acceptEdits --mcp-config` 下调 `delegate_to_opencode` 被拒（DeferExecuteTool 需授权） | 🟢 | 2026-08-13 |
 | P6-0: 解决方案 = bypassPermissions + 禁 Bash | `bypassPermissions --disallowedTools Bash` 下：能写文件 ✅、能调桥 ✅、拦 Bash ✅（codebuddy 明说 "Bash tool isn't available"） | 🟢 | 2026-08-13 |
 | P6-0 gotcha: --disallowedTools 贪婪参数 | 放 prompt 前会吞掉 prompt 导致空输出，须放 prompt 后 | 🟡 | 2026-08-13 |
+| P6: 双向工作流 e2e | codebuddy 实现排序函数时回调 1 次问 opencode"快排还是归并"，opencode 拍板"归并"，codebuddy 继续写完 | 🟢 | 2026-08-13 |
+| P6: 回调记录 + 统计 + 警告阈值 | 回调写入 JSONL、implement 返回 `callbackCount/callbacks/warnCallbacks`（≥3 警告）；单测覆盖 | 🟢 | 2026-08-13 |
+| P6: 回调上限 5 次（硬限制） | 桥内计数，第 6 次返回"已达回调上限"；单测覆盖 | 🟢 | 2026-08-13 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs`），一键重跑 4 评审员 + 只读负向。
 
