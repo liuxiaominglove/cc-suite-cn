@@ -1,7 +1,8 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode } from "./review-runner.mjs";
+import { tmpdir } from "node:os";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode, resolveReviewCwd } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -105,6 +106,34 @@ describe("frameCode", () => {
     const out = frameCode(code);
     assert.ok(out.includes(code), "original code should be embedded verbatim");
     assert.ok(!/^[A-Za-z0-9+/=]+$/m.test(out.split("\n")[1]), "second line should not look like base64");
+  });
+});
+
+describe("resolveReviewCwd", () => {
+  it("isolates kimi to temp dir", () => {
+    assert.equal(resolveReviewCwd("kimi"), tmpdir());
+  });
+
+  it("isolates qwen to temp dir", () => {
+    assert.equal(resolveReviewCwd("qwen"), tmpdir());
+  });
+
+  it("keeps codebuddy on default cwd (undefined)", () => {
+    assert.equal(resolveReviewCwd("codebuddy"), undefined);
+  });
+
+  it("keeps unknown backend on default cwd (undefined)", () => {
+    assert.equal(resolveReviewCwd("glm"), undefined);
+  });
+
+  it("review() passes temp cwd to kimi spawn", async () => {
+    let capturedOpts = null;
+    setSpawn((cmd, args, opts) => {
+      capturedOpts = opts;
+      return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+    });
+    await review({ model: "kimi-k2.7-code", backend: "kimi", code: "const x = 1;" });
+    assert.equal(capturedOpts.cwd, tmpdir());
   });
 });
 

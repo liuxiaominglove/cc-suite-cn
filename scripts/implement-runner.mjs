@@ -1,30 +1,7 @@
-import { spawn as nodeSpawn } from "node:child_process";
-import { Buffer } from "node:buffer";
 import { readCallbacks } from "./opencode-mcp-bridge.mjs";
+import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
 
-let _spawn = null;
-
-export function setSpawn(fn) {
-  _spawn = fn;
-}
-
-export class RunnerError extends Error {
-  constructor(message, { exitCode, stderr } = {}) {
-    super(message);
-    this.name = "RunnerError";
-    this.exitCode = exitCode;
-    this.stderr = stderr;
-  }
-}
-
-export class TimeoutError extends Error {
-  constructor(message = "Implement timed out") {
-    super(message);
-    this.name = "TimeoutError";
-  }
-}
-
-const SIGKILL_DELAY = 5000;
+export { setSpawn, RunnerError, TimeoutError };
 
 export const DEFAULT_TIMEOUT = 120000;
 export const DEFAULT_BRIDGE_TIMEOUT = 300000;
@@ -49,15 +26,6 @@ export function shouldWarnCallbackCount(count, threshold = 3) {
   return count >= threshold;
 }
 
-function collectStream(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    stream.on("error", reject);
-  });
-}
-
 export async function implement({ model, task, timeout = null, permissionMode = "acceptEdits", bridge = false, bridgeConfig = null, callbackLog = null }) {
   if (!model || typeof model !== "string" || model.startsWith("-")) {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -69,82 +37,36 @@ export async function implement({ model, task, timeout = null, permissionMode = 
 
   timeout = resolveTimeout(timeout, bridge);
 
-  const spawn = _spawn ?? nodeSpawn;
   const args = bridge
     ? buildImplementArgs({ model, bridgeConfig })
     : ["--model", model, "--permission-mode", permissionMode, "--print"];
   const prompt = bridge ? `${BOUNDARY_PROMPT}\n\n${task}` : task;
 
-  let proc;
-  try {
-    proc = spawn("codebuddy", args, { stdio: ["pipe", "pipe", "pipe"] });
-  } catch (err) {
-    if (err.code === "ENOENT") {
-      throw new RunnerError("codebuddy not found", { exitCode: -1, stderr: err.message });
-    }
-    throw err;
-  }
-
-  try {
-    proc.stdin.write(prompt);
-    proc.stdin.end();
-  } catch (err) {
-    proc.kill("SIGKILL");
-    throw new RunnerError("failed to write to codebuddy stdin", { exitCode: -1, stderr: err.message });
-  }
-
-  const stdoutPromise = collectStream(proc.stdout);
-  const stderrPromise = collectStream(proc.stderr);
-
-  let closeHandler, errorHandler;
-  const closePromise = new Promise((resolve, reject) => {
-    closeHandler = (code, signal) => resolve({ code, signal });
-    errorHandler = (err) => reject(err);
-    proc.on("close", closeHandler);
-    proc.on("error", errorHandler);
+  const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({
+    command: "codebuddy",
+    args,
+    stdin: prompt,
+    timeout,
   });
 
-  let timedOut = false;
-  let forceKillTimer;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGTERM");
-    forceKillTimer = setTimeout(() => {
-      proc.kill("SIGKILL");
-    }, SIGKILL_DELAY);
-  }, timeout);
-
-  try {
-    const [{ code: exitCode, signal: exitSignal }, stdout, stderr] = await Promise.all([
-      closePromise,
-      stdoutPromise,
-      stderrPromise,
-    ]);
-
-    if (timedOut) {
-      throw new TimeoutError();
-    }
-
-    if (exitCode !== 0 || (exitCode === null && exitSignal !== null)) {
-      throw new RunnerError(`codebuddy exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
-    }
-
-    const callbacks = callbackLog ? await readCallbacks(callbackLog) : [];
-
-    return {
-      model,
-      success: true,
-      output: stdout.trim() || "(no output)",
-      callbackCount: callbacks.length,
-      callbacks,
-      warnCallbacks: shouldWarnCallbackCount(callbacks.length),
-    };
-  } finally {
-    clearTimeout(timer);
-    clearTimeout(forceKillTimer);
-    proc.removeListener("close", closeHandler);
-    proc.removeListener("error", errorHandler);
+  if (timedOut) {
+    throw new TimeoutError();
   }
+
+  if (exitCode !== 0 || (exitCode === null && exitSignal !== null)) {
+    throw new RunnerError(`codebuddy exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
+  }
+
+  const callbacks = callbackLog ? await readCallbacks(callbackLog) : [];
+
+  return {
+    model,
+    success: true,
+    output: stdout.trim() || "(no output)",
+    callbackCount: callbacks.length,
+    callbacks,
+    warnCallbacks: shouldWarnCallbackCount(callbacks.length),
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -166,14 +88,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   let result;
   if (bridge) {
-    const { buildBridgeConfig } = await import("./bridge-config.mjs");
-    const { mkdtemp, writeFile } = await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const dir = await mkdtemp(join(tmpdir(), "impl-bridge-"));
-    const bridgeConfig = join(dir, "bridge.json");
-    const callbackLog = join(dir, "callbacks.jsonl");
-    await writeFile(bridgeConfig, JSON.stringify(buildBridgeConfig({ gate: "open", maxCallbacks: 5, callbackLog })));
+    const { bridgeConfig, callbackLog } = await setupBridge();
     result = await implement({ model, task, timeout, bridge: true, bridgeConfig, callbackLog });
   } else {
     result = await implement({ model, task, timeout });
@@ -184,4 +99,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error(`\n⚠️ 警告：本任务回调了 ${result.callbackCount} 次（≥3），偏多，请留意是否有"小事也回调"的乱回调。`);
   }
   if (!result.success) process.exit(1);
+}
+
+export async function setupBridge() {
+  const { buildBridgeConfig } = await import("./bridge-config.mjs");
+  const { mkdtemp, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "impl-bridge-"));
+  const bridgeConfig = join(dir, "bridge.json");
+  const callbackLog = join(dir, "callbacks.jsonl");
+  await writeFile(bridgeConfig, JSON.stringify(buildBridgeConfig({ gate: "open", maxCallbacks: 5, callbackLog })));
+  return { bridgeConfig, callbackLog, dir };
 }

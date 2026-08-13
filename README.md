@@ -76,20 +76,21 @@
 | `/review-qwen <文件>` | 只叫 Qwen 审 | 单医生看诊 |
 | `/implement <任务>` | codebuddy 写代码（可回调 opencode，写后不自动合并） | 派施工队写代码 |
 | `/fix <bug>` | codebuddy 修 bug | 派施工队修 bug |
-| `/verify <文件>` | diff 审查（只发改动区域，省 tokens） | 复查刚改的地方 |
-| `/jobs` | 查任务账本 | 看订单列表 |
+| `/verify` | diff 审查（只发改动区域，省 tokens） | 复查刚改的地方 |
+| `/jobs` | 查任务账本（审计/实现/修复都自动记账） | 看订单列表 |
 | `/result <job-id>` | 看某任务详细结果 | 点进订单看详情 |
 | `/cancel <job-id>` | 取消某任务（真杀进程） | 取消订单 |
+| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应施工队分身（换脑不换身） | 直接点名某个工人干活 |
 
 ### B. 终端里敲的命令（在项目目录）
 
 | 命令 | 干什么 |
 |------|--------|
-| `pnpm test` | 跑全部测试（146 个）+ 漂移守卫 |
+| `pnpm test` | 跑全部测试 + 漂移守卫 |
 | `pnpm test:unit` | 只跑单元测试（不需联网） |
-| `pnpm verify` | 一键重跑 4 评审员 + 只读负向验证 |
+| `pnpm verify` | 一键重跑 4 评审员 + 双向回调 + 真后台真取消 |
 | `pnpm preflight` | 检查 codebuddy 是否就绪 |
-| `node scripts/jobs.mjs --run-review --model glm-5.2 --file x.js --background` | 后台跑一个评审任务 |
+| `node scripts/jobs.mjs --run-audit --file x.js` | 4 施工队并行评审 + 记 1 条账 |
 | `node scripts/jobs.mjs --list` | 查任务账本 |
 
 ---

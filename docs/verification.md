@@ -42,6 +42,13 @@
 | review-e2e 四施工队实跑 | `pnpm test:e2e` 5/5：glm/hy3/kimi/qwen 均 success + 视角差异 | 🟢 | 2026-08-14 |
 | kimi 卡死在 base64"脑内解码"提示 → 已修复 | `frameCode` 自适应反引号围栏替代 base64；kimi 评审含 ``` 的 review-runner.mjs 81s 完成（原挂死 >5min）；e2e 加回归守卫 | 🟢 | 2026-08-14 |
 | isAuthError 误报 → 已修复 | 只在进程真正失败（非零退出）时判 AuthError；exit 0 时 stderr 的 "401"/"unauthorized"（如 kimi reasoning 引用）不再误报；单测覆盖正负向 | 🟢 | 2026-08-14 |
+| kimi/qwen 写锁硬防护（cwd 隔离） | `review()` 对 kimi/qwen 用 `resolveReviewCwd` 把子进程 cwd 设到 temp（`os.tmpdir()`）；即使误写也落 temp 而非项目；单测覆盖 kimi/qwen/codebuddy/未知 backend | 🟢 | 2026-08-14 |
+| codebuddy bypassPermissions+禁Bash 下**能联网** | 实测：任务"访问 httpbin.org/get?marker=随机token 回报 marker"——返回了真实随机 token（非训练数据） | 🟢 | 2026-08-14 |
+| 工具级禁 WebFetch/WebSearch **拦不住**联网 | 实测：`--disallowedTools "WebFetch"` / `"WebSearch"` 下仍能取到随机 token → 怀疑 glm-5.2 模型级原生联网，非 WebFetch 工具通道 | 🔴（已知局限，写代码 agent 有只读联网，暂无工具级开关） | 2026-08-14 |
+| 共享 spawn 逻辑（runner-core） | `runProcess`/`collectStream`/`RunnerError`/`TimeoutError`/`setSpawn` 抽到 `runner-core.mjs`，review/implement 复用；8 单测 + 回归 178 全绿 | 🟢 | 2026-08-14 |
+| /audit 记入账本（--run-audit） | `jobs.mjs --run-audit --file` 4 模型并行 + 聚合 1 条 job；实测冒烟 4 worker 均 success | 🟢 | 2026-08-14 |
+| /implement 记入账本（--run-implement --bridge） | `jobs.mjs --run-implement` 支持 --bridge/--timeout，实测冒烟记账 completed | 🟢 | 2026-08-14 |
+| B 分身命令（/b-qwen /b-glm /b-kimi /b-hy3） | 4 个薄命令派活给对应 subagent | 🟡（命令已建，待人工跑一次验证派活） | 2026-08-14 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-bridge.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 双向回调 + 真后台真取消。
 

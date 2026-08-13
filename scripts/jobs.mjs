@@ -90,9 +90,20 @@ export async function runJob(store, meta, fn) {
 
 export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog = openSync } = {}) {
   const args = [JOBS_SCRIPT, `--${spec.action}`, "--job-id", spec.jobId];
-  for (const [flag, val] of [["--model", spec.model], ["--file", spec.file], ["--task", spec.task], ["--backend", spec.backend], ["--ms", spec.ms]]) {
+  for (const [flag, val] of [
+    ["--model", spec.model],
+    ["--file", spec.file],
+    ["--task", spec.task],
+    ["--backend", spec.backend],
+    ["--dir", spec.dir],
+    ["--exts", spec.exts],
+    ["--timeout", spec.timeout],
+    ["--ms", spec.ms],
+  ]) {
     if (val) args.push(flag, String(val));
   }
+  if (spec.bridge) args.push("--bridge");
+  if (spec.diff) args.push("--diff");
   const stdio = logPath ? ["ignore", openLog(logPath, "a"), openLog(logPath, "a")] : "ignore";
   const child = spawn("node", args, { detached: true, stdio });
   child.unref();
@@ -155,9 +166,37 @@ export function parseArgs(args) {
       const r = { action: "run-implement" };
       const model = flag("model");
       const task = flag("task");
+      const timeout = flag("timeout");
       if (model) r.model = model;
       if (task) r.task = task;
+      if (timeout) r.timeout = parseInt(timeout, 10);
+      if (rest.includes("--bridge")) r.bridge = true;
       if (hasBackground) r.background = true;
+      return r;
+    }
+    case "--run-audit": {
+      const r = { action: "run-audit" };
+      const file = flag("file");
+      const dir = flag("dir");
+      const exts = flag("exts");
+      if (file) r.file = file;
+      if (dir) r.dir = dir;
+      if (exts) r.exts = exts.split(",").map((e) => e.trim());
+      if (rest.includes("--diff")) r.diff = true;
+      if (hasBackground) r.background = true;
+      return r;
+    }
+    case "--worker-audit": {
+      const r = { action: "worker-audit" };
+      const jobId = flag("job-id");
+      const file = flag("file");
+      const dir = flag("dir");
+      const exts = flag("exts");
+      if (jobId) r.jobId = jobId;
+      if (file) r.file = file;
+      if (dir) r.dir = dir;
+      if (exts) r.exts = exts.split(",").map((e) => e.trim());
+      if (rest.includes("--diff")) r.diff = true;
       return r;
     }
     case "--worker-review": {
@@ -202,7 +241,34 @@ export function buildMeta(parsed) {
   if (parsed.action === "run-implement") {
     return { type: "implement", model: parsed.model, task: parsed.task };
   }
+  if (parsed.action === "run-audit") {
+    return { type: "audit", task: parsed.file ?? parsed.dir };
+  }
   return null;
+}
+
+export const AUDIT_WORKERS = [
+  { backend: "codebuddy", model: "glm-5.2" },
+  { backend: "codebuddy", model: "hy3" },
+  { backend: "kimi", model: "kimi-k2.7-code" },
+  { backend: "qwen", model: "qwen3-coder-plus" },
+];
+
+export async function runAudit({ file, dir, exts, diff = false, review }) {
+  if (!review) {
+    ({ review } = await import("./review-runner.mjs"));
+  }
+  const workers = await Promise.all(
+    AUDIT_WORKERS.map(async ({ backend, model }) => {
+      try {
+        const r = await review({ model, backend, file, dir, exts, diff });
+        return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
+      } catch (err) {
+        return { backend, model, success: false, error: err.message };
+      }
+    })
+  );
+  return { workers };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -238,11 +304,24 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (parsed.action === "run-implement") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-implement", model: parsed.model, task: parsed.task }, { logDir: DEFAULT_JOBS_DIR });
+      const id = await runJobBackground(store, meta, { action: "worker-implement", model: parsed.model, task: parsed.task, bridge: parsed.bridge, timeout: parsed.timeout }, { logDir: DEFAULT_JOBS_DIR });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
-      const { implement } = await import("./implement-runner.mjs");
-      const id = await runJob(store, meta, () => implement({ model: parsed.model, task: parsed.task }));
+      const { implement, setupBridge } = await import("./implement-runner.mjs");
+      let bridgeConfig = null;
+      let callbackLog = null;
+      if (parsed.bridge) ({ bridgeConfig, callbackLog } = await setupBridge());
+      const id = await runJob(store, meta, () => implement({ model: parsed.model, task: parsed.task, timeout: parsed.timeout, bridge: parsed.bridge, bridgeConfig, callbackLog }));
+      const job = await store.get(id);
+      console.log(`${id}  [${job.status}]`);
+    }
+  } else if (parsed.action === "run-audit") {
+    const meta = buildMeta(parsed);
+    if (parsed.background) {
+      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }, { logDir: DEFAULT_JOBS_DIR });
+      console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
+    } else {
+      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));
       const job = await store.get(id);
       console.log(`${id}  [${job.status}]`);
     }
@@ -250,11 +329,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const { review } = await import("./review-runner.mjs");
     await updateJobWithResult(store, parsed.jobId, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy" }));
   } else if (parsed.action === "worker-implement") {
-    const { implement } = await import("./implement-runner.mjs");
-    await updateJobWithResult(store, parsed.jobId, () => implement({ model: parsed.model, task: parsed.task }));
+    const { implement, setupBridge } = await import("./implement-runner.mjs");
+    let bridgeConfig = null;
+    let callbackLog = null;
+    if (parsed.bridge) ({ bridgeConfig, callbackLog } = await setupBridge());
+    await updateJobWithResult(store, parsed.jobId, () => implement({ model: parsed.model, task: parsed.task, timeout: parsed.timeout, bridge: parsed.bridge, bridgeConfig, callbackLog }));
+  } else if (parsed.action === "worker-audit") {
+    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));
   } else if (parsed.action === "worker-sleep") {
     await updateJobWithResult(store, parsed.jobId, () => new Promise((resolve) => setTimeout(resolve, parsed.ms ?? 1000)));
   } else {
-    console.log("Usage: node jobs.mjs --list | --get <id> | --cancel <id> | --run-review --model <m> --file <f> [--background] | --run-implement --model <m> --task <t> [--background]");
+    console.log("Usage: node jobs.mjs --list | --get <id> | --cancel <id> | --run-review --model <m> --file <f> [--background] | --run-implement --model <m> --task <t> [--bridge] [--timeout <ms>] [--background] | --run-audit --file <f>|--dir <d> [--background]");
   }
 }

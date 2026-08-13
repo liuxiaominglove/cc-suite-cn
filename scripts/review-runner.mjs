@@ -1,7 +1,11 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { resolve, sep, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
+import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
+
+export { setSpawn, RunnerError, TimeoutError };
 
 export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".h", ".m", ".mm"];
 const MAX_FILES_WARN = 50;
@@ -9,32 +13,10 @@ const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pod
 
 export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，line 指改动后文件的行号。";
 
-let _spawn = null;
-
-export function setSpawn(fn) {
-  _spawn = fn;
-}
-
 let _gitSpawn = null;
 
 export function setGitSpawn(fn) {
   _gitSpawn = fn;
-}
-
-export class RunnerError extends Error {
-  constructor(message, { exitCode, stderr } = {}) {
-    super(message);
-    this.name = "RunnerError";
-    this.exitCode = exitCode;
-    this.stderr = stderr;
-  }
-}
-
-export class TimeoutError extends Error {
-  constructor(message = "Review timed out") {
-    super(message);
-    this.name = "TimeoutError";
-  }
 }
 
 export class AuthError extends Error {
@@ -43,8 +25,6 @@ export class AuthError extends Error {
     this.name = "AuthError";
   }
 }
-
-const SIGKILL_DELAY = 5000;
 
 export async function collectSourceFiles(dirPath, exts = DEFAULT_EXTS) {
   const { readdir } = await import("node:fs/promises");
@@ -78,15 +58,6 @@ export function validateFilePath(filePath, baseDir = process.cwd(), opts = {}) {
     throw new RunnerError("File path is outside project directory", { exitCode: -1, stderr: "Invalid file path" });
   }
   return resolved;
-}
-
-function collectStream(stream) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    stream.on("error", reject);
-  });
 }
 
 export function extractJson(text) {
@@ -132,6 +103,10 @@ export function frameCode(code) {
   }
   const fence = "`".repeat(Math.max(3, maxRun + 1));
   return `${fence}\n${code}\n${fence}`;
+}
+
+export function resolveReviewCwd(backend) {
+  return backend === "kimi" || backend === "qwen" ? tmpdir() : undefined;
 }
 
 function isAuthError(stderr) {
@@ -261,7 +236,6 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     code = await readFile(resolved, "utf-8");
   }
 
-  const spawn = _spawn ?? nodeSpawn;
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : "Review the following code for bugs, security issues, and code quality problems. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).");
 
   const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
@@ -269,103 +243,49 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
-  let proc;
-  try {
-    proc = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
-  } catch (err) {
-    if (err.code === "ENOENT") {
-      throw new RunnerError(`${command} not found`, { exitCode: -1, stderr: err.message });
-    }
-    throw err;
+  const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, cwd: resolveReviewCwd(backend) });
+
+  if (timedOut) {
+    throw new TimeoutError();
   }
 
-  if (stdin !== null) {
-    try {
-      proc.stdin.write(stdin);
-      proc.stdin.end();
-    } catch (err) {
-      proc.kill("SIGKILL");
-      throw new RunnerError(`failed to write to ${command} stdin`, { exitCode: -1, stderr: err.message });
-    }
+  const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
+  if (failed && isAuthError(stderr)) {
+    throw new AuthError();
   }
 
-  const stdoutPromise = collectStream(proc.stdout);
-  const stderrPromise = collectStream(proc.stderr);
+  if (failed) {
+    throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
+  }
 
-  let closeHandler, errorHandler;
-  const closePromise = new Promise((resolve, reject) => {
-    closeHandler = (code, signal) => {
-      resolve({ code, signal });
+  if (!stdout.trim()) {
+    return {
+      model,
+      success: false,
+      summary: "No output from reviewer",
+      issues: [],
     };
-    errorHandler = (err) => reject(err);
-    proc.on("close", closeHandler);
-    proc.on("error", errorHandler);
-  });
+  }
 
-  let timedOut = false;
-  let forceKillTimer;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGTERM");
-    forceKillTimer = setTimeout(() => {
-      proc.kill("SIGKILL");
-    }, SIGKILL_DELAY);
-  }, timeout);
-
-  try {
-    const [{ code: exitCode, signal: exitSignal }, stdout, stderr] = await Promise.all([
-      closePromise,
-      stdoutPromise,
-      stderrPromise,
-    ]);
-
-    if (timedOut) {
-      throw new TimeoutError();
-    }
-
-    const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
-    if (failed && isAuthError(stderr)) {
-      throw new AuthError();
-    }
-
-    if (failed) {
-      throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
-    }
-
-    if (!stdout.trim()) {
-      return {
-        model,
-        success: false,
-        summary: "No output from reviewer",
-        issues: [],
-      };
-    }
-
-    const parsed = extractJson(stdout);
-    if (parsed) {
-      return {
-        model,
-        success: true,
-        severity: parsed.severity ?? "unknown",
-        issues: parsed.issues ?? [],
-        summary: parsed.summary ?? "",
-      };
-    }
-
+  const parsed = extractJson(stdout);
+  if (parsed) {
     return {
       model,
       success: true,
-      severity: "unknown",
-      issues: [],
-      summary: stdout.trim(),
-      parseError: true,
+      severity: parsed.severity ?? "unknown",
+      issues: parsed.issues ?? [],
+      summary: parsed.summary ?? "",
     };
-  } finally {
-    clearTimeout(timer);
-    clearTimeout(forceKillTimer);
-    proc.removeListener("close", closeHandler);
-    proc.removeListener("error", errorHandler);
   }
+
+  return {
+    model,
+    success: true,
+    severity: "unknown",
+    issues: [],
+    summary: stdout.trim(),
+    parseError: true,
+  };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, AUDIT_WORKERS } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -163,6 +163,17 @@ describe("parseArgs", () => {
   it("returns help on unknown flag", () => {
     assert.deepEqual(parseArgs(["--wat"]), { action: "help" });
   });
+
+  it("parses --run-audit with file", () => {
+    assert.deepEqual(parseArgs(["--run-audit", "--file", "x.js"]), { action: "run-audit", file: "x.js" });
+  });
+
+  it("parses --run-implement with bridge and timeout", () => {
+    assert.deepEqual(
+      parseArgs(["--run-implement", "--model", "glm-5.2", "--task", "做X", "--bridge", "--timeout", "300000"]),
+      { action: "run-implement", model: "glm-5.2", task: "做X", bridge: true, timeout: 300000 }
+    );
+  });
 });
 
 describe("defaultStore", () => {
@@ -265,6 +276,19 @@ describe("spawnWorker", () => {
     assert.ok(captured.includes("--ms"));
     assert.ok(captured.includes("60000"));
   });
+
+  it("passes --bridge and --dir through for worker-audit/implement", () => {
+    let captured = null;
+    spawnWorker(
+      { action: "worker-implement", jobId: "j", bridge: true, dir: "src", timeout: 300000 },
+      { spawn: (c, a) => { captured = a; return { unref() {}, pid: 1 }; } }
+    );
+    assert.ok(captured.includes("--bridge"));
+    assert.ok(captured.includes("--dir"));
+    assert.ok(captured.includes("src"));
+    assert.ok(captured.includes("--timeout"));
+    assert.ok(captured.includes("300000"));
+  });
 });
 
 describe("runJobBackground", () => {
@@ -296,6 +320,35 @@ describe("parseArgs background and worker", () => {
       jobId: "job-1",
       model: "glm-5.2",
     });
+  });
+});
+
+describe("runAudit", () => {
+  it("runs all 4 workers and aggregates results", async () => {
+    const calls = [];
+    const review = async ({ model, backend }) => {
+      calls.push({ model, backend });
+      return { success: true, severity: "low", issues: [], summary: `ok ${model}` };
+    };
+    const result = await runAudit({ file: "x.js", review });
+    assert.equal(calls.length, 4);
+    assert.equal(result.workers.length, 4);
+    assert.deepEqual(
+      result.workers.map((w) => w.model),
+      AUDIT_WORKERS.map((w) => w.model)
+    );
+  });
+
+  it("captures a failing worker without rejecting", async () => {
+    const review = async ({ model }) => {
+      if (model === "hy3") throw new Error("hy3 down");
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const result = await runAudit({ file: "x.js", review });
+    const hy3 = result.workers.find((w) => w.model === "hy3");
+    assert.equal(hy3.success, false);
+    assert.ok(hy3.error.includes("hy3 down"));
+    assert.equal(result.workers.filter((w) => w.success).length, 3);
   });
 });
 
