@@ -7,10 +7,18 @@ export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go
 const MAX_FILES_WARN = 50;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
 
+export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，line 指改动后文件的行号。";
+
 let _spawn = null;
 
 export function setSpawn(fn) {
   _spawn = fn;
+}
+
+let _gitSpawn = null;
+
+export function setGitSpawn(fn) {
+  _gitSpawn = fn;
 }
 
 export class RunnerError extends Error {
@@ -116,7 +124,44 @@ function isAuthError(stderr) {
   return lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid api key");
 }
 
-export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false, backend = "codebuddy" }) {
+export function getDiff({ cwd = process.cwd(), spawn } = {}) {
+  const gitSpawn = spawn ?? _gitSpawn ?? nodeSpawn;
+
+  return new Promise((resolve, reject) => {
+    let proc;
+    try {
+      proc = gitSpawn("git", ["diff", "HEAD"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        reject(new RunnerError("git not found", { exitCode: -1, stderr: err.message }));
+      } else {
+        reject(err);
+      }
+      return;
+    }
+
+    const stdout = [];
+    const stderr = [];
+    proc.stdout.on("data", (c) => stdout.push(Buffer.from(c)));
+    proc.stderr.on("data", (c) => stderr.push(Buffer.from(c)));
+    proc.on("error", (err) => {
+      if (err.code === "ENOENT") {
+        reject(new RunnerError("git not found", { exitCode: -1, stderr: err.message }));
+      } else {
+        reject(err);
+      }
+    });
+    proc.on("close", (code) => {
+      if (code === 0) {
+        resolve(Buffer.concat(stdout).toString("utf-8"));
+      } else {
+        reject(new RunnerError(`git exited with code ${code}`, { exitCode: code, stderr: Buffer.concat(stderr).toString("utf-8") }));
+      }
+    });
+  });
+}
+
+export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -124,6 +169,17 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
 
   if (model.startsWith("-")) {
     throw new RunnerError("invalid model name", { exitCode: -1, stderr: "model must not start with -" });
+  }
+
+  if (diff) {
+    if (code || file || dir) {
+      throw new RunnerError("diff is mutually exclusive with code, file, and dir", { exitCode: -1, stderr: "Cannot combine diff with code/file/dir" });
+    }
+    const diffText = await getDiff();
+    if (!diffText.trim()) {
+      return { model, success: false, summary: "no changes to verify (git diff HEAD is empty)", issues: [] };
+    }
+    code = diffText;
   }
 
   if (!Number.isFinite(timeout) || timeout <= 0) {
@@ -196,7 +252,7 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     : code;
 
   const spawn = _spawn ?? nodeSpawn;
-  const prompt = customPrompt ?? "Review the following code for bugs, security issues, and code quality problems. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : "Review the following code for bugs, security issues, and code quality problems. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).");
 
   const codeTag = hasBackticks ? "CODE (BASE64)" : "CODE";
   const decodeHint = hasBackticks ? "\n(The code above is Base64-encoded. You MUST decode it mentally — do NOT use any tools, do NOT try to execute commands. Simply recognize this is Base64 text, decode it in your mind, and review the decoded code directly. Start your response with the review findings.)" : "";
@@ -313,10 +369,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const timeoutIdx = args.indexOf("--timeout");
   const backendIdx = args.indexOf("--backend");
   const allowExternal = args.includes("--allow-external");
+  const diff = args.includes("--diff");
 
   if (modelIdx === -1) {
     console.error("Usage: node review-runner.mjs --model <model> --file <path> [--prompt <text>] [--timeout <ms>]");
     console.error("       node review-runner.mjs --model <model> --dir <path> --exts <.ext1,.ext2> [--prompt <text>] [--timeout <ms>]");
+    console.error("       node review-runner.mjs --model <model> --diff [--backend <name>]");
     process.exit(1);
   }
 
@@ -341,12 +399,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
 
-  if (!file && !dir) {
-    console.error("Either --file or --dir is required");
+  if (!file && !dir && !diff) {
+    console.error("Either --file, --dir, or --diff is required");
     process.exit(1);
   }
 
-  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend });
+  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff });
   console.log(JSON.stringify(result, null, 2));
   if (!result.success) process.exit(1);
 }

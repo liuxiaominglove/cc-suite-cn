@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -668,5 +668,130 @@ describe("review --dir", () => {
       () => review({ model: "test", dir: `${FIXTURES}/swift-project`, exts: [".swift"], file: "test.swift" }),
       RunnerError
     );
+  });
+});
+
+describe("getDiff", () => {
+  afterEach(() => setGitSpawn(null));
+
+  it("returns git diff output verbatim", async () => {
+    const diffText = "diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n";
+    setGitSpawn(() => createMockProcess({ stdout: diffText }));
+    const diff = await getDiff();
+    assert.equal(diff, diffText);
+  });
+
+  it("returns empty string when no diff", async () => {
+    setGitSpawn(() => createMockProcess({ stdout: "" }));
+    const diff = await getDiff();
+    assert.equal(diff, "");
+  });
+
+  it("throws RunnerError on non-zero git exit", async () => {
+    setGitSpawn(() => createMockProcess({ exitCode: 1, stderr: "not a git repository" }));
+    await assert.rejects(() => getDiff(), RunnerError);
+  });
+
+  it("throws RunnerError when git not found", async () => {
+    setGitSpawn(() => {
+      const e = new Error("spawn git ENOENT");
+      e.code = "ENOENT";
+      throw e;
+    });
+    await assert.rejects(() => getDiff(), RunnerError);
+  });
+
+  it("throws RunnerError on async ENOENT (real spawn path)", async () => {
+    setGitSpawn(() => {
+      const err = new Error("spawn git ENOENT");
+      err.code = "ENOENT";
+      return {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        on: (event, cb) => {
+          if (event === "error") cb(err);
+        },
+      };
+    });
+    await assert.rejects(() => getDiff(), RunnerError);
+  });
+});
+
+describe("review diff mode", () => {
+  afterEach(() => {
+    setSpawn(null);
+    setGitSpawn(null);
+  });
+
+  it("returns no-changes result without spawning reviewer when diff empty", async () => {
+    setGitSpawn(() => createMockProcess({ stdout: "" }));
+    let reviewerSpawned = false;
+    setSpawn(() => {
+      reviewerSpawned = true;
+      return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+    });
+    const r = await review({ model: "glm-5.2", diff: true });
+    assert.equal(r.success, false);
+    assert.ok(r.summary.includes("no changes"));
+    assert.equal(reviewerSpawned, false);
+  });
+
+  it("sends diff text as code to reviewer", async () => {
+    const diffText = "diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n";
+    setGitSpawn(() => createMockProcess({ stdout: diffText }));
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = {
+        write: (d) => {
+          stdinWritten = d;
+        },
+        end: () => {},
+      };
+      return p;
+    });
+    await review({ model: "glm-5.2", diff: true });
+    assert.ok(stdinWritten.includes("@@ -1 +1 @@"), "stdin should contain the diff hunk");
+    assert.ok(stdinWritten.includes("+new"), "stdin should contain the added line");
+  });
+
+  it("uses verify prompt by default in diff mode", async () => {
+    setGitSpawn(() => createMockProcess({ stdout: "diff --git a/x b/x\n" }));
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = {
+        write: (d) => {
+          stdinWritten = d;
+        },
+        end: () => {},
+      };
+      return p;
+    });
+    await review({ model: "glm-5.2", diff: true });
+    assert.ok(stdinWritten.includes("回归"), "verify prompt should mention regression");
+  });
+
+  it("throws RunnerError when diff and file both provided", async () => {
+    await assert.rejects(() => review({ model: "glm-5.2", diff: true, file: "x.js" }), RunnerError);
+  });
+
+  it("throws RunnerError when diff and code both provided", async () => {
+    await assert.rejects(() => review({ model: "glm-5.2", diff: true, code: "const x = 1;" }), RunnerError);
+  });
+
+  it("throws RunnerError when diff and dir both provided", async () => {
+    await assert.rejects(
+      () => review({ model: "glm-5.2", diff: true, dir: `${FIXTURES}/swift-project`, exts: [".swift"] }),
+      RunnerError
+    );
+  });
+});
+
+describe("VERIFY_PROMPT", () => {
+  it("contains key verification constraints", () => {
+    assert.ok(VERIFY_PROMPT.includes("回归"));
+    assert.ok(VERIFY_PROMPT.includes("逐处"));
+    assert.ok(VERIFY_PROMPT.includes("遗漏"));
   });
 });
