@@ -16,5 +16,9 @@
 | qwen CLI 只读评审返回合法 JSON | `review-runner.mjs --backend qwen --file demos/quick-demo.js` → severity/issues/summary 齐全 | 🟢 | 2026-08-13 |
 | 四施工队并行评审（glm/hy3/kimi/qwen） | 4 backend 并行审 demo 文件，全部 success=true 且各有 findings | 🟢 | 2026-08-13 |
 | 只读负向：评审后文件未改动 | 4 评审跑完 `git status demos/` 无改动（代码走 stdin，评审员碰不到文件） | 🟢 | 2026-08-13 |
+| codebuddy 能写（且可精细锁） | `--permission-mode acceptEdits` 成功写文件；`--disallowedTools "Edit,Bash"` 能锁写 | 🟢 | 2026-08-13 |
+| qwen 写权限是两档、无中间档 | 无 `-y` 写被拒（只读）、`-y` 写成功；`--help` 无 `--permission-mode` 档 | 🟡 | 2026-08-13 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs`），一键重跑 4 评审员 + 只读负向。
+
+> 写能力分工（设计决策，非实测）：qwen / kimi 只做**只读评审**；写代码 / 实现 / 修复走 **codebuddy**（唯一能精细锁权限的壳）。qwen / kimi 若要开写，需先上 OS 级沙箱（`sandbox-exec`）硬隔离——留到 P5 写能力阶段再评估。
