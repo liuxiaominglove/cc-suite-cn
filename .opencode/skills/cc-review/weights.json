@@ -14,6 +14,24 @@
       "logic": { "depth": "standard", "weight": 0.40 },
       "code_quality": { "depth": "deep", "weight": 0.80 },
       "style": { "depth": "deep", "weight": 0.80 }
+    },
+    "hy3": {
+      "security": { "depth": "standard", "weight": 0.50 },
+      "logic": { "depth": "standard", "weight": 0.50 },
+      "code_quality": { "depth": "standard", "weight": 0.50 },
+      "style": { "depth": "standard", "weight": 0.50 }
+    },
+    "kimi-k2.7-code": {
+      "security": { "depth": "standard", "weight": 0.50 },
+      "logic": { "depth": "standard", "weight": 0.50 },
+      "code_quality": { "depth": "standard", "weight": 0.50 },
+      "style": { "depth": "standard", "weight": 0.50 }
+    },
+    "qwen3-coder-plus": {
+      "security": { "depth": "standard", "weight": 0.50 },
+      "logic": { "depth": "standard", "weight": 0.50 },
+      "code_quality": { "depth": "standard", "weight": 0.50 },
+      "style": { "depth": "standard", "weight": 0.50 }
     }
   }
 }

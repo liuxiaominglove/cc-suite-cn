@@ -13,10 +13,11 @@ opencode (DeepSeek V4 Pro)  →  总指挥（唯一发起方、最终拍板方�
   │    ├─ kimi  → alibaba-cn/kimi-k2.6
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
-  └─ A 突击员（独立第三方 · /audit 路径）
-       └─ scripts/review-runner.mjs → spawns codebuddy
-            ├─ --model glm-5.2
-            └─ --model custom-local:qwen-coder-plus
+  └─ A 突击员（独立第三方 · /audit 四施工队并行只读评审）
+       └─ scripts/review-runner.mjs（参数化 backend）
+            ├─ codebuddy → glm-5.2 / hy3
+            ├─ kimi      → kimi-k2.7-code（独立壳）
+            └─ qwen      → qwen3-coder-plus（独立壳，只读）
                                    ↓
                          Unified comparison report
 ```

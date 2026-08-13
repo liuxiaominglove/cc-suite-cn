@@ -1,12 +1,12 @@
 ---
 name: cc-review
-description: Multi-model code review — delegates to GLM-5.2 and Qwen Coder Plus via CodeBuddy, compares findings, and presents a unified report
+description: Multi-model code review — delegates to GLM-5.2, Hy3, Kimi, Qwen via CodeBuddy and their own CLIs, compares findings, and presents a unified report
 scope: global
 ---
 
 ## What I Do
 
-I run code reviews using **two different AI models** (GLM-5.2 and Qwen Coder Plus) to get independent perspectives on the same code. Since each model has different training data, they catch different classes of bugs — what one misses, the other often finds.
+I run code reviews using **four worker models** — GLM-5.2, Hy3 (via CodeBuddy gateway), Kimi, Qwen (via their own CLIs) — to get independent perspectives on the same code. Since each model has different training data, they catch different classes of bugs — what one misses, the others often find.
 
 ## When to Use Me
 
@@ -26,29 +26,30 @@ Load this skill when the user:
    - Each capability has a `depth` that controls how thorough the check is
    - Prompts are generated using effort-unit allocation (e.g., "80 units → Security")
    - If weights.json is missing, fall back to a balanced default prompt
-4. Run `node /Users/liuxiaoming/project/cc-suite-pe/scripts/review-runner.mjs` **twice in parallel**:
-   - Once with `--model glm-5.2 --prompt "<weighted GLM prompt>" [--allow-external]`
-   - Once with `--model custom-local:qwen-coder-plus --prompt "<weighted Qwen prompt>" [--allow-external]`
+4. Run `node /Users/liuxiaoming/project/cc-suite-pe/scripts/review-runner.mjs` **four times in parallel** (each reviewer is read-only):
+   - `--backend codebuddy --model glm-5.2 --prompt "<weighted GLM prompt>" [--allow-external]`
+   - `--backend codebuddy --model hy3 --prompt "<weighted Hy3 prompt>" [--allow-external]`
+   - `--backend kimi --model kimi-k2.7-code --prompt "<weighted Kimi prompt>" [--allow-external]`
+   - `--backend qwen --model qwen3-coder-plus --prompt "<weighted Qwen prompt>" [--allow-external]`
    (Add `--allow-external` only when the file is outside the cc-suite-pe project directory)
-5. Collect results from both. If one model times out or errors, still present the other's results with a note about what happened.
+5. Collect results from all four. If one model times out or errors, still present the others' results with a note about what happened.
 6. Log results to `/Users/liuxiaoming/project/cc-suite-pe/.opencode/skills/cc-review/audit-log.json` for future weight analysis.
 7. Present a unified report:
 
 ```
 ## Multi-Model Review Report
 
-### Consensus (both models agree)
+### Consensus (≥2 models agree)
 - issue 1
-- issue 2
 
-### GLM-5.2 found (Qwen missed)
-- issue 3
-
-### Qwen Coder Plus found (GLM-5.2 missed)
-- issue 4
+### Per-model findings
+- [glm-5.2] issue 2
+- [hy3] issue 3
+- [kimi] issue 4
+- [qwen] issue 5
 ```
 
-8. If both models return empty results, state that clearly. Do not fabricate issues.
+8. If all models return empty results, state that clearly. Do not fabricate issues.
 
 <example>
   User: "/audit src/auth.ts"
@@ -117,8 +118,8 @@ If weights have not been reviewed in 7+ days, remind the user at the start of th
 ## Critical Rules
 
 - Generate **weighted prompts per model** — each model gets a prompt tailored to its strengths
-- Run both reviews **in parallel** — they are independent
-- If one model fails, **still show the other's results** + a timeout/failure note
+- Run all four reviews **in parallel** — they are independent
+- If one model fails, **still show the others' results** + a timeout/failure note
 - Do not add your own review opinions. Your job is comparing and presenting, not auditing
 - Log every audit result to `audit-log.json` for cumulative weight analysis
 - **Never adjust weights without user approval** — always present the proposal with evidence and wait for confirmation
