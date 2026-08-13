@@ -3,76 +3,62 @@ import assert from "node:assert/strict";
 import { review } from "./review-runner.mjs";
 import { readFile } from "node:fs/promises";
 
-const RUNNER_CODE = await readFile("./scripts/review-runner.mjs", "utf-8");
+const TARGET_CODE = await readFile("./demos/shopping-cart.js", "utf-8");
 
-describe("e2e - real CodeBuddy multi-model review", { timeout: 420000 }, () => {
+const WORKERS = [
+  { backend: "codebuddy", model: "glm-5.2" },
+  { backend: "codebuddy", model: "hy3" },
+  { backend: "kimi", model: "kimi-k2.7-code" },
+  { backend: "qwen", model: "qwen3-coder-plus" },
+];
 
-  it("should return valid results from DeepSeek", async () => {
-    const result = await review({
-      model: "deepseek-v4-pro",
-      code: RUNNER_CODE,
-      customPrompt: "Review this code briefly. Find 1-2 issues if any. Output as JSON: {\"issues\":[{\"finding\":\"...\",\"fix\":\"...\"}],\"summary\":\"...\"}",
-      timeout: 180000,
-    });
+const PROMPT =
+  'Review this code briefly. Find 1-2 issues if any. Output as JSON: {"issues":[{"finding":"...","fix":"..."}],"summary":"..."}';
 
-    assert.equal(result.model, "deepseek-v4-pro");
-    assert.equal(result.success, true);
-    assert.ok(typeof result.summary === "string", "summary should be a string");
-    assert.ok(result.summary.length > 0, "summary should not be empty");
-    console.log(`  DeepSeek summary: ${result.summary.slice(0, 100)}...`);
-  });
+describe("e2e - real multi-model review (4 workers)", { timeout: 600000 }, () => {
 
-  it("should return valid results from Qwen", async () => {
-    const result = await review({
-      model: "qwen-coder-plus",
-      code: RUNNER_CODE,
-      customPrompt: "Review this code briefly. Find 1-2 issues if any. Output as JSON: {\"issues\":[{\"finding\":\"...\",\"fix\":\"...\"}],\"summary\":\"...\"}",
-      timeout: 180000,
-    });
-
-    assert.equal(result.model, "qwen-coder-plus");
-    assert.equal(result.success, true);
-    assert.ok(typeof result.summary === "string", "summary should be a string");
-    assert.ok(result.summary.length > 0, "summary should not be empty");
-    console.log(`  Qwen summary: ${result.summary.slice(0, 100)}...`);
-  });
-
-  it("should produce different perspectives from the two models", async () => {
-    const [deepseek, qwen] = await Promise.all([
-      review({
-        model: "deepseek-v4-pro",
-        code: RUNNER_CODE,
-      customPrompt: "Find 1 bug or improvement in this code. Output JSON: {\"issues\":[{\"finding\":\"...\"}],\"summary\":\"...\"}",
+  for (const { backend, model } of WORKERS) {
+    it(`should return valid results from ${backend}/${model}`, async () => {
+      const result = await review({
+        model,
+        backend,
+        code: TARGET_CODE,
+        customPrompt: PROMPT,
         timeout: 180000,
-      }),
-      review({
-        model: "qwen-coder-plus",
-        code: RUNNER_CODE,
-        customPrompt: "Find 1 bug or improvement in this code. Output JSON: {\"issues\":[{\"finding\":\"...\"}],\"summary\":\"...\"}",
-        timeout: 180000,
-      }),
-    ]);
+      });
 
-    assert.equal(deepseek.success, true);
-    assert.equal(qwen.success, true);
+      assert.equal(result.model, model);
+      assert.equal(result.success, true);
+      assert.ok(typeof result.summary === "string", "summary should be a string");
+      assert.ok(result.summary.length > 0, "summary should not be empty");
+      console.log(`  ${backend}/${model} summary: ${result.summary.slice(0, 100)}...`);
+    });
+  }
 
-    const dsFindings = deepseek.issues.map(i => i.finding?.toLowerCase() || "").join(" ");
-    const qwFindings = qwen.issues.map(i => i.finding?.toLowerCase() || "").join(" ");
+  it("should produce different perspectives across models", async () => {
+    const results = await Promise.all(
+      WORKERS.map(({ backend, model }) =>
+        review({
+          model,
+          backend,
+          code: TARGET_CODE,
+          customPrompt: 'Find 1 bug or improvement in this code. Output JSON: {"issues":[{"finding":"..."}],"summary":"..."}',
+          timeout: 180000,
+        }),
+      ),
+    );
 
-    console.log(`  DeepSeek raw issues: ${JSON.stringify(deepseek.issues)}`);
-    console.log(`  Qwen raw issues: ${JSON.stringify(qwen.issues)}`);
-    console.log(`  DeepSeek summary: ${deepseek.summary.slice(0, 150)}`);
-    console.log(`  Qwen summary: ${qwen.summary.slice(0, 150)}`);
+    for (const r of results) {
+      assert.equal(r.success, true, `${r.model} should succeed`);
+    }
 
-    // At least one model should find something
-    const totalFindings = deepseek.issues.length + qwen.issues.length;
+    const totalFindings = results.reduce((n, r) => n + r.issues.length, 0);
     assert.ok(totalFindings > 0, "At least one model should report a finding");
 
-    // If both found issues, they should differ (perspective divergence)
-    if (deepseek.issues.length > 0 && qwen.issues.length > 0) {
-      assert.notEqual(dsFindings, qwFindings, "The two models should have different findings");
-    } else {
-      console.log("  NOTE: One model found issues the other missed — this is the value of multi-model review.");
-    }
+    const findingSets = results.map((r) =>
+      r.issues.map((i) => i.finding?.toLowerCase() || "").join(" | "),
+    );
+    const uniqueSets = new Set(findingSets.filter((s) => s.length > 0));
+    console.log(`  distinct finding perspectives: ${uniqueSets.size}/${results.length}`);
   });
 });

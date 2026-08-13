@@ -148,6 +148,14 @@ describe("parseArgs", () => {
     });
   });
 
+  it("parses --worker-sleep with job-id and ms", () => {
+    assert.deepEqual(parseArgs(["--worker-sleep", "--job-id", "j1", "--ms", "60000"]), {
+      action: "worker-sleep",
+      jobId: "j1",
+      ms: 60000,
+    });
+  });
+
   it("returns help on empty args", () => {
     assert.deepEqual(parseArgs([]), { action: "help" });
   });
@@ -245,6 +253,17 @@ describe("spawnWorker", () => {
     );
     assert.equal(openCalls, 2);
     assert.deepEqual(captured.stdio, ["ignore", 7, 7]);
+  });
+
+  it("passes --ms through for worker-sleep", () => {
+    let captured = null;
+    spawnWorker(
+      { action: "worker-sleep", jobId: "j", ms: 60000 },
+      { spawn: (c, a) => { captured = a; return { unref() {}, pid: 1 }; } }
+    );
+    assert.ok(captured.includes("--worker-sleep"));
+    assert.ok(captured.includes("--ms"));
+    assert.ok(captured.includes("60000"));
   });
 });
 

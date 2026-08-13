@@ -26,6 +26,16 @@ export class TimeoutError extends Error {
 
 const SIGKILL_DELAY = 5000;
 
+export const DEFAULT_TIMEOUT = 120000;
+export const DEFAULT_BRIDGE_TIMEOUT = 300000;
+
+export function resolveTimeout(timeout, bridge) {
+  if (Number.isFinite(timeout) && timeout > 0) {
+    return timeout;
+  }
+  return bridge ? DEFAULT_BRIDGE_TIMEOUT : DEFAULT_TIMEOUT;
+}
+
 export const BOUNDARY_PROMPT = "你是独立施工队，负责独立完成下方任务。你手上有 delegate_to_opencode 工具，可以回调 opencode 总指挥，但必须遵守：① 只在真正拿不准、需要拍板的具体点上回调，最多回调 5 次；② 不许把整个任务踢回给总指挥；③ 回调时在 task 里写清楚上下文和你的问题。";
 
 export function buildImplementArgs({ model, permissionMode = "bypassPermissions", bridgeConfig = null }) {
@@ -48,7 +58,7 @@ function collectStream(stream) {
   });
 }
 
-export async function implement({ model, task, timeout = 120000, permissionMode = "acceptEdits", bridge = false, bridgeConfig = null, callbackLog = null }) {
+export async function implement({ model, task, timeout = null, permissionMode = "acceptEdits", bridge = false, bridgeConfig = null, callbackLog = null }) {
   if (!model || typeof model !== "string" || model.startsWith("-")) {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
   }
@@ -57,9 +67,7 @@ export async function implement({ model, task, timeout = 120000, permissionMode 
     throw new RunnerError("task is required", { exitCode: -1, stderr: "task parameter is required" });
   }
 
-  if (!Number.isFinite(timeout) || timeout <= 0) {
-    timeout = 120000;
-  }
+  timeout = resolveTimeout(timeout, bridge);
 
   const spawn = _spawn ?? nodeSpawn;
   const args = bridge
@@ -153,8 +161,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const model = args[modelIdx + 1];
   const task = args[taskIdx + 1];
-  const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : 120000;
-  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 120000;
+  const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : null;
+  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : null;
 
   let result;
   if (bridge) {

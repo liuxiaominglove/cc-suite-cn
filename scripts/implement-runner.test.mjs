@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { implement, RunnerError, TimeoutError, setSpawn, buildImplementArgs, BOUNDARY_PROMPT, shouldWarnCallbackCount } from "./implement-runner.mjs";
+import { implement, RunnerError, TimeoutError, setSpawn, buildImplementArgs, BOUNDARY_PROMPT, shouldWarnCallbackCount, resolveTimeout } from "./implement-runner.mjs";
 
 function createMockProc({ stdout = "", stderr = "", exitCode = 0, signal = null, delayMs = 0 } = {}) {
   const stdoutStream = new EventEmitter();
@@ -147,6 +147,31 @@ describe("shouldWarnCallbackCount", () => {
     assert.equal(shouldWarnCallbackCount(2, 3), false);
     assert.equal(shouldWarnCallbackCount(3, 3), true);
     assert.equal(shouldWarnCallbackCount(5, 3), true);
+  });
+});
+
+describe("resolveTimeout", () => {
+  it("defaults to 300000 when no timeout and bridge on", () => {
+    assert.equal(resolveTimeout(undefined, true), 300000);
+    assert.equal(resolveTimeout(null, true), 300000);
+  });
+
+  it("defaults to 120000 when no timeout and bridge off", () => {
+    assert.equal(resolveTimeout(undefined, false), 120000);
+    assert.equal(resolveTimeout(null, false), 120000);
+  });
+
+  it("respects explicit timeout even in bridge mode", () => {
+    assert.equal(resolveTimeout(5000, true), 5000);
+  });
+
+  it("falls back on non-positive values", () => {
+    assert.equal(resolveTimeout(0, false), 120000);
+    assert.equal(resolveTimeout(-1, true), 300000);
+  });
+
+  it("falls back on NaN", () => {
+    assert.equal(resolveTimeout(NaN, false), 120000);
   });
 });
 

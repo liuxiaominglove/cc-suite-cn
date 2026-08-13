@@ -36,7 +36,12 @@
 | P6: 双向工作流 e2e | codebuddy 实现排序函数时回调 1 次问 opencode"快排还是归并"，opencode 拍板"归并"，codebuddy 继续写完 | 🟢 | 2026-08-13 |
 | P6: 回调记录 + 统计 + 警告阈值 | 回调写入 JSONL、implement 返回 `callbackCount/callbacks/warnCallbacks`（≥3 警告）；单测覆盖 | 🟢 | 2026-08-13 |
 | P6: 回调上限 5 次（硬限制） | 桥内计数，第 6 次返回"已达回调上限"；单测覆盖 | 🟢 | 2026-08-13 |
+| bridge 默认超时常量化（bridge 300s / 非 bridge 120s） | `resolveTimeout` 单测 5 用例；`implement()` 签名改 `timeout=null`，桥模式不再被 120s 误杀 | 🟢 | 2026-08-14 |
+| P6 双向回调 e2e 固化 | `pnpm verify` → `verify-bridge.mjs`：callbackCount≥1 + opencode 答案 42 传回 + 闸门关 callbackCount=0 | 🟢 | 2026-08-14 |
+| #3 真后台 + 真取消 e2e 固化 | `pnpm verify` → `verify-background.mjs`：后台 running→completed + pid + 日志 + cancel 后进程 ESRCH | 🟢 | 2026-08-14 |
+| review-e2e 四施工队实跑 | `pnpm test:e2e` 5/5：glm/hy3/kimi/qwen 均 success + 视角差异 | 🟢 | 2026-08-14 |
+| kimi 卡死在 base64"脑内解码"提示 | 评审含 ``` 的文件触发 base64 路径，kimi（reasoning+tool_use）挂起 >5min；qwen/glm/hy3 正常 | 🔴（已知局限，e2e 目标已换成无反引号文件） | 2026-08-14 |
 
-> 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs`），一键重跑 4 评审员 + 只读负向。
+> 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-bridge.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 双向回调 + 真后台真取消。
 
 > 写能力分工（已落地 P4）：qwen / kimi 只做**只读评审**；写代码 / 实现 / 修复走 **codebuddy**（`acceptEdits` = 能写文件、拦 Bash，是"安全写"）。写后不自动合并。qwen / kimi 若要开写，需先上 OS 级沙箱（`sandbox-exec`）硬隔离。

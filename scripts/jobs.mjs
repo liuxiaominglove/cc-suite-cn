@@ -90,8 +90,8 @@ export async function runJob(store, meta, fn) {
 
 export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog = openSync } = {}) {
   const args = [JOBS_SCRIPT, `--${spec.action}`, "--job-id", spec.jobId];
-  for (const [flag, val] of [["--model", spec.model], ["--file", spec.file], ["--task", spec.task], ["--backend", spec.backend]]) {
-    if (val) args.push(flag, val);
+  for (const [flag, val] of [["--model", spec.model], ["--file", spec.file], ["--task", spec.task], ["--backend", spec.backend], ["--ms", spec.ms]]) {
+    if (val) args.push(flag, String(val));
   }
   const stdio = logPath ? ["ignore", openLog(logPath, "a"), openLog(logPath, "a")] : "ignore";
   const child = spawn("node", args, { detached: true, stdio });
@@ -182,6 +182,14 @@ export function parseArgs(args) {
       if (task) r.task = task;
       return r;
     }
+    case "--worker-sleep": {
+      const r = { action: "worker-sleep" };
+      const jobId = flag("job-id");
+      const ms = flag("ms");
+      if (jobId) r.jobId = jobId;
+      if (ms) r.ms = parseInt(ms, 10);
+      return r;
+    }
     default:
       return { action: "help" };
   }
@@ -244,6 +252,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (parsed.action === "worker-implement") {
     const { implement } = await import("./implement-runner.mjs");
     await updateJobWithResult(store, parsed.jobId, () => implement({ model: parsed.model, task: parsed.task }));
+  } else if (parsed.action === "worker-sleep") {
+    await updateJobWithResult(store, parsed.jobId, () => new Promise((resolve) => setTimeout(resolve, parsed.ms ?? 1000)));
   } else {
     console.log("Usage: node jobs.mjs --list | --get <id> | --cancel <id> | --run-review --model <m> --file <f> [--background] | --run-implement --model <m> --task <t> [--background]");
   }

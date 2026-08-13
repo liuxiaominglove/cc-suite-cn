@@ -8,7 +8,7 @@
     "test:e2e": "zsh -c 'source ~/.zshrc && node --test scripts/review-e2e.test.mjs'",
     "guard": "node scripts/guard.mjs",
     "preflight": "node scripts/preflight.mjs",
-    "verify": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs'"
+    "verify": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs && node scripts/verify/verify-bridge.mjs && node scripts/verify/verify-background.mjs'"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
