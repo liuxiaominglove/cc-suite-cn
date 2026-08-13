@@ -1,0 +1,120 @@
+import { describe, it, afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createJobStore, runJob } from "./jobs.mjs";
+
+const cleanups = [];
+afterEach(async () => {
+  while (cleanups.length) {
+    const fn = cleanups.pop();
+    await fn();
+  }
+});
+
+async function makeStore() {
+  const dir = await mkdtemp(join(tmpdir(), "jobs-test-"));
+  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  return { store: createJobStore({ dir }), dir };
+}
+
+describe("createJobStore", () => {
+  it("create generates a running job with id and startedAt", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review", model: "glm-5.2" });
+    assert.ok(job.id);
+    assert.equal(job.status, "running");
+    assert.ok(job.startedAt);
+    assert.equal(job.finishedAt, null);
+  });
+
+  it("create generates unique ids", async () => {
+    const { store } = await makeStore();
+    const a = await store.create({ type: "review" });
+    const b = await store.create({ type: "review" });
+    assert.notEqual(a.id, b.id);
+  });
+
+  it("get returns an existing job", async () => {
+    const { store } = await makeStore();
+    const created = await store.create({ type: "review", model: "x" });
+    const got = await store.get(created.id);
+    assert.equal(got.id, created.id);
+    assert.equal(got.model, "x");
+  });
+
+  it("get returns null for a missing id", async () => {
+    const { store } = await makeStore();
+    const got = await store.get("does-not-exist");
+    assert.equal(got, null);
+  });
+
+  it("update patches status and result", async () => {
+    const { store } = await makeStore();
+    const created = await store.create({ type: "implement" });
+    const updated = await store.update(created.id, { status: "completed", result: { ok: true } });
+    assert.equal(updated.status, "completed");
+    assert.equal(updated.result.ok, true);
+  });
+
+  it("update returns null for a missing id", async () => {
+    const { store } = await makeStore();
+    const updated = await store.update("nope", { status: "completed" });
+    assert.equal(updated, null);
+  });
+
+  it("list returns jobs newest-first", async () => {
+    const { store } = await makeStore();
+    const first = await store.create({ type: "review" });
+    await new Promise((r) => setTimeout(r, 5));
+    const second = await store.create({ type: "implement" });
+    const jobs = await store.list();
+    const ids = jobs.map((j) => j.id);
+    assert.deepEqual(ids, [second.id, first.id]);
+  });
+
+  it("cancel marks the job cancelled with finishedAt", async () => {
+    const { store } = await makeStore();
+    const created = await store.create({ type: "review" });
+    const cancelled = await store.cancel(created.id);
+    assert.equal(cancelled.status, "cancelled");
+    assert.ok(cancelled.finishedAt);
+  });
+
+  it("persists across store instances on the same dir", async () => {
+    const { store, dir } = await makeStore();
+    const created = await store.create({ type: "review", model: "kimi" });
+    const store2 = createJobStore({ dir });
+    const got = await store2.get(created.id);
+    assert.equal(got.id, created.id);
+    assert.equal(got.model, "kimi");
+  });
+});
+
+describe("runJob", () => {
+  it("marks completed with result when fn succeeds", async () => {
+    const { store } = await makeStore();
+    const id = await runJob(store, { type: "review", model: "x" }, async () => ({ ok: true }));
+    const job = await store.get(id);
+    assert.equal(job.status, "completed");
+    assert.deepEqual(job.result, { ok: true });
+  });
+
+  it("marks failed with error when fn throws", async () => {
+    const { store } = await makeStore();
+    const id = await runJob(store, { type: "implement" }, async () => {
+      throw new Error("boom");
+    });
+    const job = await store.get(id);
+    assert.equal(job.status, "failed");
+    assert.equal(job.error, "boom");
+  });
+
+  it("returns the job id", async () => {
+    const { store } = await makeStore();
+    const id = await runJob(store, { type: "review" }, async () => ({ ok: true }));
+    const job = await store.get(id);
+    assert.equal(job.id, id);
+  });
+});
