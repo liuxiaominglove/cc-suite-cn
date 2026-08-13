@@ -49,6 +49,7 @@
 | /audit 记入账本（--run-audit） | `jobs.mjs --run-audit --file` 4 模型并行 + 聚合 1 条 job；实测冒烟 4 worker 均 success | 🟢 | 2026-08-14 |
 | /implement 记入账本（--run-implement --bridge） | `jobs.mjs --run-implement` 支持 --bridge/--timeout，实测冒烟记账 completed | 🟢 | 2026-08-14 |
 | B 分身命令（/b-qwen /b-glm /b-kimi /b-hy3） | 4 个薄命令派活给对应 subagent | 🟡（命令已建，待人工跑一次验证派活） | 2026-08-14 |
+| 反向桥 = 权限放大通道（已知风险） | codebuddy 禁了 Bash，但能经 `delegate_to_opencode` 让 opencode（高权限）代劳；现有缓解：桥闸门默认关 + 上限 5 + 边界声明 + 回调记录，**无硬隔离** | 🟡（软缓解，硬隔离未做） | 2026-08-14 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-bridge.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 双向回调 + 真后台真取消。
 

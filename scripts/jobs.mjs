@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
+import { WORKERS } from "./models.mjs";
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -247,12 +248,7 @@ export function buildMeta(parsed) {
   return null;
 }
 
-export const AUDIT_WORKERS = [
-  { backend: "codebuddy", model: "glm-5.2" },
-  { backend: "codebuddy", model: "hy3" },
-  { backend: "kimi", model: "kimi-k2.7-code" },
-  { backend: "qwen", model: "qwen3-coder-plus" },
-];
+export const AUDIT_WORKERS = WORKERS;
 
 export async function runAudit({ file, dir, exts, diff = false, review }) {
   if (!review) {

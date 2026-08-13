@@ -9,12 +9,6 @@
       "code_quality": { "depth": "standard", "weight": 0.50 },
       "style": { "depth": "light", "weight": 0.30 }
     },
-    "custom-local:qwen-coder-plus": {
-      "security": { "depth": "light", "weight": 0.30 },
-      "logic": { "depth": "standard", "weight": 0.40 },
-      "code_quality": { "depth": "deep", "weight": 0.80 },
-      "style": { "depth": "deep", "weight": 0.80 }
-    },
     "hy3": {
       "security": { "depth": "standard", "weight": 0.50 },
       "logic": { "depth": "standard", "weight": 0.50 },
@@ -28,10 +22,10 @@
       "style": { "depth": "standard", "weight": 0.50 }
     },
     "qwen3-coder-plus": {
-      "security": { "depth": "standard", "weight": 0.50 },
-      "logic": { "depth": "standard", "weight": 0.50 },
-      "code_quality": { "depth": "standard", "weight": 0.50 },
-      "style": { "depth": "standard", "weight": 0.50 }
+      "security": { "depth": "light", "weight": 0.30 },
+      "logic": { "depth": "standard", "weight": 0.40 },
+      "code_quality": { "depth": "deep", "weight": 0.80 },
+      "style": { "depth": "deep", "weight": 0.80 }
     }
   }
 }

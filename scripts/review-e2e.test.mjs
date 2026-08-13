@@ -1,16 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { review } from "./review-runner.mjs";
+import { WORKERS } from "./models.mjs";
 import { readFile } from "node:fs/promises";
 
 const TARGET_CODE = await readFile("./demos/shopping-cart.js", "utf-8");
-
-const WORKERS = [
-  { backend: "codebuddy", model: "glm-5.2" },
-  { backend: "codebuddy", model: "hy3" },
-  { backend: "kimi", model: "kimi-k2.7-code" },
-  { backend: "qwen", model: "qwen3-coder-plus" },
-];
 
 const PROMPT =
   'Review this code briefly. Find 1-2 issues if any. Output as JSON: {"issues":[{"finding":"...","fix":"..."}],"summary":"..."}';

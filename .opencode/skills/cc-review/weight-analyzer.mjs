@@ -164,3 +164,30 @@ export async function loadWeights(filePath) {
   const raw = await readFile(filePath, "utf-8");
   return JSON.parse(raw);
 }
+
+export async function defaultLoad() {
+  const { readFile } = await import("node:fs/promises");
+  const { resolve, dirname } = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const weights = JSON.parse(await readFile(resolve(__dirname, "weights.json"), "utf-8"));
+  const auditLog = JSON.parse(await readFile(resolve(__dirname, "audit-log.json"), "utf-8"));
+  return { weights, auditLog };
+}
+
+export async function cli(args = process.argv.slice(2), { load = defaultLoad, stdout = process.stdout, stderr = process.stderr } = {}) {
+  try {
+    const { weights, auditLog } = await load();
+    const proposal = await generateProposal(weights, auditLog);
+    const pending = checkPending(weights);
+    stdout.write(JSON.stringify({ proposal, pending }, null, 2) + "\n");
+    return 0;
+  } catch (err) {
+    stderr.write(err.message + "\n");
+    return 1;
+  }
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  cli().then((code) => { process.exitCode = code; });
+}

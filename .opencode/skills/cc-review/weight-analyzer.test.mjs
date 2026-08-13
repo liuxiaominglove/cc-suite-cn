@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { suggestWeightAdjustments, generateProposal, applyProposal, checkPending } from "./weight-analyzer.mjs";
+import { suggestWeightAdjustments, generateProposal, applyProposal, checkPending, cli } from "./weight-analyzer.mjs";
 
 const WEIGHTS = {
   models: {
@@ -293,5 +293,27 @@ describe("applyProposal integrity", () => {
     assert.equal(result.weights.models["glm-5.2"].security.weight, 0.85);
     assert.equal(result.weights.models["glm-5.2"].logic.weight, 0.80, "logic should not change");
     assert.equal(result.applied, 1, "only 1 item should be applied (security)");
+  });
+});
+
+describe("cli", () => {
+  it("returns 0 and prints needs_more_data when audit log is empty", async () => {
+    let out = "";
+    const stdout = { write: (s) => { out += s; } };
+    const stderr = { write: () => {} };
+    const load = async () => ({ weights: { models: {} }, auditLog: [] });
+    const code = await cli([], { load, stdout, stderr });
+    assert.equal(code, 0);
+    assert.ok(out.includes("needs_more_data"));
+  });
+
+  it("returns 1 and prints error when load fails", async () => {
+    let err = "";
+    const stdout = { write: () => {} };
+    const stderr = { write: (s) => { err += s; } };
+    const load = async () => { throw new Error("boom"); };
+    const code = await cli([], { load, stdout, stderr });
+    assert.equal(code, 1);
+    assert.ok(err.includes("boom"));
   });
 });

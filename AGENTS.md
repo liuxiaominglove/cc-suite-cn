@@ -2,6 +2,8 @@
 
 Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥). Four worker models serve as **B-分身** subagents (daily review/fix/implement), while `/audit` additionally dispatches **A-突击员** (independent external reviews via CodeBuddy CLI). Different models have different training data, so they catch different classes of bugs.
 
+> 给人看的大白话总览见 **`README.md`**；本文是给 AI/opencode 看的机器指令（保持精简，大白话解释放 README）。
+
 ## Architecture
 
 ```
@@ -59,11 +61,14 @@ export DASHSCOPE_API_KEY=your-aliyun-dashscope-key
 | `pnpm test` | Run full test suite (loads env from `~/.zshrc`) |
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
-| `/audit <path>` | 四施工队并行只读评审（总机） |
+| `pnpm verify` | 一键重跑 4 评审员只读 + 双向回调 + 真后台真取消 |
+| `/audit <path>` | 四施工队并行只读评审（`--run-audit`，记入任务账本） |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机） |
-| `/implement <task>` | codebuddy 实现功能/写代码（写后不自动合并） |
-| `/fix <bug>` | codebuddy 修复 bug（写后不自动合并） |
-| `/verify <path>` | 只读验证修复/实现是否正确 |
+| `/implement <task>` | codebuddy 实现功能/写代码（写后不自动合并，可回调，记账本） |
+| `/fix <bug>` | codebuddy 修复 bug（写后不自动合并，记账本） |
+| `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
+| `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
+| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身 subagent（task 工具） |
 | `/review <path>` | Same as `/audit` |
 
 ## Usage
@@ -111,8 +116,11 @@ Scripts, weights, and skill assets live in **one** canonical location — this g
 |------|---------|
 | `AGENTS.md` | This file — project conventions and instructions |
 | `~/.config/opencode/commands/audit.md` | Global `/audit` command (thin pointer to this repo) |
-| `scripts/review-runner.mjs` | CodeBuddy delegation runner (timeout, error handling, structured parsing) |
-| `scripts/review-runner.test.mjs` | Unit tests for the runner (31 tests) |
+| `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
+| `scripts/implement-runner.mjs` | 写代码 runner（codebuddy，桥回调，写后不合并） |
+| `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
+| `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 模型别名 canonicalModel） |
+| `scripts/jobs.mjs` | 任务账本（run-audit/run-implement/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill + weights |

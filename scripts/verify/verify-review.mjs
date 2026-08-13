@@ -1,16 +1,12 @@
 import { review } from "../review-runner.mjs";
+import { WORKERS } from "../models.mjs";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
 const TARGET = process.argv[2] ?? "demos/quick-demo.js";
 
-const BACKENDS = [
-  { backend: "codebuddy", model: "glm-5.2" },
-  { backend: "codebuddy", model: "hy3" },
-  { backend: "kimi", model: "kimi-k2.7-code" },
-  { backend: "qwen", model: "qwen3-coder-plus" },
-];
+const BACKENDS = WORKERS;
 
 function hashFile(p) {
   return createHash("sha256").update(readFileSync(p)).digest("hex");
