@@ -18,7 +18,10 @@
 | 只读负向：评审后文件未改动 | 4 评审跑完 `git status demos/` 无改动（代码走 stdin，评审员碰不到文件） | 🟢 | 2026-08-13 |
 | codebuddy 能写（且可精细锁） | `--permission-mode acceptEdits` 成功写文件；`--disallowedTools "Edit,Bash"` 能锁写 | 🟢 | 2026-08-13 |
 | qwen 写权限是两档、无中间档 | 无 `-y` 写被拒（只读）、`-y` 写成功；`--help` 无 `--permission-mode` 档 | 🟡 | 2026-08-13 |
+| codebuddy `acceptEdits` 拦 Bash（安全写） | `whoami` 被拒（"Bash 工具被权限策略拒绝"）；写文件走 Write 工具成功 | 🟢 | 2026-08-13 |
+| implement() 真实实现（写代码） | `implement-runner.mjs --model glm-5.2` 把 `add` 函数写进 math.js、`subtract` 不变 | 🟢 | 2026-08-13 |
+| 写后不自动合并 | implement 只改工作区文件、未 commit，`git diff` 可审、`git checkout` 可回退 | 🟢 | 2026-08-13 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs`），一键重跑 4 评审员 + 只读负向。
 
-> 写能力分工（设计决策，非实测）：qwen / kimi 只做**只读评审**；写代码 / 实现 / 修复走 **codebuddy**（唯一能精细锁权限的壳）。qwen / kimi 若要开写，需先上 OS 级沙箱（`sandbox-exec`）硬隔离——留到 P5 写能力阶段再评估。
+> 写能力分工（已落地 P4）：qwen / kimi 只做**只读评审**；写代码 / 实现 / 修复走 **codebuddy**（`acceptEdits` = 能写文件、拦 Bash，是"安全写"）。写后不自动合并。qwen / kimi 若要开写，需先上 OS 级沙箱（`sandbox-exec`）硬隔离。

@@ -13,19 +13,21 @@ opencode (DeepSeek V4 Pro)  →  总指挥（唯一发起方、最终拍板方�
   │    ├─ kimi  → alibaba-cn/kimi-k2.6
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
-  └─ A 突击员（独立第三方 · /audit 四施工队并行只读评审）
-       └─ scripts/review-runner.mjs（参数化 backend）
-            ├─ codebuddy → glm-5.2 / hy3
-            ├─ kimi      → kimi-k2.7-code（独立壳）
-            └─ qwen      → qwen3-coder-plus（独立壳，只读）
-                                   ↓
-                         Unified comparison report
+  └─ A 突击员（独立第三方 · 只读评审 + 写能力）
+       ├─ scripts/review-runner.mjs（参数化 backend，只读评审）
+       │    ├─ codebuddy → glm-5.2 / hy3
+       │    ├─ kimi      → kimi-k2.7-code（独立壳）
+       │    └─ qwen      → qwen3-coder-plus（独立壳，只读）
+       └─ scripts/implement-runner.mjs（写代码，仅 codebuddy，acceptEdits）
+                                    ↓
+                          Unified comparison report
 ```
 
 - **opencode**: 总指挥 — interactive coding assistant (DeepSeek V4 Pro) and orchestrator
 - **B 分身** (`.opencode/agents/*.md`): opencode 子代理，用各自模型的大脑做日常审/改/修
 - **A 突击员** (`/audit`): 通过 CodeBuddy CLI 起独立第三方进程，做对抗性审查
-- **review-runner.mjs**: Manages timeouts, error handling, JSON parsing, and result aggregation
+- **review-runner.mjs**: 只读评审（参数化 backend，超时/错误/JSON 解析/结果聚合）
+- **implement-runner.mjs**: 写代码（仅 codebuddy，`acceptEdits` = 能写文件、拦 Bash；写后不自动合并）
 - **cc-review skill**: Defines the review workflow (`~/.config/opencode/skills/cc-review/SKILL.md`)
 
 ## Prerequisites
@@ -57,7 +59,11 @@ export DASHSCOPE_API_KEY=your-aliyun-dashscope-key
 | `pnpm test` | Run full test suite (loads env from `~/.zshrc`) |
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
-| `/audit <path>` | Run multi-model code review (global command) |
+| `/audit <path>` | 四施工队并行只读评审（总机） |
+| `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机） |
+| `/implement <task>` | codebuddy 实现功能/写代码（写后不自动合并） |
+| `/fix <bug>` | codebuddy 修复 bug（写后不自动合并） |
+| `/verify <path>` | 只读验证修复/实现是否正确 |
 | `/review <path>` | Same as `/audit` |
 
 ## Usage
