@@ -1,6 +1,10 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { resolve, sep } from "node:path";
+import { resolve, sep, join, relative } from "node:path";
+
+export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".h", ".m", ".mm"];
+const MAX_FILES_WARN = 50;
+const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
 
 let _spawn = null;
 
@@ -32,6 +36,29 @@ export class AuthError extends Error {
 }
 
 const SIGKILL_DELAY = 5000;
+
+export async function collectSourceFiles(dirPath, exts = DEFAULT_EXTS) {
+  const { readdir } = await import("node:fs/promises");
+
+  const files = [];
+  const entries = await readdir(dirPath, { withFileTypes: true });
+
+  for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.name.startsWith(".")) continue;
+
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      const sub = await collectSourceFiles(join(dirPath, entry.name), exts);
+      files.push(...sub);
+    } else if (entry.isFile()) {
+      if (exts.some((e) => entry.name.endsWith(e))) {
+        files.push(join(dirPath, entry.name));
+      }
+    }
+  }
+
+  return files;
+}
 
 export function validateFilePath(filePath, baseDir = process.cwd(), opts = {}) {
   if (opts.allowExternal) return resolve(baseDir, filePath);
@@ -88,7 +115,7 @@ function isAuthError(stderr) {
   return lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid api key");
 }
 
-export async function review({ model, code, customPrompt, timeout = 60000, file, allowExternal = false }) {
+export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -102,8 +129,46 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     timeout = 60000;
   }
 
+  if (dir != null && typeof dir !== "string") {
+    throw new RunnerError("dir must be a string", { exitCode: -1, stderr: "Invalid dir type" });
+  }
+
+  if (dir) {
+    if (code || file) {
+      throw new RunnerError("dir is mutually exclusive with code and file", { exitCode: -1, stderr: "Cannot combine dir with code/file" });
+    }
+
+    const { readFile } = await import("node:fs/promises");
+    const resolvedDir = validateFilePath(dir, process.cwd(), { allowExternal });
+    const resolvedExts = exts ?? DEFAULT_EXTS;
+    const srcFiles = await collectSourceFiles(resolvedDir, resolvedExts);
+
+    if (srcFiles.length === 0) {
+      return {
+        model,
+        success: false,
+        summary: `No source files found in ${dir} (exts: ${resolvedExts.join(",")})`,
+        issues: [],
+        dir,
+        fileCount: 0,
+      };
+    }
+
+    const parts = [];
+    for (const f of srcFiles) {
+      const relPath = relative(resolvedDir, f);
+      const content = await readFile(f, "utf-8");
+      parts.push(`// === File: ${relPath} ===\n${content}`);
+    }
+    code = parts.join("\n\n");
+
+    if (srcFiles.length > MAX_FILES_WARN) {
+      process.stderr.write(`Warning: ${srcFiles.length} source files found — review may hit token limits\n`);
+    }
+  }
+
   if (!code && !file) {
-    throw new RunnerError("code or file is required", { exitCode: -1, stderr: "No code content provided" });
+    throw new RunnerError("code or file or dir is required", { exitCode: -1, stderr: "No code content provided" });
   }
 
   if (code !== undefined && typeof code !== "string") {
@@ -114,7 +179,7 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     throw new RunnerError("customPrompt must be a string", { exitCode: -1, stderr: "Invalid customPrompt type" });
   }
 
-  if (file !== undefined && typeof file !== "string") {
+  if (file !== undefined && file !== null && typeof file !== "string") {
     throw new RunnerError("file must be a string", { exitCode: -1, stderr: "Invalid file type" });
   }
 
@@ -240,12 +305,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const modelIdx = args.indexOf("--model");
   const fileIdx = args.indexOf("--file");
+  const dirIdx = args.indexOf("--dir");
+  const extsIdx = args.indexOf("--exts");
   const promptIdx = args.indexOf("--prompt");
   const timeoutIdx = args.indexOf("--timeout");
   const allowExternal = args.includes("--allow-external");
 
   if (modelIdx === -1) {
     console.error("Usage: node review-runner.mjs --model <model> --file <path> [--prompt <text>] [--timeout <ms>]");
+    console.error("       node review-runner.mjs --model <model> --dir <path> --exts <.ext1,.ext2> [--prompt <text>] [--timeout <ms>]");
     process.exit(1);
   }
 
@@ -256,17 +324,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
 
   const file = fileIdx !== -1 ? args[fileIdx + 1] : null;
+  const dir = dirIdx !== -1 ? args[dirIdx + 1] : null;
+  const extsRaw = extsIdx !== -1 ? args[extsIdx + 1] : null;
+  const exts = extsRaw ? extsRaw.split(",").map((e) => e.trim()) : null;
   const customPrompt = promptIdx !== -1 ? args[promptIdx + 1] : null;
 
   const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : 60000;
   const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 60000;
 
-  if (!file) {
-    console.error("--file is required");
+  if (file && dir) {
+    console.error("--file and --dir are mutually exclusive");
     process.exit(1);
   }
 
-  const result = await review({ model, file, customPrompt, timeout, allowExternal });
+  if (!file && !dir) {
+    console.error("Either --file or --dir is required");
+    process.exit(1);
+  }
+
+  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal });
   console.log(JSON.stringify(result, null, 2));
   if (!result.success) process.exit(1);
 }

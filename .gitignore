@@ -8,3 +8,4 @@ node_modules/
 nlpm-history.json
 .claude/
 .codebuddy/
+.opencode/skills/cc-review/audit-log.json

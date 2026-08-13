@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -556,5 +556,117 @@ describe("review-runner", () => {
     assert.equal(r2.success, true);
     assert.equal(r1.model, "deepseek-v4-pro");
     assert.equal(r2.model, "qwen-coder-plus");
+  });
+});
+
+const FIXTURES = "/var/folders/77/4qgc39t17kn1jhl7wrw62dkr0000gn/T/opencode/test-fixtures";
+
+describe("collectSourceFiles", () => {
+  it("should find Swift files in a directory tree", async () => {
+    const files = await collectSourceFiles(`${FIXTURES}/swift-project`, [".swift"]);
+    assert.equal(files.length, 2, "should find 2 swift files");
+    assert.ok(files.some((f) => f.endsWith("main.swift")), "should include main.swift");
+    assert.ok(files.some((f) => f.endsWith("utils.swift")), "should include utils.swift");
+  });
+
+  it("should return empty array for directories without matching files", async () => {
+    const files = await collectSourceFiles(`${FIXTURES}/empty`, [".swift"]);
+    assert.equal(files.length, 0);
+  });
+
+  it("should skip .git, node_modules, and non-source files", async () => {
+    const files = await collectSourceFiles(`${FIXTURES}/mixed`, [".swift"]);
+    assert.equal(files.length, 1, "should only find src/app.swift");
+    assert.ok(files[0].endsWith("src/app.swift"), "should be the swift file");
+  });
+
+  it("should return sorted file paths", async () => {
+    const files = await collectSourceFiles(`${FIXTURES}/swift-project`, [".swift"]);
+    assert.ok(files[0].endsWith("main.swift"), "main.swift should come first alphabetically");
+    assert.ok(files[1].endsWith("utils.swift"), "utils.swift should come second");
+  });
+
+  it("should use DEFAULT_EXTS when no exts argument is provided", async () => {
+    const files = await collectSourceFiles(`${FIXTURES}/swift-project`);
+    assert.equal(files.length, 2, "DEFAULT_EXTS should include .swift");
+  });
+});
+
+describe("review --dir", () => {
+  afterEach(() => {
+    setSpawn(null);
+  });
+
+  it("should merge multiple files with file markers in dir mode", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const stdoutStream = new EventEmitter();
+      const stderrStream = new EventEmitter();
+      const events = new EventEmitter();
+
+      const proc = {
+        stdout: stdoutStream,
+        stderr: stderrStream,
+        on: (event, cb) => { events.on(event, cb); return proc; },
+        kill: () => {
+          const buf = Buffer.from(JSON.stringify({ severity: "low", issues: [], summary: "ok" }));
+          stdoutStream.emit("data", buf);
+          stdoutStream.emit("end");
+          stderrStream.emit("end");
+          events.emit("close", 0, null);
+        },
+        removeListener: () => proc,
+        stdin: { write: (d) => { stdinWritten = d; }, end: () => {} },
+        pid: 1,
+      };
+
+      setImmediate(() => {
+        const buf = Buffer.from(JSON.stringify({ severity: "low", issues: [], summary: "ok" }));
+        stdoutStream.emit("data", buf);
+        stdoutStream.emit("end");
+        stderrStream.emit("end");
+        events.emit("close", 0, null);
+      });
+
+      return proc;
+    });
+
+    const result = await review({
+      model: "test",
+      dir: `${FIXTURES}/swift-project`,
+      exts: [".swift"],
+      allowExternal: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.ok(stdinWritten, "stdin should be written");
+    assert.ok(stdinWritten.includes("// === File: main.swift ==="), "should include file marker for main.swift");
+    assert.ok(stdinWritten.includes("// === File: subdir/utils.swift ==="), "should include file marker for utils.swift");
+    assert.ok(stdinWritten.includes("func hello()"), "should include main.swift content");
+    assert.ok(stdinWritten.includes("let x = 1"), "should include utils.swift content");
+  });
+
+  it("should return empty result for directory with no matching files", async () => {
+    setSpawn(() => {
+      throw new Error("should not spawn codebuddy for empty dir");
+    });
+
+    const result = await review({
+      model: "test",
+      dir: `${FIXTURES}/empty`,
+      exts: [".swift"],
+      allowExternal: true,
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.fileCount, 0);
+    assert.ok(result.summary.includes("No source files found"));
+  });
+
+  it("should throw RunnerError when dir and file are both provided", async () => {
+    await assert.rejects(
+      () => review({ model: "test", dir: `${FIXTURES}/swift-project`, exts: [".swift"], file: "test.swift" }),
+      RunnerError
+    );
   });
 });
