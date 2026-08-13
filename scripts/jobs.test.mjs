@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -184,5 +184,119 @@ describe("buildMeta", () => {
       model: "glm-5.2",
       task: "做X",
     });
+  });
+});
+
+describe("updateJobWithResult", () => {
+  it("marks completed with result when fn succeeds", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    await updateJobWithResult(store, job.id, async () => ({ ok: true }));
+    const got = await store.get(job.id);
+    assert.equal(got.status, "completed");
+    assert.deepEqual(got.result, { ok: true });
+  });
+
+  it("marks failed with error when fn throws", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "implement" });
+    await updateJobWithResult(store, job.id, async () => {
+      throw new Error("boom");
+    });
+    const got = await store.get(job.id);
+    assert.equal(got.status, "failed");
+    assert.equal(got.error, "boom");
+  });
+
+  it("runJob still works after refactor (regression)", async () => {
+    const { store } = await makeStore();
+    const id = await runJob(store, { type: "review" }, async () => ({ ok: true }));
+    const got = await store.get(id);
+    assert.equal(got.status, "completed");
+  });
+});
+
+describe("spawnWorker", () => {
+  it("spawns a detached node worker with correct args and unref", () => {
+    let captured = null;
+    let unrefCalled = false;
+    const spawn = (cmd, args, opts) => {
+      captured = { cmd, args, opts };
+      return { unref: () => { unrefCalled = true; }, pid: 123 };
+    };
+    spawnWorker({ action: "worker-review", jobId: "job-1", model: "glm-5.2", file: "x.js" }, { spawn });
+    assert.equal(captured.cmd, "node");
+    assert.ok(captured.args.includes("--worker-review"));
+    assert.ok(captured.args.includes("--job-id"));
+    assert.ok(captured.args.includes("job-1"));
+    assert.ok(captured.args.includes("glm-5.2"));
+    assert.equal(captured.opts.detached, true);
+    assert.equal(captured.opts.stdio, "ignore");
+    assert.equal(unrefCalled, true);
+  });
+
+  it("opens a log fd when logPath is provided", () => {
+    let openCalls = 0;
+    const openLog = () => { openCalls += 1; return 7; };
+    let captured = null;
+    spawnWorker(
+      { action: "worker-review", jobId: "j" },
+      { spawn: (c, a, o) => { captured = o; return { unref() {}, pid: 1 }; }, logPath: "/tmp/x.log", openLog }
+    );
+    assert.equal(openCalls, 2);
+    assert.deepEqual(captured.stdio, ["ignore", 7, 7]);
+  });
+});
+
+describe("runJobBackground", () => {
+  it("creates a running job, spawns worker, records pid, returns id", async () => {
+    const { store } = await makeStore();
+    let spawned = false;
+    const spawn = () => { spawned = true; return { unref() {}, pid: 999 }; };
+    const id = await runJobBackground(
+      store,
+      { type: "review", model: "glm-5.2" },
+      { action: "worker-review", file: "x.js" },
+      { spawn }
+    );
+    const job = await store.get(id);
+    assert.equal(job.status, "running");
+    assert.equal(job.pid, 999);
+    assert.equal(spawned, true);
+  });
+});
+
+describe("parseArgs background and worker", () => {
+  it("parses --background on run-review", () => {
+    assert.equal(parseArgs(["--run-review", "--background", "--model", "glm-5.2"]).background, true);
+  });
+
+  it("parses worker-review action with job-id", () => {
+    assert.deepEqual(parseArgs(["--worker-review", "--job-id", "job-1", "--model", "glm-5.2"]), {
+      action: "worker-review",
+      jobId: "job-1",
+      model: "glm-5.2",
+    });
+  });
+});
+
+describe("cancelJob", () => {
+  it("kills the worker pid and marks cancelled", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    await store.update(job.id, { pid: 555 });
+    let killed = null;
+    const result = await cancelJob(store, job.id, (pid) => { killed = pid; });
+    assert.equal(killed, 555);
+    assert.equal(result.status, "cancelled");
+  });
+
+  it("does not kill when job has no pid", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    let killed = null;
+    const result = await cancelJob(store, job.id, (pid) => { killed = pid; });
+    assert.equal(killed, null);
+    assert.equal(result.status, "cancelled");
   });
 });
