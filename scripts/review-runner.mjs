@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { resolve, sep, join, relative } from "node:path";
+import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 
 export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".h", ".m", ".mm"];
 const MAX_FILES_WARN = 50;
@@ -115,7 +116,7 @@ function isAuthError(stderr) {
   return lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid api key");
 }
 
-export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false }) {
+export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false, backend = "codebuddy" }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -199,28 +200,29 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
 
   const codeTag = hasBackticks ? "CODE (BASE64)" : "CODE";
   const decodeHint = hasBackticks ? "\n(The code above is Base64-encoded. You MUST decode it mentally — do NOT use any tools, do NOT try to execute commands. Simply recognize this is Base64 text, decode it in your mind, and review the decoded code directly. Start your response with the review findings.)" : "";
-  const fullPrompt = `${prompt}\n\n${codeTag}:\n\`\`\`\n${codeContent}\n\`\`\`${decodeHint}`;
+  const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
+  const fullPrompt = `${readOnlyPrefix}${prompt}\n\n${codeTag}:\n\`\`\`\n${codeContent}\n\`\`\`${decodeHint}`;
+
+  const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
   let proc;
   try {
-    proc = spawn("codebuddy", [
-      "--model", model,
-      "--print",
-      "--output-format", "text",
-    ], { stdio: ["pipe", "pipe", "pipe"] });
+    proc = spawn(command, args, { stdio: ["pipe", "pipe", "pipe"] });
   } catch (err) {
     if (err.code === "ENOENT") {
-      throw new RunnerError("codebuddy not found", { exitCode: -1, stderr: err.message });
+      throw new RunnerError(`${command} not found`, { exitCode: -1, stderr: err.message });
     }
     throw err;
   }
 
-  try {
-    proc.stdin.write(fullPrompt);
-    proc.stdin.end();
-  } catch (err) {
-    proc.kill("SIGKILL");
-    throw new RunnerError("failed to write to codebuddy stdin", { exitCode: -1, stderr: err.message });
+  if (stdin !== null) {
+    try {
+      proc.stdin.write(stdin);
+      proc.stdin.end();
+    } catch (err) {
+      proc.kill("SIGKILL");
+      throw new RunnerError(`failed to write to ${command} stdin`, { exitCode: -1, stderr: err.message });
+    }
   }
 
   const stdoutPromise = collectStream(proc.stdout);
@@ -258,7 +260,7 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     }
 
     if (exitCode !== 0 || (exitCode === null && exitSignal !== null)) {
-      throw new RunnerError(`codebuddy exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
+      throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
     }
 
     if (isAuthError(stderr)) {
@@ -309,6 +311,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const extsIdx = args.indexOf("--exts");
   const promptIdx = args.indexOf("--prompt");
   const timeoutIdx = args.indexOf("--timeout");
+  const backendIdx = args.indexOf("--backend");
   const allowExternal = args.includes("--allow-external");
 
   if (modelIdx === -1) {
@@ -331,6 +334,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : 60000;
   const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 60000;
+  const backend = backendIdx !== -1 ? args[backendIdx + 1] : "codebuddy";
 
   if (file && dir) {
     console.error("--file and --dir are mutually exclusive");
@@ -342,7 +346,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
 
-  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal });
+  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend });
   console.log(JSON.stringify(result, null, 2));
   if (!result.success) process.exit(1);
 }
