@@ -78,6 +78,16 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 - Only mock external boundaries (network, filesystem, child_process) — never mock business logic
 - Run tests before committing: `pnpm test`
 
+## Verification Discipline
+
+The global rule `~/.config/opencode/rules/verification-discipline.md` applies everywhere. This section defines its project-specific instantiation:
+
+- **能力动词清单**: 审 / 改 / 修 / 反向往返 —— 每个动词都要有独立的 🟢 证据，缺一个不许说满。
+- **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
+- **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
+- **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。P3 之后固化真实往返/锁写/负向三个验证。
+- **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
+
 ## Single Source of Truth
 
 Scripts, weights, and skill assets live in **one** canonical location — this git repo. The global `~/.config/opencode/` directory must only hold thin pointers that reference this repo; it must never hold its own copy of `review-runner.mjs`, `weights.json`, or `SKILL.md`.
