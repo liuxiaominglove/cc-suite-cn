@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -71,6 +71,42 @@ function createMockProcess({ stdout = "", stderr = "", exitCode = 0, signal = nu
 
   return proc;
 }
+
+describe("frameCode", () => {
+  it("fences plain code with three backticks", () => {
+    assert.equal(frameCode("const x = 1;"), "```\nconst x = 1;\n```");
+  });
+
+  it("handles empty code with three-backtick fence", () => {
+    assert.equal(frameCode(""), "```\n\n```");
+  });
+
+  it("keeps a three-backtick fence for single backticks (template literals)", () => {
+    const out = frameCode("let s = `hi`;");
+    assert.ok(out.startsWith("```\n"));
+    assert.ok(out.endsWith("\n```"));
+    assert.ok(out.includes("let s = `hi`;"));
+  });
+
+  it("upgrades fence to four backticks when code contains three", () => {
+    const code = "hello\n```\nevil\n```";
+    assert.equal(frameCode(code), "````\nhello\n```\nevil\n```\n````");
+  });
+
+  it("upgrades fence to five backticks when code contains four", () => {
+    const out = frameCode("a````b");
+    assert.ok(out.startsWith("`````\n"));
+    assert.ok(out.endsWith("\n`````"));
+    assert.ok(out.includes("a````b"));
+  });
+
+  it("never base64-encodes the code", () => {
+    const code = "const x = 1;\n```\ncode fence inside\n```";
+    const out = frameCode(code);
+    assert.ok(out.includes(code), "original code should be embedded verbatim");
+    assert.ok(!/^[A-Za-z0-9+/=]+$/m.test(out.split("\n")[1]), "second line should not look like base64");
+  });
+});
 
 describe("extractJson", () => {
   it("should parse JSON inside code fence with trailing text", () => {
@@ -324,7 +360,7 @@ describe("review-runner", () => {
     );
   });
 
-  it("should escape triple backticks in code to prevent prompt injection", async () => {
+  it("should fence code containing triple backticks without base64", async () => {
     let stdinWritten = null;
     setSpawn((cmd, args) => {
       const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
@@ -338,8 +374,9 @@ describe("review-runner", () => {
     });
 
     assert.ok(stdinWritten, "should write to stdin");
-    assert.ok(!stdinWritten.includes("```\nevil code\n```"));
-    assert.ok(stdinWritten.includes("BASE64"), "should wrap code with backticks in Base64");
+    assert.ok(!stdinWritten.includes("BASE64"), "should not base64-encode");
+    assert.ok(stdinWritten.includes("evil code"), "original code text should be embedded verbatim");
+    assert.ok(stdinWritten.includes("````"), "should use a four-backtick fence");
   });
 
   it("should not escape code without triple backticks", async () => {
@@ -490,7 +527,7 @@ describe("review-runner", () => {
     );
   });
 
-  it("should base64-encode code containing triple backticks to prevent fence breakout", async () => {
+  it("should embed triple-backtick code verbatim (no base64)", async () => {
     let stdinWritten = null;
     setSpawn((cmd, args) => {
       const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
@@ -504,8 +541,8 @@ describe("review-runner", () => {
     });
 
     assert.ok(stdinWritten, "should write to stdin");
-    assert.ok(stdinWritten.includes("BASE64"), "should use Base64 wrapper");
-    assert.ok(!stdinWritten.includes("evil code"), "original code text should not be in plain text");
+    assert.ok(!stdinWritten.includes("BASE64"), "should not use Base64");
+    assert.ok(stdinWritten.includes("evil"), "original code text should be present");
   });
 
   it("should throw RunnerError when file parameter is not a string", async () => {

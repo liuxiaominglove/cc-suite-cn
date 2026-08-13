@@ -119,6 +119,21 @@ export function extractJson(text) {
   return null;
 }
 
+export function frameCode(code) {
+  let maxRun = 0;
+  let cur = 0;
+  for (const ch of code) {
+    if (ch === "`") {
+      cur += 1;
+      if (cur > maxRun) maxRun = cur;
+    } else {
+      cur = 0;
+    }
+  }
+  const fence = "`".repeat(Math.max(3, maxRun + 1));
+  return `${fence}\n${code}\n${fence}`;
+}
+
 function isAuthError(stderr) {
   const lower = stderr.toLowerCase();
   return lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid api key");
@@ -246,18 +261,11 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     code = await readFile(resolved, "utf-8");
   }
 
-  const hasBackticks = code.includes("```");
-  const codeContent = hasBackticks
-    ? Buffer.from(code, "utf-8").toString("base64")
-    : code;
-
   const spawn = _spawn ?? nodeSpawn;
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : "Review the following code for bugs, security issues, and code quality problems. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).");
 
-  const codeTag = hasBackticks ? "CODE (BASE64)" : "CODE";
-  const decodeHint = hasBackticks ? "\n(The code above is Base64-encoded. You MUST decode it mentally — do NOT use any tools, do NOT try to execute commands. Simply recognize this is Base64 text, decode it in your mind, and review the decoded code directly. Start your response with the review findings.)" : "";
   const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
-  const fullPrompt = `${readOnlyPrefix}${prompt}\n\n${codeTag}:\n\`\`\`\n${codeContent}\n\`\`\`${decodeHint}`;
+  const fullPrompt = `${readOnlyPrefix}${prompt}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 

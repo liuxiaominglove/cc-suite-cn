@@ -61,4 +61,20 @@ describe("e2e - real multi-model review (4 workers)", { timeout: 600000 }, () =>
     const uniqueSets = new Set(findingSets.filter((s) => s.length > 0));
     console.log(`  distinct finding perspectives: ${uniqueSets.size}/${results.length}`);
   });
+
+  it("kimi reviews code containing triple backticks without hanging", async () => {
+    const backtickCode = "function demo() {\n  // ``` a markdown fence inside a comment\n  return 42;\n}\n";
+    const result = await review({
+      model: "kimi-k2.7-code",
+      backend: "kimi",
+      code: backtickCode,
+      customPrompt: PROMPT,
+      timeout: 300000,
+    });
+
+    assert.equal(result.success, true);
+    assert.ok(typeof result.summary === "string", "summary should be a string");
+    assert.ok(result.summary.length > 0, "summary should not be empty");
+    console.log(`  kimi (triple-backtick code) summary: ${result.summary.slice(0, 100)}...`);
+  });
 });
