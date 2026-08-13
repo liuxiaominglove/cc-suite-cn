@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -116,5 +116,73 @@ describe("runJob", () => {
     const id = await runJob(store, { type: "review" }, async () => ({ ok: true }));
     const job = await store.get(id);
     assert.equal(job.id, id);
+  });
+});
+
+describe("parseArgs", () => {
+  it("parses --list", () => {
+    assert.deepEqual(parseArgs(["--list"]), { action: "list" });
+  });
+
+  it("parses --get with id", () => {
+    assert.deepEqual(parseArgs(["--get", "abc"]), { action: "get", id: "abc" });
+  });
+
+  it("parses --cancel with id", () => {
+    assert.deepEqual(parseArgs(["--cancel", "abc"]), { action: "cancel", id: "abc" });
+  });
+
+  it("parses --run-review with model and file", () => {
+    assert.deepEqual(parseArgs(["--run-review", "--model", "glm-5.2", "--file", "x.js"]), {
+      action: "run-review",
+      model: "glm-5.2",
+      file: "x.js",
+    });
+  });
+
+  it("parses --run-implement with model and task", () => {
+    assert.deepEqual(parseArgs(["--run-implement", "--model", "glm-5.2", "--task", "做X"]), {
+      action: "run-implement",
+      model: "glm-5.2",
+      task: "做X",
+    });
+  });
+
+  it("returns help on empty args", () => {
+    assert.deepEqual(parseArgs([]), { action: "help" });
+  });
+
+  it("returns help on unknown flag", () => {
+    assert.deepEqual(parseArgs(["--wat"]), { action: "help" });
+  });
+});
+
+describe("defaultStore", () => {
+  it("points at the default jobs dir", () => {
+    assert.equal(DEFAULT_JOBS_DIR, ".cc-suite-pe/jobs");
+  });
+
+  it("returns a working store", async () => {
+    const store = defaultStore();
+    assert.equal(typeof store.create, "function");
+    assert.equal(typeof store.get, "function");
+  });
+});
+
+describe("buildMeta", () => {
+  it("builds review meta from run-review", () => {
+    assert.deepEqual(buildMeta({ action: "run-review", model: "glm-5.2", file: "x.js" }), {
+      type: "review",
+      model: "glm-5.2",
+      task: "x.js",
+    });
+  });
+
+  it("builds implement meta from run-implement", () => {
+    assert.deepEqual(buildMeta({ action: "run-implement", model: "glm-5.2", task: "做X" }), {
+      type: "implement",
+      model: "glm-5.2",
+      task: "做X",
+    });
   });
 });
