@@ -1,34 +1,42 @@
 # CC-Suite PE
 
-Multi-model code review orchestration — the `/audit` command dispatches two external AI models (GLM-5.2 + Qwen Coder Plus) via CodeBuddy CLI in parallel. Since each model has different training data, they catch different classes of bugs — what one misses, the other often finds. Neither model is the same as opencode's core model (DeepSeek V4 Pro), ensuring independent review without bias.
+Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥). Four worker models serve as **B-分身** subagents (daily review/fix/implement), while `/audit` additionally dispatches **A-突击员** (independent external reviews via CodeBuddy CLI). Different models have different training data, so they catch different classes of bugs.
 
 ## Architecture
 
 ```
-opencode (DeepSeek V4 Pro)  →  Your coding assistant
+opencode (DeepSeek V4 Pro)  →  总指挥（唯一发起方、最终拍板方）
   │
-  └─ /audit  →  scripts/review-runner.mjs  →  spawns codebuddy
-                   ├─ --model glm-5.2                    (Zhipu AI)
-                   └─ --model custom-local:qwen-coder-plus  (Alibaba Cloud)
-                                        ↓
-                              Unified comparison report
+  ├─ B 分身（日常 · opencode 子代理，换脑不换身）
+  │    ├─ qwen  → alibaba-cn/qwen3-coder-plus
+  │    ├─ glm   → alibaba-cn/glm-5.2
+  │    ├─ kimi  → alibaba-cn/kimi-k2.6
+  │    └─ hy3   → opencode/hy3-free
+  │
+  └─ A 突击员（独立第三方 · /audit 路径）
+       └─ scripts/review-runner.mjs → spawns codebuddy
+            ├─ --model glm-5.2
+            └─ --model custom-local:qwen-coder-plus
+                                   ↓
+                         Unified comparison report
 ```
 
-- **opencode**: Orchestration hub — your interactive coding assistant (DeepSeek V4 Pro)
-- **`/audit`**: Global command (`~/.config/opencode/commands/audit.md`) — works in any project
-- **CodeBuddy CLI**: Delegation runner that spawns external model reviews
+- **opencode**: 总指挥 — interactive coding assistant (DeepSeek V4 Pro) and orchestrator
+- **B 分身** (`.opencode/agents/*.md`): opencode 子代理，用各自模型的大脑做日常审/改/修
+- **A 突击员** (`/audit`): 通过 CodeBuddy CLI 起独立第三方进程，做对抗性审查
 - **review-runner.mjs**: Manages timeouts, error handling, JSON parsing, and result aggregation
-- **cc-review skill**: Defines the review workflow (global: `~/.config/opencode/skills/cc-review/SKILL.md`)
+- **cc-review skill**: Defines the review workflow (`~/.config/opencode/skills/cc-review/SKILL.md`)
 
 ## Prerequisites
 
 | Requirement | Version/Details |
 |-------------|-----------------|
 | Node.js | >= 18.0 |
-| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code` |
-| `CODEBUDDY_API_KEY` | Set in `~/.zshrc` — used by CodeBuddy platform + DeepSeek |
-| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — Alibaba Cloud DashScope (for Qwen) |
-| GLM-5.2 | Routed through Tencent CodeBuddy platform, no separate key needed |
+| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code` (A 突击员用) |
+| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，一个 key 通吃 Qwen + GLM + Kimi（B 分身） |
+| `CODEBUDDY_API_KEY` | A 突击员走 CodeBuddy 平台账号登录态，无需单独 key |
+| `MOONSHOT_API_KEY` | 可选 — 仅当 Kimi 直连 Moonshot 时才需要（B 分身走阿里通道，用不上） |
+| Hy3 | B 分身用 `opencode/hy3-free` 免费档；真·Hy3 需腾讯云 TokenHub key（可选） |
 
 ## Setup
 
@@ -91,4 +99,5 @@ Scripts, weights, and skill assets live in **one** canonical location — this g
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill + weights |
+| `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
 | `~/.codebuddy/models.json` | Model endpoint configuration (DeepSeek, Qwen) |
