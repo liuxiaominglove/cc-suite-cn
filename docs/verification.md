@@ -41,7 +41,7 @@
 | #3 真后台 + 真取消 e2e 固化 | `pnpm verify` → `verify-background.mjs`：后台 running→completed + pid + 日志 + cancel 后进程 ESRCH | 🟢 | 2026-08-14 |
 | review-e2e 四施工队实跑 | `pnpm test:e2e` 5/5：glm/hy3/kimi/qwen 均 success + 视角差异 | 🟢 | 2026-08-14 |
 | kimi 卡死在 base64"脑内解码"提示 → 已修复 | `frameCode` 自适应反引号围栏替代 base64；kimi 评审含 ``` 的 review-runner.mjs 81s 完成（原挂死 >5min）；e2e 加回归守卫 | 🟢 | 2026-08-14 |
-| isAuthError 误报：评审含 "401"/"unauthorized" 字样的代码会假 AuthError | kimi 把 reasoning 写到 stderr；评审含这些字样的代码（如 review-runner.mjs 自身第 122-124 行）时，isAuthError 在 stderr 命中关键字 → kimi 明明成功却抛 AuthError | 🔴（已知 bug，待修） | 2026-08-14 |
+| isAuthError 误报 → 已修复 | 只在进程真正失败（非零退出）时判 AuthError；exit 0 时 stderr 的 "401"/"unauthorized"（如 kimi reasoning 引用）不再误报；单测覆盖正负向 | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-bridge.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 双向回调 + 真后台真取消。
 

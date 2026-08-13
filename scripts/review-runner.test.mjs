@@ -258,8 +258,8 @@ describe("review-runner", () => {
     assert.equal(result.success, true);
   });
 
-  it("should throw AuthError when stderr contains auth failure", async () => {
-    setSpawn(() => createMockProcess({ stderr: "401 Unauthorized", exitCode: 0 }));
+  it("should throw AuthError when process fails with auth error in stderr", async () => {
+    setSpawn(() => createMockProcess({ stderr: "401 Unauthorized", exitCode: 1 }));
 
     await assert.rejects(
       () =>
@@ -269,6 +269,17 @@ describe("review-runner", () => {
         }),
       AuthError
     );
+  });
+
+  it("should NOT throw AuthError when stderr mentions 401 but process exits 0", async () => {
+    setSpawn(() => createMockProcess({ stdout: MOCK_OUTPUT_VALID, stderr: "note: 401 check needed", exitCode: 0 }));
+
+    const result = await review({
+      model: "deepseek-v4-pro",
+      code: "test",
+    });
+
+    assert.equal(result.success, true);
   });
 
   it("should treat NaN timeout as default timeout", async () => {

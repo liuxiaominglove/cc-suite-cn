@@ -323,12 +323,13 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
       throw new TimeoutError();
     }
 
-    if (exitCode !== 0 || (exitCode === null && exitSignal !== null)) {
-      throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
+    const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
+    if (failed && isAuthError(stderr)) {
+      throw new AuthError();
     }
 
-    if (isAuthError(stderr)) {
-      throw new AuthError();
+    if (failed) {
+      throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
     }
 
     if (!stdout.trim()) {
