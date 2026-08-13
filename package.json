@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "zsh -c 'source ~/.zshrc && node --test scripts/review-runner.test.mjs scripts/guard.test.mjs && node scripts/guard.mjs'",
-    "test:unit": "node --test scripts/review-runner.test.mjs scripts/guard.test.mjs && node scripts/guard.mjs",
+    "test": "zsh -c 'source ~/.zshrc && node --test scripts/review-runner.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs && node scripts/guard.mjs'",
+    "test:unit": "node --test scripts/review-runner.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs && node scripts/guard.mjs",
     "test:e2e": "zsh -c 'source ~/.zshrc && node --test scripts/review-e2e.test.mjs'",
-    "guard": "node scripts/guard.mjs"
+    "guard": "node scripts/guard.mjs",
+    "preflight": "node scripts/preflight.mjs"
   }
 }
