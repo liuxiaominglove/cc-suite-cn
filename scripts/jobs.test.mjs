@@ -326,14 +326,14 @@ describe("runAudit", () => {
     assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
 
-  it("passes a default 300000ms timeout to review", async () => {
+  it("passes a default 600000ms timeout to review", async () => {
     let captured = null;
     const review = async (opts) => {
       captured = opts.timeout;
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
     await runAudit({ file: "x.js", review });
-    assert.equal(captured, 300000);
+    assert.equal(captured, 600000);
   });
 });
 

@@ -222,7 +222,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 300000 }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 600000 }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
