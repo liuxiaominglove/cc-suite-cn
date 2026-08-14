@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
+import { setRetryBackoffMs } from "./review-runner.mjs";
 
-afterEach(() => setSpawn(null));
+afterEach(() => { setSpawn(null); setRetryBackoffMs(null); });
 
 function mockProc(stdout = "", { exitCode = 0, stderr = "" } = {}) {
   const stdoutStream = new EventEmitter();
@@ -147,6 +148,17 @@ describe("buildAdjudicatorPrompt", () => {
     assert.ok(p.includes("function x(){}"), "should carry the code");
     assert.ok(p.includes("verdict"), "should ask for a verdict");
   });
+
+  it("injects project rules when provided", () => {
+    const p = buildAdjudicatorPrompt("removeItem null crash", "function x(){}", "禁止 CFTypeRef 强转");
+    assert.ok(p.includes("[项目规则]"), p);
+    assert.ok(p.includes("禁止 CFTypeRef 强转"), p);
+  });
+
+  it("omits the rules section when no rules provided", () => {
+    const p = buildAdjudicatorPrompt("removeItem null crash", "function x(){}");
+    assert.ok(!p.includes("[项目规则]"), p);
+  });
 });
 
 describe("parseVerdict", () => {
@@ -185,6 +197,29 @@ describe("adjudicate", () => {
     setSpawn(() => mockProc("", { exitCode: 1, stderr: "boom" }));
     const r = await adjudicate({ finding: "x", code: "y" });
     assert.equal(r.verdict, "uncertain");
+  });
+
+  it("passes project rules into the prompt", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"true","evidence":"e"}');
+      return captured;
+    });
+    await adjudicate({ finding: "x", code: "y", rules: "禁止 CFTypeRef 强转" });
+    assert.ok(captured.stdinWritten.includes("禁止 CFTypeRef 强转"), "rules should be in the adjudicator prompt");
+  });
+
+  it("retries on transient failure", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls += 1;
+      if (calls === 1) return mockProc("", { exitCode: 1, stderr: "rate limited" });
+      return mockProc('{"verdict":"false","evidence":"after retry"}');
+    });
+    const r = await adjudicate({ finding: "x", code: "y", retries: 1 });
+    assert.deepEqual(r, { verdict: "false", evidence: "after retry" });
+    assert.equal(calls, 2, "should retry once after a transient exit failure");
   });
 });
 
@@ -259,6 +294,16 @@ describe("evaluateModels", () => {
     assert.equal(calls, 1, "near-identical findings should be adjudicated once");
     assert.equal(r.perModel["glm-5.2"].trueCount, 2);
     assert.equal(r.perModel["kimi-k2.7-code"].trueCount, 1);
+  });
+
+  it("passes resolved project rules to the adjudicator", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "unique bug", file: "f.js" }] },
+    ]}];
+    let seenRules = null;
+    const adjudicateFn = async ({ rules }) => { seenRules = rules; return { verdict: "false" }; };
+    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", resolveRules: async () => "禁止 X" });
+    assert.equal(seenRules, "禁止 X");
   });
 });
 

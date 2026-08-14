@@ -87,6 +87,9 @@
 | WI-5: 重写 SKILL.md 为 4 角色 | SKILL.md 描述 find-bug(glm+kimi)/critic(qwen)/verifier(hy3)/fixer(opencode) + AGENTS.md 注入 | 🟢 | 2026-08-14 |
 | WI-6: guard 内容一致性检查 | `findDeadReferences` 扫描 SKILL.md 引用的 .mjs/.json 是否存在，防再漂移；2 单测 + 真实 guard 过 | 🟢 | 2026-08-14 |
 | WI-7: runJobBackground 并发上限 | `acquireSlot` 轮询等空位 + CLI `--max-concurrent`（默认4）；4 单测 + 集成（满员等位） | 🟢 | 2026-08-14 |
+| 风险1: codebuddy 只读不设防 → 修复 | 负向实测：`--print` 非交互默认拒 Edit/Write，但 Bash 会挂起等审批；加 `--disallowedTools "Edit Write Bash"` 后 25s 内明确拒绝且不挂起（文件未变）。所有后端统一加 READ_ONLY_DECLARATION | 🟢 | 2026-08-14 |
+| 风险2: hy3 裁决注入项目规则 | `buildAdjudicatorPrompt` 加 rules 段 + `adjudicate` 透传 + `evaluateModels` 加 resolveRules（CLI 从 cwd 读 AGENTS.md）；3 单测 | 🟢 | 2026-08-14 |
+| 风险3: adjudicate 加重试 | `adjudicate` 用 withRetry（retries 默认0，CLI 传2），transient 失败重试而非直接 uncertain；2 单测 | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

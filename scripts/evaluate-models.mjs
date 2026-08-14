@@ -1,6 +1,6 @@
-import { runProcess } from "./runner-core.mjs";
+import { runProcess, RunnerError, TimeoutError } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
-import { frameCode, extractJson } from "./review-runner.mjs";
+import { frameCode, extractJson, withRetry, collectProjectRules } from "./review-runner.mjs";
 
 export function normalizeFinding(text) {
   if (typeof text !== "string" || text.trim() === "") {
@@ -95,8 +95,9 @@ export function classifyConsensus(results) {
   return { groups, perModel };
 }
 
-export function buildAdjudicatorPrompt(finding, code) {
-  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}\n\nCODE:\n${frameCode(code)}`;
+export function buildAdjudicatorPrompt(finding, code, rules = "") {
+  const rulesSection = (rules ?? "").trim() ? `\n\n[项目规则]\n${rules}` : "";
+  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}\n\nCODE:\n${frameCode(code)}`;
 }
 
 export function parseVerdict(text) {
@@ -113,18 +114,23 @@ export function parseVerdict(text) {
 
 export const ADJUDICATE_TIMEOUT = 900000;
 
-export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null }) {
+export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", retries = 0 }) {
   const ctx = line ? extractContext(code, line, { contextLines }) : code;
-  const prompt = buildAdjudicatorPrompt(finding, ctx);
+  const prompt = buildAdjudicatorPrompt(finding, ctx, rules);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
-  const { exitCode, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn });
 
-  if (timedOut) {
-    return { verdict: "uncertain", evidence: "timeout" };
+  let stdout;
+  try {
+    ({ stdout } = await withRetry(async () => {
+      const { exitCode, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn });
+      if (timedOut) throw new TimeoutError("adjudication timed out");
+      if (exitCode !== 0) throw new RunnerError(`adjudicator exited with code ${exitCode}`, { exitCode, stderr });
+      return { stdout };
+    }, { maxRetries: retries }));
+  } catch (err) {
+    return { verdict: "uncertain", evidence: err instanceof TimeoutError ? "timeout" : err.message };
   }
-  if (exitCode !== 0) {
-    return { verdict: "uncertain", evidence: `exit ${exitCode}: ${stderr || ""}`.trim() };
-  }
+
   if (!stdout || !stdout.trim()) {
     return { verdict: "uncertain", evidence: "no output" };
   }
@@ -133,7 +139,7 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
 
 const MIN_SAMPLES = 5;
 
-export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null }) {
+export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, retries = 0 }) {
   const perModel = {};
   const allFindings = [];
 
@@ -187,11 +193,12 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
 
   if (arbitrate) {
     const unique = dedupFindings(allFindings);
+    const rules = resolveRules ? await resolveRules() : "";
     const results = await Promise.all(
       unique.map(async (f) => {
         const file = f.auditFile || f.issue?.file || "";
         const code = resolveCode ? await resolveCode(file) : "";
-        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line });
+        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, retries });
         return { f, verdict: result && result.verdict };
       })
     );
@@ -269,7 +276,9 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
       }
     };
 
-    const { perModel, minSamples, arbitrated } = await evaluateModels({ audits, arbitrate, resolveCode });
+    const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
+
+    const { perModel, minSamples, arbitrated } = await evaluateModels({ audits, arbitrate, resolveCode, resolveRules, retries: 2 });
 
     stdout.write("模型性能评估\n");
     stdout.write("=".repeat(60) + "\n");

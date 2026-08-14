@@ -5,7 +5,7 @@ export function buildCommand(backend, { model, prompt }) {
     case "codebuddy":
       return {
         command: "codebuddy",
-        args: ["--model", model, "--print", "--output-format", "text"],
+        args: ["--model", model, "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"],
         stdin: prompt,
       };
     case "kimi":

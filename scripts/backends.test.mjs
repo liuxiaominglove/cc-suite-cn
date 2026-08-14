@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 
 describe("buildCommand", () => {
-  it("codebuddy passes prompt via stdin with --model", () => {
+  it("codebuddy passes prompt via stdin with --model and read-only tool denylist", () => {
     const cmd = buildCommand("codebuddy", { model: "glm-5.2", prompt: "review this" });
     assert.equal(cmd.command, "codebuddy");
-    assert.deepEqual(cmd.args, ["--model", "glm-5.2", "--print", "--output-format", "text"]);
+    assert.deepEqual(cmd.args, ["--model", "glm-5.2", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
     assert.equal(cmd.stdin, "review this");
   });
 

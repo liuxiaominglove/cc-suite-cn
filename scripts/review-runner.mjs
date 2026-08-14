@@ -294,7 +294,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : REVIEW_PROMPT);
 
-  const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
+  const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
   const rules = projectRules ?? (await collectProjectRules({ cwd }));
   const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}\n\nCODE:\n${frameCode(code)}`;
 

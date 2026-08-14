@@ -206,6 +206,19 @@ describe("review-runner", () => {
       "custom prompt should appear in stdin content");
   });
 
+  it("includes read-only declaration for codebuddy backend", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1" });
+
+    assert.ok(stdinWritten.includes("只读代码评审员"), "codebuddy should get the read-only declaration");
+  });
+
   it("should throw TimeoutError when process exceeds timeout", async () => {
     setSpawn(() => createMockProcess({ stdout: "", delayMs: 5000 }));
 
