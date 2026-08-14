@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -983,5 +983,15 @@ describe("reviewFile", () => {
     // 801 lines → 2 chunks (800 + 1, with overlap 10 it's 2 chunks)
     assert.equal(r.chunkCount, 2);
     assert.equal(r.success, true);
+  });
+});
+
+describe("prompt language requirement", () => {
+  it("REVIEW_PROMPT requires English finding/fix", () => {
+    assert.ok(REVIEW_PROMPT.toLowerCase().includes("english"), "REVIEW_PROMPT should require English output");
+  });
+
+  it("VERIFY_PROMPT requires English finding/fix", () => {
+    assert.ok(VERIFY_PROMPT.includes("英文"), "VERIFY_PROMPT should require English output");
   });
 });

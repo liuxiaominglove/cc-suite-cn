@@ -11,7 +11,9 @@ export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go
 const MAX_FILES_WARN = 50;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
 
-export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，line 指改动后文件的行号。";
+export const REVIEW_PROMPT = "Review the following code for bugs, security issues, and code quality problems. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+
+export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
 
 let _gitSpawn = null;
 
@@ -236,7 +238,7 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
     code = await readFile(resolved, "utf-8");
   }
 
-  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : "Review the following code for bugs, security issues, and code quality problems. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).");
+  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : REVIEW_PROMPT);
 
   const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
   const fullPrompt = `${readOnlyPrefix}${prompt}\n\nCODE:\n${frameCode(code)}`;
