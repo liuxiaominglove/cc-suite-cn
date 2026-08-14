@@ -90,6 +90,17 @@ describe("createJobStore", () => {
     assert.equal(got.id, created.id);
     assert.equal(got.model, "kimi");
   });
+
+  it("rejects path-traversal ids (no read/write outside the jobs dir)", async () => {
+    const { store, dir } = await makeStore();
+    const outside = join(dir, "..", "pwned.json");
+    const got = await store.get("../../pwned");
+    assert.equal(got, null);
+    assert.equal(await store.update("../../pwned", { status: "completed" }), null);
+    assert.equal(await store.cancel("../pwned"), null);
+    const { existsSync } = await import("node:fs");
+    assert.equal(existsSync(outside), false, "must not create a file outside the jobs dir");
+  });
 });
 
 describe("runJob", () => {
@@ -233,7 +244,7 @@ describe("spawnWorker", () => {
       return { unref: () => { unrefCalled = true; }, pid: 123 };
     };
     spawnWorker({ action: "worker-review", jobId: "job-1", model: "glm-5.2", file: "x.js" }, { spawn });
-    assert.equal(captured.cmd, "node");
+    assert.equal(captured.cmd, process.execPath);
     assert.ok(captured.args.includes("--worker-review"));
     assert.ok(captured.args.includes("--job-id"));
     assert.ok(captured.args.includes("job-1"));

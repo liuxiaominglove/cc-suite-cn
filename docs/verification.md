@@ -105,3 +105,43 @@
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
 > 写能力分工（角色重构后）：**修 bug 只由 opencode（总指挥）亲自做**（最了解项目 + TDD）。施工队（glm/kimi/qwen/hy3）全部只读——找 bug / 批判 / 验证。写后不自动合并。
+
+---
+
+# 自审（dogfooding）第一轮：审自己的引擎代码
+
+**范围**：8 个核心非测试脚本（约 1500 行）= `review-runner / evaluate-models / jobs / backends / runner-core / guard / models / preflight`。**排除**：所有 `*.test.mjs`（测试是 oracle）、demos、docs、node_modules。
+**流程**：`--run-audit --file`（glm+kimi 找 bug，16/16 worker 成功，合计 115 条 finding）→ opencode 逐条用代码级证据 triage → TDD 修真 bug → qwen 批判员修后复查。
+
+## Triage 结果（opencode 逐条用源码核实）
+
+- **真 bug 修复 12 项**（下表），全部 TDD（RED→GREEN）+ 全量 303 测试绿 + guard 绿。
+- **确认假阳 3 项**（模型幻觉，源码里是对的）：① kimi 报 `runner-core` 用 `SIGSIGKILL`（实际是 `SIGKILL`）② glm 报 `adjudicate` 解构漏 `rules`（实际有 `rules=""`）③ kimi 报 `READ_ONLY_DECLARATION` 是死代码（实际在 review-runner:328 使用）。
+- **归档（不修）**：约 40 项噪音/设计取舍/潜在但未触发的缺陷，代表性：`resolveCli` 裸名回退（backends.test.mjs:10 明确"让 spawn 报 ENOENT"，有意为之）、`--disallowedTools "Edit Write Bash"` 空格格式（台账 90 行已实测生效）、`import.meta.url === file://...` 入口守卫（macOS 正常路径下实测 MATCH，仅 Windows/空格路径/symlink 才失效）、`isWorkerModel` 不归一化别名（死代码，零调用方，models.test.mjs:40 固化其行为）。
+
+## 真 bug 修复台账
+
+| 结论 | 证据（测试用例） | 置信度 | 日期 |
+|------|------------------|--------|------|
+| SA-1: `reviewFile` 走 `fileName` 而非 `file`，导致 `.md` NL 工件评审永不触发 `NL_REVIEW_PROMPT`（isNLArtifact(file) 恒 false） | `review()` 改 `isNLArtifact(fileName ?? file)`；新增"review NL prompt selection"2 用例（fileName 指向 SKILL.md → NL prompt；.js → code prompt） | 🟢 | 2026-08-15 |
+| SA-2: `collectProjectRules` 只查当前目录，子目录文件（如 `scripts/*.mjs`）拿不到根 `AGENTS.md` → 误报 | 改为向上一级目录查找直至文件系统根；新增"walks up to find AGENTS.md in an ancestor directory"用例 | 🟢 | 2026-08-15 |
+| SA-3: `parseVerdict` 严格 `===` 只认字符串，hy3 输出 JSON 布尔 `{"verdict":true}` 会被静默判 `uncertain`，污染 precision | 改为 `String(parsed.verdict).trim().toLowerCase()`；新增布尔/大小写/空格 3 用例 | 🟢 | 2026-08-15 |
+| SA-4: `evaluateModels` 裁决用 `Promise.all` 无并发上限，大 finding 集会并发 spawn 数百进程（台账 81 行已知 15 并发就卡死） | 新增 `mapLimit` + `ADJUDICATE_CONCURRENCY=4`；新增"caps adjudication concurrency"用例（20 finding 断言 maxRunning≤4） | 🟢 | 2026-08-15 |
+| SA-5: `spawnWorker` 用裸 `node`（PATH 劫持风险，与项目自身 resolveCli 纪律矛盾） | 改 `process.execPath`；jobs.test.mjs 断言 `captured.cmd === process.execPath` | 🟢 | 2026-08-15 |
+| SA-6: `jobFile(id)` 不校验 id，`--get/--cancel/--job-id` 可路径穿越读/写 jobs 目录外文件 | 新增 `isValidJobId`（`/^job-\d+-[a-f0-9]+$/`），`get/update/cancel` 对非法 id 返回 null；新增"rejects path-traversal ids"用例（含 existsSync 断言不外写） | 🟢 | 2026-08-15 |
+| SA-7: `runProcess` timeout 缺省时 `setTimeout(fn, undefined)` ≈1ms 就 SIGTERM（共享 spawn 原语潜在缺陷） | 只在 `Number.isFinite(timeout) && timeout>0` 才 arm timer；新增"does not arm timer when timeout is undefined"用例 | 🟢 | 2026-08-15 |
+| SA-8: `reviewFile` 聚合 severity 取第一块而非最高，可能低估整体风险 | 改 reduce 取 high>medium>low；新增"takes the highest severity across chunks"用例 | 🟢 | 2026-08-15 |
+| SA-9: `chunkCode` 当 `overlap >= chunkSize` 时 `start = end - overlap` 无前进 → 死循环 | 顶部校验 chunkSize/overlap，非法抛错；新增 2 用例断言抛 /overlap/ | 🟢 | 2026-08-15 |
+| SA-10: `withRetry` 负 `maxRetries` 时循环体不执行 → `throw undefined`（无信息错误） | clamp 到 0 + `throw lastErr ?? new Error(...)`；新增"clamps negative maxRetries"用例 | 🟢 | 2026-08-15 |
+| SA-11: `guard.findStaleReferences` `readFileSync` 无存在性检查，fresh 机器（无全局 opencode 配置）`pnpm test` 直接 ENOENT 崩溃 | 读失败时 `continue` 跳过；新增"skips missing reference files instead of crashing"用例 | 🟢 | 2026-08-15 |
+| SA-12: `updateJobWithResult` 捕获非 Error（如抛字符串）时 `err.message` 为 undefined，失败原因丢失 | 改 `err?.message ?? String(err)` | 🟢 | 2026-08-15 |
+
+## 修后交叉验证（qwen 批判员只读复查 3 个改动最大的文件）
+
+- 结论：**未发现新真 bug，也未否定上述 12 项修复**；仅产出噪音/设计取舍（timeout 15min 过长 / SKIP_DIRS 不全 / busy-wait CPU / SIGTERM 平台差异 / parseArgs 重复等）。其 `evaluateModels` 报"`m` used without defined"为幻觉（`m` 经 `member.m` 引用，mapLimit 改动未触及该作用域）。 | 🟢 | 2026-08-15 |
+- SA-3/SA-4 端到端真模型验证：hy3 裁决 2 个 demo 审计（25 条 finding 去重后裁决）80.6s 完成，并发上限 4 生效未卡死，glm precision 0.87 / kimi 1.00（demo 是教学坏代码，precision 偏高属预期） | 🟢 | 2026-08-15 |
+
+## 固化
+
+- 新增 `scripts/self-audit.mjs`（`selfAudit()` 依次对 8 核心脚本跑 glm+kimi 找 bug）+ `scripts/self-audit.test.mjs`（2 用例）+ `pnpm self-audit`。**每次 release 前跑一次**。
+- 自审结论定义（破循环三步）：**AI 报 → opencode 用代码级证据确认 → 🟢 测试落账**，缺一不宣称"质量提升"；单测是 ground truth，AI 审只找"测试没盖到的"。

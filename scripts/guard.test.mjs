@@ -76,6 +76,12 @@ describe("findStaleReferences", () => {
     assert.equal(problems.length, 1);
     assert.ok(problems[0].includes("opencode.jsonc"));
   });
+
+  it("skips missing reference files instead of crashing", () => {
+    const read = (f) => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    const problems = findStaleReferences(["audit.md", "opencode.jsonc"], read);
+    assert.deepEqual(problems, []);
+  });
 });
 
 describe("runGuard", () => {

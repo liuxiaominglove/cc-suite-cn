@@ -957,6 +957,11 @@ describe("chunkCode", () => {
     assert.equal(chunkCode("").length, 1);
     assert.equal(chunkCode(null).length, 1);
   });
+
+  it("throws when overlap >= chunkSize (would infinite-loop)", () => {
+    assert.throws(() => chunkCode("a\nb\nc", { chunkSize: 3, overlap: 3 }), /overlap/);
+    assert.throws(() => chunkCode("a\nb\nc", { chunkSize: 3, overlap: 5 }), /overlap/);
+  });
 });
 
 describe("offsetFindings", () => {
@@ -1049,6 +1054,39 @@ describe("reviewFile", () => {
     assert.equal(names.length, 3);
     assert.ok(names.every((n) => n === "big.js"), "every chunk should carry the file name");
   });
+
+  it("takes the highest severity across chunks, not the first", async () => {
+    const sevs = ["low", "high", "medium"];
+    let i = 0;
+    const reviewFn = async () => ({ success: true, severity: sevs[i++], issues: [], summary: "ok" });
+    const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
+    const r = await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 0 });
+    assert.equal(r.severity, "high");
+  });
+});
+
+describe("review NL prompt selection", () => {
+  it("uses NL_REVIEW_PROMPT when fileName is an NL artifact", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await review({ model: "m", backend: "codebuddy", code: "# 一个命令定义", fileName: ".opencode/skills/x/SKILL.md" });
+    assert.ok(stdinWritten.includes("natural-language prompt artifact"), "should use NL review prompt for .md skill path");
+  });
+
+  it("uses REVIEW_PROMPT for a normal code file name", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await review({ model: "m", backend: "codebuddy", code: "const x = 1;", fileName: "src/foo.js" });
+    assert.ok(stdinWritten.includes("Review the following code for bugs"), "should use code review prompt for .js");
+  });
 });
 
 describe("prompt language requirement", () => {
@@ -1118,6 +1156,13 @@ describe("withRetry", () => {
     await assert.rejects(() => withRetry(fn, { maxRetries: 2, backoffMs: [0, 0] }), RunnerError);
     assert.equal(calls, 3);
   });
+
+  it("clamps negative maxRetries to zero (never throws undefined)", async () => {
+    let calls = 0;
+    const fn = async () => { calls++; throw new RunnerError("boom", { exitCode: 1 }); };
+    await assert.rejects(() => withRetry(fn, { maxRetries: -5, backoffMs: [0] }), RunnerError);
+    assert.equal(calls, 1);
+  });
 });
 
 describe("review retry integration", () => {
@@ -1170,9 +1215,18 @@ describe("collectProjectRules", () => {
     assert.ok(rules.includes("禁止 X"), rules);
   });
 
-  it("returns empty string when no rule files exist", async () => {
+  it("returns empty for empty input", async () => {
     const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({}) });
     assert.equal(rules, "");
+  });
+
+  it("walks up to find AGENTS.md in an ancestor directory", async () => {
+    const reader = async (p) => {
+      if (p.endsWith("/repo/AGENTS.md")) return "根规则 ROOT";
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    };
+    const rules = await collectProjectRules({ cwd: "/repo/sub/dir", readFile: reader });
+    assert.ok(rules.includes("根规则 ROOT"), rules);
   });
 
   it("includes both AGENTS.md and CLAUDE.md when present", async () => {

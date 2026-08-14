@@ -105,14 +105,36 @@ export function parseVerdict(text) {
   if (!parsed || typeof parsed !== "object") {
     return { verdict: "uncertain", evidence: "unparseable output" };
   }
-  const v = parsed.verdict;
-  if (v === "true" || v === "false" || v === "uncertain") {
-    return { verdict: v, evidence: typeof parsed.evidence === "string" ? parsed.evidence : "" };
+  const vs = typeof parsed.verdict === "string" ? parsed.verdict.trim().toLowerCase() : String(parsed.verdict).toLowerCase();
+  if (vs === "true" || vs === "false" || vs === "uncertain") {
+    return { verdict: vs, evidence: typeof parsed.evidence === "string" ? parsed.evidence : "" };
   }
   return { verdict: "uncertain", evidence: "missing or invalid verdict" };
 }
 
 export const ADJUDICATE_TIMEOUT = 900000;
+export const ADJUDICATE_CONCURRENCY = 4;
+
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = [];
+  for (let i = 0; i < workerCount; i++) {
+    workers.push(
+      (async () => {
+        while (true) {
+          const idx = next;
+          next += 1;
+          if (idx >= items.length) break;
+          results[idx] = await fn(items[idx], idx);
+        }
+      })()
+    );
+  }
+  await Promise.all(workers);
+  return results;
+}
 
 export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", retries = 0 }) {
   const ctx = line ? extractContext(code, line, { contextLines }) : code;
@@ -139,7 +161,7 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
 
 const MIN_SAMPLES = 5;
 
-export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, retries = 0 }) {
+export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY }) {
   const perModel = {};
   const allFindings = [];
 
@@ -194,14 +216,12 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   if (arbitrate) {
     const unique = dedupFindings(allFindings);
     const rules = resolveRules ? await resolveRules() : "";
-    const results = await Promise.all(
-      unique.map(async (f) => {
-        const file = f.auditFile || f.issue?.file || "";
-        const code = resolveCode ? await resolveCode(file) : "";
-        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, retries });
-        return { f, verdict: result && result.verdict };
-      })
-    );
+    const results = await mapLimit(unique, adjudicateConcurrency, async (f) => {
+      const file = f.auditFile || f.issue?.file || "";
+      const code = resolveCode ? await resolveCode(file) : "";
+      const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, retries });
+      return { f, verdict: result && result.verdict };
+    });
     for (const { f, verdict } of results) {
       if (verdict === "true") {
         for (const member of f.cluster ?? [f]) {

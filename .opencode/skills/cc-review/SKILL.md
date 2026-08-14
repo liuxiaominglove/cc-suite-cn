@@ -54,6 +54,23 @@ Load this skill when the user:
 - If all models return empty, state that clearly. Do not fabricate issues.
 - 汇报「已验证」必须能在 `docs/verification.md` 找到对应行（三色置信度 🟢🟡🔴）。
 
+## Report Template (每次工作完总结必带两节)
+
+每条 cc-suite-pe 命令的总结，末尾固定附两节（详见 `AGENTS.md`「汇报惯例」）：
+
+```
+## 本次各 AI 表现
+- 底线（每次必加）：各模型 success / issue 数（读 job result，不编）。
+- 加码（仅当本次做了 triage/裁决）：真 bug / 假阳 / 噪音 / 共识 + precision。
+  没做 triage 就写"未 triage，仅计数"。
+
+## 本次触达功能
+对照 docs/features.md 基线清单逐项标三色；没用的功能标"未触达"，不算 🟢。
+```
+
+- 每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出。
+- 两节只是追加，不替代原有评审/修复内容汇报。
+
 ## Key Scripts (single source of truth in this repo)
 
 - `scripts/review-runner.mjs` — 只读评审（review/reviewFile/chunkCode/offsetFindings/retry/AGENTS.md 注入）

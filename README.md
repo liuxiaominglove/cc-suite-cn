@@ -88,7 +88,9 @@
 |------|--------|
 | `pnpm test` | 跑全部测试 + 漂移守卫 |
 | `pnpm test:unit` | 只跑单元测试（不需联网） |
+| `pnpm test:e2e` | 跑端到端测试 |
 | `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `pnpm self-audit` | 自审 8 个核心脚本（glm+kimi 找 bug，release 前跑） |
 | `pnpm preflight` | 检查 codebuddy 是否就绪 |
 | `node scripts/jobs.mjs --run-audit --file x.js` | glm+kimi 找 bug + 记 1 条账 |
 | `node scripts/evaluate-models.mjs [--arbitrate]` | 评估谁找得多、谁找得准 |
@@ -181,6 +183,7 @@ scripts/runner-core.mjs         共享 spawn 原语
 scripts/jobs.mjs                任务账本
 scripts/guard.mjs               漂移守卫
 scripts/backends.mjs            backend 定义（codebuddy/kimi/qwen）
+scripts/self-audit.mjs          自审核心脚本（dogfooding，release 前跑）
 .opencode/agents/*.md           4 个 B 分身子代理
 .opencode/skills/cc-review/     评审技能 + 权重
 docs/verification.md            验证台账

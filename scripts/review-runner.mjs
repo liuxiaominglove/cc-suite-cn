@@ -21,19 +21,20 @@ export function setRetryBackoffMs(ms) {
 }
 
 export async function withRetry(fn, { maxRetries = 0, backoffMs = _retryBackoffMs } = {}) {
+  const attempts = Number.isFinite(maxRetries) && maxRetries > 0 ? Math.floor(maxRetries) : 0;
   let lastErr;
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= attempts; attempt++) {
     try {
       return await fn();
     } catch (err) {
       lastErr = err;
       const retryable = err instanceof TimeoutError || err instanceof RunnerError;
-      if (!retryable || attempt >= maxRetries) throw err;
+      if (!retryable || attempt >= attempts) throw err;
       const delay = backoffMs[attempt] ?? backoffMs[backoffMs.length - 1] ?? 0;
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
-  throw lastErr;
+  throw lastErr ?? new Error("withRetry: fn was never called");
 }
 
 export const REVIEW_PROMPT = "Review the following code for bugs, security issues, and code quality problems. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
@@ -69,14 +70,21 @@ export async function collectProjectRules({ cwd = process.cwd(), readFile = null
   const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
   const sections = [];
   for (const name of ruleFiles) {
-    const filePath = join(cwd, name);
-    try {
-      const raw = await read(filePath);
-      if (typeof raw === "string" && raw.trim()) {
-        sections.push(`=== ${name} ===\n${truncateLines(raw, maxLines)}`);
+    let dir = cwd;
+    for (;;) {
+      const filePath = join(dir, name);
+      try {
+        const raw = await read(filePath);
+        if (typeof raw === "string" && raw.trim()) {
+          sections.push(`=== ${name} ===\n${truncateLines(raw, maxLines)}`);
+          break;
+        }
+      } catch {
+        // 规则文件不存在或不可读：向上一级目录继续找
       }
-    } catch {
-      // 规则文件不存在或不可读：跳过，不拖垮评审
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
     }
   }
   return sections.join("\n\n");
@@ -323,7 +331,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     ruleCwd = dirname(resolved);
   }
 
-  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
+  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(fileName ?? file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
 
   const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
   const rules = projectRules ?? (await collectProjectRules({ cwd: ruleCwd }));
@@ -382,6 +390,12 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 }
 
 export function chunkCode(code, { chunkSize = 800, overlap = 10 } = {}) {
+  if (!Number.isInteger(chunkSize) || chunkSize <= 0) {
+    throw new Error("chunkSize must be a positive integer");
+  }
+  if (!Number.isInteger(overlap) || overlap < 0 || overlap >= chunkSize) {
+    throw new Error("overlap must be a non-negative integer less than chunkSize");
+  }
   const text = typeof code === "string" ? code : "";
   const lines = text.split("\n");
   if (lines.length <= chunkSize) {
@@ -442,7 +456,12 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   );
 
   const issues = offsetFindings(chunkResults);
-  const severity = chunkResults.find((c) => c.result?.severity)?.result?.severity ?? "unknown";
+  const SEVERITY_ORDER = { high: 3, medium: 2, low: 1 };
+  const severity = chunkResults.reduce((worst, c) => {
+    const s = c.result?.severity;
+    if (!s) return worst;
+    return (SEVERITY_ORDER[s] ?? 0) > (SEVERITY_ORDER[worst] ?? 0) ? s : worst;
+  }, "unknown");
 
   return {
     model,

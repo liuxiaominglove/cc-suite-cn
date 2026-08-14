@@ -12,8 +12,13 @@ function makeId() {
   return `job-${Date.now()}-${randomBytes(4).toString("hex")}`;
 }
 
+export function isValidJobId(id) {
+  return typeof id === "string" && /^job-\d+-[a-f0-9]+$/.test(id);
+}
+
 export function createJobStore({ dir }) {
   function jobFile(id) {
+    if (!isValidJobId(id)) throw new Error(`invalid job id: ${id}`);
     return join(dir, `${id}.json`);
   }
 
@@ -22,6 +27,7 @@ export function createJobStore({ dir }) {
   }
 
   async function get(id) {
+    if (!isValidJobId(id)) return null;
     try {
       const raw = await readFile(jobFile(id), "utf-8");
       return JSON.parse(raw);
@@ -79,7 +85,7 @@ export async function updateJobWithResult(store, id, fn) {
     const result = await fn();
     await store.update(id, { status: "completed", finishedAt: new Date().toISOString(), result });
   } catch (err) {
-    await store.update(id, { status: "failed", finishedAt: new Date().toISOString(), error: err.message });
+    await store.update(id, { status: "failed", finishedAt: new Date().toISOString(), error: err?.message ?? String(err) });
   }
 }
 
@@ -105,7 +111,7 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
   if (spec.diff) args.push("--diff");
   if (spec.allowExternal) args.push("--allow-external");
   const stdio = logPath ? ["ignore", openLog(logPath, "a"), openLog(logPath, "a")] : "ignore";
-  const child = spawn("node", args, { detached: true, stdio });
+  const child = spawn(process.execPath, args, { detached: true, stdio });
   child.unref();
   return child;
 }

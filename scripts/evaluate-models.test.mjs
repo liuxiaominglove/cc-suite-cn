@@ -185,6 +185,17 @@ describe("parseVerdict", () => {
     assert.equal(parseVerdict('{"foo":"bar"}').verdict, "uncertain");
     assert.equal(parseVerdict('{"verdict":"maybe"}').verdict, "uncertain");
   });
+
+  it("accepts JSON boolean true/false verdicts", () => {
+    assert.equal(parseVerdict('{"verdict":true}').verdict, "true");
+    assert.equal(parseVerdict('{"verdict":false}').verdict, "false");
+  });
+
+  it("normalizes casing and whitespace in verdict", () => {
+    assert.equal(parseVerdict('{"verdict":" TRUE "}').verdict, "true");
+    assert.equal(parseVerdict('{"verdict":"False"}').verdict, "false");
+    assert.equal(parseVerdict('{"verdict":"Uncertain"}').verdict, "uncertain");
+  });
 });
 
 describe("adjudicate", () => {
@@ -276,6 +287,24 @@ describe("evaluateModels", () => {
     const r = await evaluateModels({ audits });
     assert.equal(r.perModel["glm-5.2"].consensusCount, 1);
     assert.equal(r.perModel["glm-5.2"].consensusRate, 1);
+  });
+
+  it("caps adjudication concurrency", async () => {
+    const words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango"];
+    const issues = words.map((w) => ({ finding: `problem ${w}` }));
+    const audits = [{ workers: [{ model: "glm-5.2", success: true, issues }] }];
+    let running = 0;
+    let maxRunning = 0;
+    const adjudicateFn = async () => {
+      running += 1;
+      maxRunning = Math.max(maxRunning, running);
+      await new Promise((r) => setTimeout(r, 5));
+      running -= 1;
+      return { verdict: "true" };
+    };
+    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", adjudicateConcurrency: 4 });
+    assert.ok(maxRunning <= 4, `concurrency should cap at 4, saw ${maxRunning}`);
+    assert.ok(maxRunning > 1, "should still run in parallel");
   });
 
   it("adjudicates consensus findings too (not default true)", async () => {

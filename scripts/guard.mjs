@@ -38,7 +38,12 @@ export function findMissingCanonical(files = CANONICAL_FILES, exists = existsSyn
 export function findStaleReferences(files = GLOBAL_REF_FILES, read = readFileSync) {
   const problems = [];
   for (const f of files) {
-    const content = read(f, "utf-8");
+    let content;
+    try {
+      content = read(f, "utf-8");
+    } catch {
+      continue;
+    }
     for (const stale of STALE_GLOBAL_PATHS) {
       if (content.includes(stale)) {
         problems.push(`${f} references ${stale}`);

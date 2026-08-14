@@ -70,13 +70,16 @@ export async function runProcess({ command, args, stdin = null, timeout, spawn =
 
   let timedOut = false;
   let forceKillTimer;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill("SIGTERM");
-    forceKillTimer = setTimeout(() => {
-      proc.kill("SIGKILL");
-    }, SIGKILL_DELAY);
-  }, timeout);
+  let timer = null;
+  if (Number.isFinite(timeout) && timeout > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        proc.kill("SIGKILL");
+      }, SIGKILL_DELAY);
+    }, timeout);
+  }
 
   try {
     const [{ code: exitCode, signal: exitSignal }, stdout, stderr] = await Promise.all([

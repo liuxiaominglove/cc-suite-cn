@@ -118,6 +118,25 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。P3 之后固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
 
+## 汇报惯例（每次 cc-suite-pe 工作完的总结必带两节）
+
+所有 cc-suite-pe 命令（`/audit` `/review-*` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节：
+
+### 第一节：本次各 AI 表现
+
+- **底线（每次必加）**：客观计数——各模型 `success` / `issue 数`（从 `jobs.mjs --get` 的 `result.workers` 读，不编）。
+- **加码（仅当本次实际做了 triage 或裁决时）**：升级为「真 bug / 假阳 / 噪音 / 共识」+ `/evaluate` 的 precision。**没做 triage 就写"未 triage，仅计数"，不许编"谁表现好"。**
+
+### 第二节：本次触达功能
+
+对照 `docs/features.md` 基线清单，逐项标三色：🟢 实测通过 / 🟡 机制或部分 / 🔴 失败；**本次没用的功能标"未触达"，不算 🟢**。
+
+### 铁律（防惯例退化成空话）
+
+1. **结论 ≤ 证据**：每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出；查不到就标 🔴 或"未触达"。
+2. **负向必测**：凡写"能拦住/能禁止"，必须实测"确实拦住了"。
+3. 两节只是追加，不替代原有的评审/修复内容汇报。
+
 ## Single Source of Truth
 
 Scripts and skill assets live in **one** canonical location — this git repo. The global `~/.config/opencode/` directory must only hold thin pointers that reference this repo; it must never hold its own copy of `review-runner.mjs` or `SKILL.md`.
@@ -142,7 +161,10 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/preflight.mjs` | 环境自检（codebuddy CLI 可用性检查） |
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
+| `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
 | `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
+| `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
+| `docs/features.md` | 功能基线清单（每次总结"触达功能"对照的单一数据源） |
 | `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.2/hy3 走 codebuddy 平台账号，无需本地 endpoint） |

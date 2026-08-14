@@ -84,6 +84,19 @@ describe("runProcess", () => {
     assert.ok(proc.killSignals.includes("SIGTERM"));
   });
 
+  it("does not arm timer when timeout is undefined (no premature SIGTERM)", async () => {
+    let proc;
+    setSpawn(() => {
+      proc = createMockProc({ stdout: "ok", autoClose: false });
+      return proc;
+    });
+    const pending = runProcess({ command: "foo", args: [] });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.deepEqual(proc.killSignals, [], "should not SIGTERM when timeout is omitted");
+    proc.kill("SIGKILL");
+    await pending;
+  });
+
   it("throws RunnerError when command not found", async () => {
     const err = new Error("spawn foo ENOENT");
     err.code = "ENOENT";
