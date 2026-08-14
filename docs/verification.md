@@ -60,6 +60,9 @@
 | 分块后行号偏移正确 | 块2(startLine=791) finding line 15 → 偏移后 805；单测覆盖 | 🟢 | 2026-08-14 |
 | 某块失败不拖垮 | reviewFile 单块失败，其余块结果仍返回；单测覆盖 | 🟢 | 2026-08-14 |
 | TDD 铁律入 AGENTS.md | 修 bug 必须 RED→GREEN→REFACTOR；无测试框架先用 node:test 搭；DOM 类改动标 🟡 | 🟢 | 2026-08-14 |
+| 超时统一 900s | review/adjudicate 默认都 900s（抽 DEFAULT_TIMEOUT/ADJUDICATE_TIMEOUT 常量），qwen 批判员/hy3 裁判大文件不超时 | 🟢 | 2026-08-14 |
+| 批判员 qwen 也分块 | review-runner CLI 文件模式走 reviewFile（分块），customPrompt/allowExternal 透传 | 🟢 | 2026-08-14 |
+| hy3 裁决只传上下文（不整文件） | `extractContext(code,line,±40行)`；adjudicate 有 line 时只传 finding 附近代码段；evaluateModels 传 finding 行号 | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

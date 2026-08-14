@@ -320,11 +320,11 @@ export function offsetFindings(chunkResults) {
   return all;
 }
 
-export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = 900000, reviewFn = null, readFn = null }) {
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null }) {
   const reviewFnUsed = reviewFn ?? review;
   const read = readFn ?? (async (f) => {
     const { readFile } = await import("node:fs/promises");
-    const resolved = validateFilePath(f, process.cwd());
+    const resolved = validateFilePath(f, process.cwd(), { allowExternal });
     return readFile(resolved, "utf-8");
   });
 
@@ -332,18 +332,18 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   try {
     code = await read(file);
   } catch (err) {
-    return reviewFnUsed({ model, backend, file, timeout });
+    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal });
   }
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, timeout });
+    return reviewFnUsed({ model, backend, code, timeout, customPrompt });
   }
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };
@@ -409,7 +409,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     process.exit(1);
   }
 
-  const result = await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff });
+  const useChunking = !!(file && !dir && !diff);
+  const result = useChunking
+    ? await reviewFile({ model, backend, file, customPrompt, allowExternal, timeout })
+    : await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff });
   console.log(JSON.stringify(result, null, 2));
   if (!result.success) process.exit(1);
 }

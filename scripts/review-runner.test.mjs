@@ -1001,3 +1001,16 @@ describe("timeout defaults", () => {
     assert.equal(DEFAULT_TIMEOUT, 900000);
   });
 });
+
+describe("reviewFile options", () => {
+  it("passes customPrompt through to review", async () => {
+    let captured = null;
+    const reviewFn = async (opts) => {
+      captured = opts.customPrompt;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => "const x = 1;";
+    await reviewFile({ model: "m", backend: "b", file: "f", readFn, reviewFn, customPrompt: "提示" });
+    assert.equal(captured, "提示");
+  });
+});

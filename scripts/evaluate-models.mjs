@@ -17,6 +17,15 @@ export function normalizeFinding(text) {
   return tokens;
 }
 
+export function extractContext(code, line, { contextLines = 40 } = {}) {
+  if (typeof code !== "string" || code === "") return "";
+  if (!Number.isInteger(line) || line < 1) return code;
+  const lines = code.split("\n");
+  const start = Math.max(1, line - contextLines);
+  const end = Math.min(lines.length, line + contextLines);
+  return lines.slice(start - 1, end).join("\n");
+}
+
 export function dice(a, b) {
   if (a.length === 0 && b.length === 0) return 0;
   const setA = new Set(a);
@@ -104,8 +113,9 @@ export function parseVerdict(text) {
 
 export const ADJUDICATE_TIMEOUT = 900000;
 
-export async function adjudicate({ finding, code, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null }) {
-  const prompt = buildAdjudicatorPrompt(finding, code);
+export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null }) {
+  const ctx = line ? extractContext(code, line, { contextLines }) : code;
+  const prompt = buildAdjudicatorPrompt(finding, ctx);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
   const { exitCode, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn });
 
@@ -180,7 +190,7 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       allFindings.map(async (f) => {
         const file = f.auditFile || f.issue?.file || "";
         const code = resolveCode ? await resolveCode(file) : "";
-        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "" });
+        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line });
         return { f, verdict: result && result.verdict };
       })
     );

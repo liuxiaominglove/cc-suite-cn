@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 
 afterEach(() => setSpawn(null));
@@ -10,13 +10,6 @@ function mockProc(stdout = "", { exitCode = 0, stderr = "" } = {}) {
   const stdoutStream = new EventEmitter();
   const stderrStream = new EventEmitter();
   const events = new EventEmitter();
-  const close = () => {
-    if (stdout) stdoutStream.emit("data", Buffer.from(stdout));
-    stdoutStream.emit("end");
-    if (stderr) stderrStream.emit("data", Buffer.from(stderr));
-    stderrStream.emit("end");
-    events.emit("close", exitCode, null);
-  };
   const proc = {
     stdout: stdoutStream,
     stderr: stderrStream,
@@ -24,6 +17,17 @@ function mockProc(stdout = "", { exitCode = 0, stderr = "" } = {}) {
     kill: () => {},
     removeListener: () => proc,
     stdin: { write: () => {}, end: () => {} },
+  };
+  const close = () => {
+    if (stdout) stdoutStream.emit("data", Buffer.from(stdout));
+    stdoutStream.emit("end");
+    if (stderr) stderrStream.emit("data", Buffer.from(stderr));
+    stderrStream.emit("end");
+    events.emit("close", exitCode, null);
+  };
+  proc.stdin = {
+    write: (d) => { proc.stdinWritten = d; },
+    end: () => {},
   };
   setImmediate(close);
   return proc;
@@ -248,5 +252,78 @@ describe("evaluateModels", () => {
 describe("timeout defaults", () => {
   it("adjudicate default timeout is 900000ms", () => {
     assert.equal(ADJUDICATE_TIMEOUT, 900000);
+  });
+});
+
+describe("extractContext", () => {
+  const code = Array(100).fill(0).map((_, i) => `line${i + 1}`).join("\n");
+
+  it("extracts surrounding lines around a middle line", () => {
+    const ctx = extractContext(code, 50, { contextLines: 5 });
+    const lines = ctx.split("\n");
+    assert.equal(lines.length, 11); // 5 before + line 50 + 5 after
+    assert.equal(lines[0], "line45");
+    assert.equal(lines[10], "line55");
+  });
+
+  it("clamps to the start", () => {
+    const ctx = extractContext(code, 3, { contextLines: 5 });
+    assert.ok(ctx.startsWith("line1"), "should start at line 1");
+  });
+
+  it("clamps to the end", () => {
+    const ctx = extractContext(code, 98, { contextLines: 5 });
+    assert.ok(ctx.endsWith("line100"), "should end at last line");
+  });
+
+  it("returns full code when line is missing/invalid", () => {
+    assert.equal(extractContext(code, null), code);
+    assert.equal(extractContext(code, undefined), code);
+  });
+
+  it("returns empty for empty code", () => {
+    assert.equal(extractContext("", 5), "");
+  });
+});
+
+describe("adjudicate context extraction", () => {
+  it("passes only the surrounding context (not full code) when line is provided", async () => {
+    const code = Array(200).fill(0).map((_, i) => `line${i + 1}`).join("\n");
+    let proc = null;
+    setSpawn((cmd, args, opts) => {
+      proc = mockProc('{"verdict":"true","evidence":"real"}');
+      return proc;
+    });
+    await adjudicate({ finding: "bug here", code, line: 100, contextLines: 10 });
+    const prompt = proc.stdinWritten || "";
+    assert.ok(prompt.includes("line100"), "should include the finding's line");
+    assert.ok(prompt.includes("line90"), "should include context before");
+    assert.ok(prompt.includes("line110"), "should include context after");
+    assert.ok(!prompt.includes("line1\n"), "should NOT include far-away line 1");
+    assert.ok(!prompt.includes("line200"), "should NOT include far-away line 200");
+  });
+
+  it("passes the full code when no line is provided", async () => {
+    const code = "const a = 1;\nconst b = 2;";
+    let proc = null;
+    setSpawn((cmd, args, opts) => {
+      proc = mockProc('{"verdict":"false","evidence":"x"}');
+      return proc;
+    });
+    await adjudicate({ finding: "x", code });
+    assert.ok((proc.stdinWritten || "").includes("const b = 2;"));
+  });
+});
+
+describe("evaluateModels passes line to adjudicator", () => {
+  it("passes each finding's line number", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "unique x", file: "f.js", line: 42 }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "different y", file: "f.js", line: 7 }] },
+    ]}];
+    const seen = [];
+    const adjudicateFn = async ({ line }) => { seen.push(line); return { verdict: "false" }; };
+    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
+    assert.deepEqual(seen.sort((a, b) => a - b), [7, 42]);
   });
 });
