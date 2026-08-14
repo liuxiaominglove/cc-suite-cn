@@ -60,7 +60,9 @@ export DASHSCOPE_API_KEY=your-aliyun-dashscope-key
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
 | `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
-| `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本） |
+| `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
+| `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
+| `/fix <bug>` | 修复闭环：找 → 裁 → 修 bug(TDD) → 验证 |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |

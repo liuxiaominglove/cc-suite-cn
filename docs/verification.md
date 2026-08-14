@@ -63,6 +63,8 @@
 | 超时统一 900s | review/adjudicate 默认都 900s（抽 DEFAULT_TIMEOUT/ADJUDICATE_TIMEOUT 常量），qwen 批判员/hy3 裁判大文件不超时 | 🟢 | 2026-08-14 |
 | 批判员 qwen 也分块 | review-runner CLI 文件模式走 reviewFile（分块），customPrompt/allowExternal 透传 | 🟢 | 2026-08-14 |
 | hy3 裁决只传上下文（不整文件） | `extractContext(code,line,±40行)`；adjudicate 有 line 时只传 finding 附近代码段；evaluateModels 传 finding 行号 | 🟢 | 2026-08-14 |
+| audit-log 接线（run-audit 顺带写） | `persistAuditEntries`(原子写) + run-audit 把 worker 结果经 fromReviewResult 追加到 audit-log.json；实测 14→16 条 | 🟢 | 2026-08-14 |
+| /audit-full + /fix 闭环命令 | 命令 .md：/audit-full=找bug+批判员+裁决三合一；/fix=找→裁→修(TDD)→验闭环 | 🟡（命令已建，待真实跑一次验证） | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

@@ -70,7 +70,9 @@
 
 | 命令 | 干什么 | 类比 |
 |------|--------|------|
-| `/audit <文件/目录>` | glm+kimi 找 bug（记入账本） | 两个监理巡楼 |
+| `/audit <文件/目录>` | glm+kimi 找 bug（记入账本 + audit-log） | 两个监理巡楼 |
+| `/audit-full <文件>` | 完整审计：找 bug + 批判员 + 裁决 | 全套体检 |
+| `/fix <bug>` | 修复闭环：找 → 裁 → 修(TDD) → 验证 | 看病到治好 |
 | `/review-kimi <文件>` | 只叫 Kimi 审 | 单医生看诊 |
 | `/review-qwen <文件>` | 只叫 Qwen 审（批判员） | 单医生看诊 |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） | 赛后统计 MVP |
@@ -96,12 +98,15 @@
 ## 五、典型工作流（完整闭环）
 
 ```
-1. 修代码：  opencode 自己改（带 TDD）——最了解项目，最精准
-2. 找 bug：  /audit 文件   → glm+kimi 审，出共识 + 各模型报告
-3. 判真假：  /evaluate --arbitrate → hy3 逐条判 finding 真假
-4. 验证：    /verify       → 只发改动区域复查
-5. 查账：    /jobs → /result <id>
+1. 找 bug：  /audit 文件       → glm+kimi 审，出共识 + 各模型报告
+2. 批判员：  /review-qwen       → qwen 独立第二意见（沙箱只读）
+3. 判真假：  /evaluate --arbitrate → hy3 逐条判 finding 真假，出 precision
+4. 修 bug：  /fix               → opencode 用 TDD 修（RED→GREEN→REFACTOR）
+5. 验证：    /verify            → 只发改动区域复查
+6. 查账：    /jobs → /result <id>
 ```
+
+> 一步到位：`/audit-full` = 找 bug + 批判员 + 裁决三合一；`/fix` = 找→裁→修→验闭环。
 
 ---
 
