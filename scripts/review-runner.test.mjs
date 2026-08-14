@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -993,5 +993,11 @@ describe("prompt language requirement", () => {
 
   it("VERIFY_PROMPT requires English finding/fix", () => {
     assert.ok(VERIFY_PROMPT.includes("英文"), "VERIFY_PROMPT should require English output");
+  });
+});
+
+describe("timeout defaults", () => {
+  it("review default timeout is 900000ms", () => {
+    assert.equal(DEFAULT_TIMEOUT, 900000);
   });
 });

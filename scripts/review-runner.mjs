@@ -8,6 +8,7 @@ import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.m
 export { setSpawn, RunnerError, TimeoutError };
 
 export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go", ".rs", ".java", ".kt", ".c", ".cpp", ".h", ".m", ".mm"];
+export const DEFAULT_TIMEOUT = 900000;
 const MAX_FILES_WARN = 50;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
 
@@ -153,7 +154,7 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
   });
 }
 
-export async function review({ model, code, customPrompt, timeout = 60000, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -175,7 +176,7 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
   }
 
   if (!Number.isFinite(timeout) || timeout <= 0) {
-    timeout = 60000;
+    timeout = DEFAULT_TIMEOUT;
   }
 
   if (dir != null && typeof dir !== "string") {
@@ -394,8 +395,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const exts = extsRaw ? extsRaw.split(",").map((e) => e.trim()) : null;
   const customPrompt = promptIdx !== -1 ? args[promptIdx + 1] : null;
 
-  const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : 60000;
-  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : 60000;
+  const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : DEFAULT_TIMEOUT;
+  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : DEFAULT_TIMEOUT;
   const backend = backendIdx !== -1 ? args[backendIdx + 1] : "codebuddy";
 
   if (file && dir) {

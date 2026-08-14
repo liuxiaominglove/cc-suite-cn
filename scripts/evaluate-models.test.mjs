@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 
 afterEach(() => setSpawn(null));
@@ -242,5 +242,11 @@ describe("evaluateModels", () => {
     const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "" });
     assert.equal(r.perModel["glm-5.2"].trueCount, 0);
     assert.equal(r.perModel["glm-5.2"].precision, 0);
+  });
+});
+
+describe("timeout defaults", () => {
+  it("adjudicate default timeout is 900000ms", () => {
+    assert.equal(ADJUDICATE_TIMEOUT, 900000);
   });
 });

@@ -102,7 +102,9 @@ export function parseVerdict(text) {
   return { verdict: "uncertain", evidence: "missing or invalid verdict" };
 }
 
-export async function adjudicate({ finding, code, model = "hy3", backend = "codebuddy", timeout = 120000, spawn = null }) {
+export const ADJUDICATE_TIMEOUT = 900000;
+
+export async function adjudicate({ finding, code, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null }) {
   const prompt = buildAdjudicatorPrompt(finding, code);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
   const { exitCode, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn });
