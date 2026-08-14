@@ -108,7 +108,25 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
   return child;
 }
 
-export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSpawn, logDir = null, openLog = openSync } = {}) {
+export async function acquireSlot({ max, getRunningCount, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), pollMs = 500 } = {}) {
+  if (!max || max <= 0) return;
+  while ((await getRunningCount()) >= max) {
+    await sleep(pollMs);
+  }
+}
+
+export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSpawn, logDir = null, openLog = openSync, maxConcurrent = 0, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), pollMs = 500 } = {}) {
+  if (maxConcurrent > 0) {
+    await acquireSlot({
+      max: maxConcurrent,
+      getRunningCount: async () => {
+        const jobs = await store.list();
+        return jobs.filter((j) => j.status === "running").length;
+      },
+      sleep,
+      pollMs,
+    });
+  }
   const job = await store.create(meta);
   const logPath = logDir ? join(logDir, `${job.id}.log`) : null;
   const child = spawnWorker({ ...workerSpec, jobId: job.id }, { spawn, logPath, openLog });
@@ -154,9 +172,11 @@ export function parseArgs(args) {
       const model = flag("model");
       const file = flag("file");
       const backend = flag("backend");
+      const maxConcurrent = flag("max-concurrent");
       if (model) r.model = model;
       if (file) r.file = file;
       if (backend) r.backend = backend;
+      if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
       if (hasBackground) r.background = true;
       return r;
     }
@@ -165,9 +185,11 @@ export function parseArgs(args) {
       const file = flag("file");
       const dir = flag("dir");
       const exts = flag("exts");
+      const maxConcurrent = flag("max-concurrent");
       if (file) r.file = file;
       if (dir) r.dir = dir;
       if (exts) r.exts = exts.split(",").map((e) => e.trim());
+      if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
       if (rest.includes("--diff")) r.diff = true;
       if (hasBackground) r.background = true;
       return r;
@@ -295,7 +317,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (parsed.action === "run-review") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-review", model: parsed.model, file: parsed.file, backend: parsed.backend }, { logDir: DEFAULT_JOBS_DIR });
+      const id = await runJobBackground(store, meta, { action: "worker-review", model: parsed.model, file: parsed.file, backend: parsed.backend }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
       const { review } = await import("./review-runner.mjs");
@@ -306,7 +328,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (parsed.action === "run-audit") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }, { logDir: DEFAULT_JOBS_DIR });
+      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
       const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));

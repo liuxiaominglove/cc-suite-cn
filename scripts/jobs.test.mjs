@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, AUDIT_WORKERS } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, AUDIT_WORKERS } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -296,6 +296,11 @@ describe("parseArgs background and worker", () => {
       model: "glm-5.2",
     });
   });
+
+  it("parses --max-concurrent on run-audit", () => {
+    const r = parseArgs(["--run-audit", "--file", "x.js", "--background", "--max-concurrent", "3"]);
+    assert.equal(r.maxConcurrent, 3);
+  });
 });
 
 describe("runAudit", () => {
@@ -404,5 +409,45 @@ describe("runAudit retries", () => {
     };
     await runAudit({ file: "x.js", review, appendAudit: async () => {}, persistAuditLog: false });
     assert.equal(captured, 2);
+  });
+});
+
+describe("acquireSlot", () => {
+  it("returns immediately when running < max", async () => {
+    let sleepCalls = 0;
+    await acquireSlot({ max: 4, getRunningCount: async () => 2, sleep: async () => { sleepCalls += 1; } });
+    assert.equal(sleepCalls, 0);
+  });
+
+  it("polls until a slot frees", async () => {
+    let running = 4;
+    let sleepCalls = 0;
+    await acquireSlot({ max: 4, getRunningCount: async () => running, sleep: async () => { sleepCalls += 1; running = 3; } });
+    assert.equal(sleepCalls, 1);
+  });
+
+  it("skips gating when max <= 0", async () => {
+    let getCalls = 0;
+    await acquireSlot({ max: 0, getRunningCount: async () => { getCalls += 1; return 99; }, sleep: async () => {} });
+    assert.equal(getCalls, 0);
+  });
+});
+
+describe("runJobBackground concurrency", () => {
+  it("waits for a slot when maxConcurrent is reached", async () => {
+    const { store } = await makeStore();
+    const blocker = await store.create({ type: "audit", task: "blocker.js" });
+    let spawned = false;
+    const spawn = () => { spawned = true; return { unref() {}, pid: 999 }; };
+    let slept = 0;
+    const sleep = async () => { slept += 1; await store.update(blocker.id, { status: "completed" }); };
+    await runJobBackground(
+      store,
+      { type: "review", model: "glm-5.2" },
+      { action: "worker-review", file: "x.js" },
+      { spawn, maxConcurrent: 1, sleep, pollMs: 1 }
+    );
+    assert.equal(slept, 1, "should wait once until the blocker completes");
+    assert.equal(spawned, true);
   });
 });
