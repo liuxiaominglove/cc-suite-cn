@@ -39,6 +39,36 @@ export const REVIEW_PROMPT = "Review the following code for bugs, security issue
 
 export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
 
+const RULE_FILES = ["AGENTS.md", "CLAUDE.md"];
+const RULES_MAX_LINES = 400;
+
+function truncateLines(text, maxLines) {
+  const lines = text.split("\n");
+  return lines.length <= maxLines ? text : lines.slice(0, maxLines).join("\n");
+}
+
+export async function collectProjectRules({ cwd = process.cwd(), readFile = null, ruleFiles = RULE_FILES, maxLines = RULES_MAX_LINES } = {}) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  const sections = [];
+  for (const name of ruleFiles) {
+    const filePath = join(cwd, name);
+    try {
+      const raw = await read(filePath);
+      if (typeof raw === "string" && raw.trim()) {
+        sections.push(`=== ${name} ===\n${truncateLines(raw, maxLines)}`);
+      }
+    } catch {
+      // 规则文件不存在或不可读：跳过，不拖垮评审
+    }
+  }
+  return sections.join("\n\n");
+}
+
+export function buildRulesSection(rules) {
+  const text = (rules ?? "").trim();
+  return text ? `\n\n[项目规则]\n${text}` : "";
+}
+
 let _gitSpawn = null;
 
 export function setGitSpawn(fn) {
@@ -177,7 +207,7 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
   });
 }
 
-export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0 }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -265,7 +295,8 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : REVIEW_PROMPT);
 
   const readOnlyPrefix = backend === "codebuddy" ? "" : `${READ_ONLY_DECLARATION}\n\n`;
-  const fullPrompt = `${readOnlyPrefix}${prompt}\n\nCODE:\n${frameCode(code)}`;
+  const rules = projectRules ?? (await collectProjectRules({ cwd }));
+  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 

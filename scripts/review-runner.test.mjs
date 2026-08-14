@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -1081,5 +1081,99 @@ describe("review retry integration", () => {
       RunnerError
     );
     assert.equal(calls, 1);
+  });
+});
+
+function makeRulesReader({ agents, claude } = {}) {
+  return async (p) => {
+    if (p.endsWith("AGENTS.md")) {
+      if (agents !== undefined) return agents;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    }
+    if (p.endsWith("CLAUDE.md")) {
+      if (claude !== undefined) return claude;
+      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    }
+    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  };
+}
+
+describe("collectProjectRules", () => {
+  it("returns AGENTS.md content with a header", async () => {
+    const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({ agents: "禁止 X" }) });
+    assert.ok(rules.includes("=== AGENTS.md ==="), rules);
+    assert.ok(rules.includes("禁止 X"), rules);
+  });
+
+  it("returns empty string when no rule files exist", async () => {
+    const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({}) });
+    assert.equal(rules, "");
+  });
+
+  it("includes both AGENTS.md and CLAUDE.md when present", async () => {
+    const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({ agents: "规则A", claude: "规则B" }) });
+    assert.ok(rules.includes("=== AGENTS.md ==="), rules);
+    assert.ok(rules.includes("规则A"), rules);
+    assert.ok(rules.includes("=== CLAUDE.md ==="), rules);
+    assert.ok(rules.includes("规则B"), rules);
+  });
+
+  it("truncates to 400 lines when longer", async () => {
+    const lines = [];
+    for (let i = 1; i <= 500; i++) lines.push(`line${i}`);
+    const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({ agents: lines.join("\n") }) });
+    assert.ok(rules.includes("line400"), "should keep line 400");
+    assert.ok(!rules.includes("line401"), "should drop line 401");
+  });
+
+  it("swallows read errors and returns empty", async () => {
+    const reader = async () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); };
+    const rules = await collectProjectRules({ cwd: "/p", readFile: reader });
+    assert.equal(rules, "");
+  });
+});
+
+describe("buildRulesSection", () => {
+  it("wraps rules with a header", () => {
+    const s = buildRulesSection("禁止 X");
+    assert.ok(s.includes("[项目规则]"), s);
+    assert.ok(s.includes("禁止 X"), s);
+  });
+
+  it("returns empty for blank rules", () => {
+    assert.equal(buildRulesSection(""), "");
+    assert.equal(buildRulesSection("   \n  "), "");
+    assert.equal(buildRulesSection(null), "");
+  });
+});
+
+describe("review project rules injection", () => {
+  it("injects projectRules into the prompt", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "m", backend: "codebuddy", code: "const x = 1", projectRules: "禁止 CFTypeRef 强转" });
+
+    assert.ok(stdinWritten, "should write to stdin");
+    assert.ok(stdinWritten.includes("[项目规则]"), "should include rules header");
+    assert.ok(stdinWritten.includes("禁止 CFTypeRef 强转"), "should include rules content");
+  });
+
+  it("omits rules section when no projectRules and cwd has no rule file", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "m", backend: "codebuddy", code: "const x = 1", cwd: "/nonexistent-dir-xyz" });
+
+    assert.ok(stdinWritten, "should write to stdin");
+    assert.ok(!stdinWritten.includes("[项目规则]"), "should not include rules section when none found");
   });
 });
