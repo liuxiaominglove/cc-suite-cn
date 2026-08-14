@@ -74,12 +74,19 @@
 | ELTA 实战第二轮：修 7 个真 bug（TDD） | substringInRange UTF-16偏移(emoji) + 划词日志隐私 + 剪贴板restore先清后写 + NSRegularExpression缓存 + loadKey可见性复位 + providerChanged顺序 + reset完整复位；179 全绿 | 🟢 | 2026-08-14 |
 | review() 重试（瞬时限速自动恢复） | `withRetry`（maxRetries=2 退避 10s/30s），只对 TimeoutError/RunnerError 重试、AuthError 不重试；runAudit 传 retries=2 | 🟢 | 2026-08-14 |
 | 失败醒目化（--run-audit 显示 worker OK/FAIL） | `summarizeWorkers` 输出 `glm-5.2: OK(8) \| kimi-k2.7-code: FAIL(...)`；实测 kimi 失败时前台立刻可见 | 🟢 | 2026-08-14 |
-| ⚠ 评审员缺项目 AGENTS.md 上下文 → 误报 | qwen/kimi 把「CFTypeRef 强转」当 bug 报，但被审项目 AGENTS.md 明确此为正确做法（typeID 判断会 SIGSEGV）；review() 未把项目 AGENTS.md 注入 prompt | 🟡（已知缺陷，待修） | 2026-08-14 |
+| ⚠ 评审员缺项目 AGENTS.md 上下文 → 误报 | qwen/kimi 把「CFTypeRef 强转」当 bug 报，但被审项目 AGENTS.md 明确此为正确做法（typeID 判断会 SIGSEGV）；review() 未把项目 AGENTS.md 注入 prompt | 🟢（已修 WI-1） | 2026-08-14 |
 | ⚠ 双模型共识率极低 | ELTA 283 唯一 finding 仅 21 共识（7%）；glm/kimi 抓的 bug 几乎不重叠，导致"全修"成本高 | 🟡（观察中） | 2026-08-14 |
 | ⚠ 严重度虚高 | 283 finding 中 94 标 high，但大量是"注释中英混写/未用import/魔法数字"噪音 | 🟡（观察中） | 2026-08-14 |
 | ⚠ kimi 余额<50 触发限速 | Moonshot 余额<50 时 kimi exit code 1（并发放大）；充值后恢复；重试机制已兜底 | 🟡（环境依赖，非代码缺陷） | 2026-08-14 |
-| ⚠ 15 并发后台 worker 卡死 | 一次投 15 个 `--background`，spawnWorker(detached+unref) 大多死/卡，job 卡 running 无兜底；≤6 并发正常 | 🟡（已知缺陷，待修） | 2026-08-14 |
+| ⚠ 15 并发后台 worker 卡死 | 一次投 15 个 `--background`，spawnWorker(detached+unref) 大多死/卡，job 卡 running 无兜底；≤6 并发正常 | 🟢（已修 WI-7：acquireSlot 并发上限 + --max-concurrent 默认4） | 2026-08-14 |
 | kimi `-y` 与 `-p` 不兼容（教训） | `kimi -y -p` 报 "Cannot combine --prompt with --yolo"；且 `-p` 模式本就不等工具审批。曾误加 -y 后回滚 | 🟢 | 2026-08-14 |
+| WI-1: review() 注入 AGENTS.md/CLAUDE.md | `collectProjectRules`（全文，超400行截断）+ `buildRulesSection` 拼进 prompt；9 单测（含截断/读失败容错/注入集成） | 🟢 | 2026-08-14 |
+| WI-2: loadAudits 按 task 去重 | `dedupJobsByTask` 每个文件只留最新 job，run 数按唯一文件算（修复 glm 35 vs kimi 19 虚高）；4 单测 | 🟢 | 2026-08-14 |
+| WI-3: dedupFindings + arbitrate 去重 | 跨文件按 (file+相似度0.6) 聚类，`--arbitrate` 只裁唯一 finding、verdict 回填 cluster 全成员；5 单测 + 集成（near-identical 只裁1次） | 🟢 | 2026-08-14 |
+| WI-4: 删死代码 | 删 prompt-builder/weight-analyzer/weekly-sync/weights-validator(+test)+weights.json（1081行），清理 package.json/guard/AGENTS.md；全量 246 绿 | 🟢 | 2026-08-14 |
+| WI-5: 重写 SKILL.md 为 4 角色 | SKILL.md 描述 find-bug(glm+kimi)/critic(qwen)/verifier(hy3)/fixer(opencode) + AGENTS.md 注入 | 🟢 | 2026-08-14 |
+| WI-6: guard 内容一致性检查 | `findDeadReferences` 扫描 SKILL.md 引用的 .mjs/.json 是否存在，防再漂移；2 单测 + 真实 guard 过 | 🟢 | 2026-08-14 |
+| WI-7: runJobBackground 并发上限 | `acquireSlot` 轮询等空位 + CLI `--max-concurrent`（默认4）；4 单测 + 集成（满员等位） | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
