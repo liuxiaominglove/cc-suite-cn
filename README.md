@@ -1,8 +1,8 @@
 # cc-suite-pe — AI 施工队协作系统
 
-一个让 **opencode（DeepSeek）当总指挥、多个 AI 模型当施工队**、互相派活、交叉查代码的协作系统。
+一个让 **opencode（DeepSeek）当总指挥兼修 bug、四个 AI 模型各司其职**、交叉查代码的协作系统。
 
-> 一句话：**你当老板，opencode 当工头，Qwen/GLM/Kimi/Hy3 当四个施工队，这个项目是工头的助手 + 翻译 + 对讲机 + 记账本。**
+> 一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy3 当裁判判真假。**
 
 ---
 
@@ -13,40 +13,40 @@
 现在这套系统：
 
 1. **多个 AI 交叉审代码**——一个 AI 漏掉的 bug，另一个能抓到（不同公司、不同训练数据、盲区不同）。
-2. **AI 能派活给 AI**——工头 opencode 能派施工队干活，施工队拿不准时也能**通过对讲机反向问工头**。
+2. **分工明确、各司其职**——找 bug 的、挑毛病的、判真假的、修 bug 的，各干各的，不"自己批自己"。
 3. **干活有记录、有账本**——每个任务记一笔账，能查状态、看结果、真取消。
-4. **写代码有安全底线**——施工队能改文件，但不能乱跑命令，写后也不自动提交。
+4. **能评估谁靠谱**——累积审计数据后，能算"谁找得多、谁找得准"。
 
 ---
 
 ## 二、架构（一张图看懂）
 
 ```
-                    你（老板）
-                       │
-        ┌──────────────┴──────────────┐
-        │   opencode + DeepSeek        │  ← 工头（总指挥，唯一拍板方）
-        └──────────────┬──────────────┘
-                       │
-      ┌────────────────┼────────────────┐
-      │                │                │
-   B 分身（日常）   A 突击员（独立评审）  反向桥（对讲机）
-      │                │                │
-   4 个施工队      4 个施工队          施工队 ↔ 工头
-   （换脑不换身）  （独立第三方进程）     （MCP 桥 + 闸门）
+                     你（老板）
+                        │
+         ┌──────────────┴──────────────┐
+         │  opencode + DeepSeek         │  ← 工头 + 施工队长（总指挥 + 亲自修 bug）
+         └──────────────┬──────────────┘
+                        │
+       ┌────────────────┼────────────────┐
+       │                │                │
+   找 bug（audit）   批判员（critic）   验证审计员（verifier）
+       │                │                │
+   GLM + Kimi        Qwen             Hy3
+   （只读评审）     （只读 + 沙箱）    （只读，判 finding 真假）
 ```
 
-### 四个施工队（模型）
+### 四个施工队（模型）+ 分工
 
-| 施工队 | 公司 | 脑子 | 分工 |
-|--------|------|------|------|
-| **Qwen** | 阿里通义千问 | `qwen3-coder-plus` | 只读评审（天然只读） |
-| **GLM-5.2** | 智谱 | `glm-5.2` | 只读评审 |
-| **Kimi** | 月之暗面 | `kimi-k2.7-code` | 只读评审 |
-| **Hy3** | 腾讯混元 | `hy3`（TokenHub） | 只读评审 |
-| （工头）DeepSeek | 深度求索 | `deepseek-v4-pro` | 总指挥，openCode 主脑 |
+| 角色 | AI | 公司 | 干什么 |
+|------|-----|------|--------|
+| 找 bug | **GLM-5.2** | 智谱 | 报得多（广撒网） |
+| 找 bug | **Kimi** | 月之暗面 | 报得准（质量高） |
+| 批判员 | **Qwen** | 阿里 | 独立第二意见（只读 + `--sandbox`） |
+| 验证审计员 | **Hy3** | 腾讯混元 | 逐条判 finding 真假（只读） |
+| 总指挥 + 修 bug | **DeepSeek** | 深度求索 | 最了解项目，亲自修（带 TDD） |
 
-> **写代码的活只交给 codebuddy**（腾讯的 agent 壳，能精细锁权限），qwen/kimi/hy3/glm 只当"只读评审员"。
+> **核心原则：谁都不批自己。** 找 bug 的不判真假，判真假的不找 bug，修 bug 的（opencode）最了解项目但只负责修。
 
 ---
 
@@ -54,11 +54,10 @@
 
 | 概念 | 大白话 | 类比 |
 |------|--------|------|
-| **B 分身** | opencode 身体里长出的"用施工队脑子"的分身，日常审/改/修 | 工头多长几只手，但每只手用不同脑子 |
-| **A 突击员** | 起一个独立第三方进程，交叉审代码 | 请外面的监理来挑刺，防"自己人串供" |
-| **反向桥（对讲机）** | 施工队写代码时能反过来喊工头拍板 | 工人手里的对讲机，拿不准就喊工头 |
-| **桥闸门** | 对讲机上的锁，工头决定这次发不发 | 门禁锁，默认锁着，需要才开 |
-| **回调** | 施工队拿不准时问工头一次 | 工人喊一声"这块你定" |
+| **找 bug（audit）** | glm+kimi 审代码，报问题清单 | 两个监理一起巡楼，记问题 |
+| **批判员（critic）** | qwen 独立挑毛病，给"第二意见" | 另请的第三方顾问，专挑刺 |
+| **验证审计员（verifier）** | hy3 逐条判"这条是不是真 bug" | 裁判，只判真假、不找新问题 |
+| **B 分身** | opencode 身体里长出的"用施工队脑子"的分身 | 工头多长几只手，每只手用不同脑子 |
 | **job 账本** | 每个任务记一笔账（状态+结果） | 外卖订单系统，能查单、退单 |
 | **真后台** | 任务在后台独立进程跑，关了终端也不断 | 你下单后不用站店门口干等 |
 | **单一数据源** | 脚本/配置只存一份，别处只"指路"不复制 | 原件存保险柜，别处只放快捷方式 |
@@ -71,13 +70,12 @@
 
 | 命令 | 干什么 | 类比 |
 |------|--------|------|
-| `/audit <文件/目录>` | 四施工队并行只读评审 | 四专家会诊 |
+| `/audit <文件/目录>` | glm+kimi 找 bug（记入账本） | 两个监理巡楼 |
 | `/review-kimi <文件>` | 只叫 Kimi 审 | 单医生看诊 |
-| `/review-qwen <文件>` | 只叫 Qwen 审 | 单医生看诊 |
-| `/implement <任务>` | codebuddy 写代码（可回调 opencode，写后不自动合并） | 派施工队写代码 |
-| `/fix <bug>` | codebuddy 修 bug | 派施工队修 bug |
+| `/review-qwen <文件>` | 只叫 Qwen 审（批判员） | 单医生看诊 |
+| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） | 赛后统计 MVP |
 | `/verify` | diff 审查（只发改动区域，省 tokens） | 复查刚改的地方 |
-| `/jobs` | 查任务账本（审计/实现/修复都自动记账） | 看订单列表 |
+| `/jobs` | 查任务账本（审计自动记账） | 看订单列表 |
 | `/result <job-id>` | 看某任务详细结果 | 点进订单看详情 |
 | `/cancel <job-id>` | 取消某任务（真杀进程） | 取消订单 |
 | `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应施工队分身（换脑不换身） | 直接点名某个工人干活 |
@@ -88,21 +86,21 @@
 |------|--------|
 | `pnpm test` | 跑全部测试 + 漂移守卫 |
 | `pnpm test:unit` | 只跑单元测试（不需联网） |
-| `pnpm verify` | 一键重跑 4 评审员 + 双向回调 + 真后台真取消 |
+| `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `pnpm preflight` | 检查 codebuddy 是否就绪 |
-| `node scripts/jobs.mjs --run-audit --file x.js` | 4 施工队并行评审 + 记 1 条账 |
-| `node scripts/jobs.mjs --list` | 查任务账本 |
+| `node scripts/jobs.mjs --run-audit --file x.js` | glm+kimi 找 bug + 记 1 条账 |
+| `node scripts/evaluate-models.mjs [--arbitrate]` | 评估谁找得多、谁找得准 |
 
 ---
 
 ## 五、典型工作流（完整闭环）
 
 ```
-1. 写代码：  /implement 写个排序函数
-            （codebuddy 拿不准算法，回调 opencode 拍板，再继续写完）
-2. 审代码：  /audit 文件   → 四施工队交叉查，出共识+各模型报告
-3. 验证：    /verify       → 只发改动区域，四施工队逐处复查
-4. 查账：    /jobs → /result <id>
+1. 修代码：  opencode 自己改（带 TDD）——最了解项目，最精准
+2. 找 bug：  /audit 文件   → glm+kimi 审，出共识 + 各模型报告
+3. 判真假：  /evaluate --arbitrate → hy3 逐条判 finding 真假
+4. 验证：    /verify       → 只发改动区域复查
+5. 查账：    /jobs → /result <id>
 ```
 
 ---
@@ -111,17 +109,16 @@
 
 | 阶段 | 干了什么 |
 |------|---------|
-| **P0** | 修"脚本漂移"（双份拷贝对不上），建立单一数据源 + 守卫 |
-| **P1** | 上线 4 个 B 分身（opencode 子代理，用各施工队脑子） |
-| **P2a** | preflight 预检（跑任务前先检查 codebuddy 是否就绪） |
-| **Hy3** | 把 Hy3 从免费档切到真模型（腾讯云 TokenHub） |
-| **验证纪律** | 建立"结论≤证据 + 三色置信度 + 台账"的验证规则 |
-| **P3** | 四施工队只读评审（review-runner 参数化 backend） |
-| **P4** | codebuddy 写能力（implement-runner + 安全写 acceptEdits） |
-| **P-verify** | /verify 升级为 diff 审查（只发改动区域，省 tokens） |
-| **P5** | 反向桥（opencode-mcp-bridge + 桥闸门） |
-| **P6** | 双向工作流（implement 带桥，回调 + 统计 + 上限5 + ≥3警告） |
+| **P0** | 修"脚本漂移"，建立单一数据源 + 守卫 |
+| **P1** | 上线 4 个 B 分身（opencode 子代理） |
+| **P2a** | preflight 预检 |
+| **Hy3** | 把 Hy3 切到真模型（腾讯云 TokenHub） |
+| **验证纪律** | 建立"结论≤证据 + 三色置信度 + 台账" |
+| **P3** | 施工队只读评审（review-runner 参数化 backend） |
+| **P-verify** | /verify 升级为 diff 审查 |
 | **job 状态** | 任务账本 + 命令面 + 真后台 + 真取消 |
+| **P0补强** | 抽 runner-core、写锁 cwd 隔离、账本打通、模型 ID 统一、权重接线 |
+| **角色重构** | 4 模型 4 角色：找 bug(glm+kimi) / 批判员(qwen+沙箱) / 验证审计员(hy3) / 修 bug(opencode)，废弃 codebuddy 写路径 |
 
 ---
 
@@ -133,18 +130,16 @@
 4. **代理 ≠ 目标**：测 echo 只证明 echo 通，不能推出 opencode 往返通。
 5. **三色置信度**：🟢 实测通过 / 🟡 机制或部分 / 🔴 未验证。汇报只能按色说。
 
-**验证台账**：`docs/verification.md` 记录了 27 条验证结论，每条都有"证据 + 置信度"。汇报"已验证"必须能在台账里找到对应行。
+**验证台账**：`docs/verification.md` 记录每条结论的"证据 + 置信度"。汇报"已验证"必须能在台账里找到对应行。
 
 ---
 
 ## 八、安全底线（重要）
 
-1. **写后不自动合并**：`/implement` `/fix` 写的改动只留工作区，`git diff` 审、`git checkout` 回退，绝不自动 commit。
-2. **施工队不能乱跑命令**：codebuddy 写代码用 `bypassPermissions + 禁 Bash`，能改文件、能回调、不能执行任意 shell 命令。
-3. **qwen/kimi 只读 + 硬隔离**：它们的子进程 cwd 被设到临时目录，即使误写也落 temp 而非项目；评审永远只读。
-4. **回调有上限**：最多 5 次，≥3 次会警告你"回调偏多，留意乱回调"。
-5. **⚠️ 反向桥是权限放大通道**：codebuddy 禁了 Bash，但能通过对讲机让 opencode（高权限）代劳。现有缓解是"闸门默认关 + 上限 5 + 边界声明"，属**软缓解、无硬隔离**（台账 🟡）。
-6. **⚠️ 写代码 agent 能联网**：codebuddy（glm-5.2）是模型级原生联网，工具级 `--disallowedTools WebFetch` 也拦不住（台账 🔴），只读 fetch，风险较低但要知道。
+1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy3）互相独立，判真假的人不找 bug。
+2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi/qwen 子进程 cwd 设到临时目录，误写也落 temp 而非项目。
+3. **修 bug 只由 opencode**：它最了解项目、带 TDD，写后不自动合并，`git diff` 审、`git checkout` 回退。
+4. **⚠️ 验证审计员 hy3 的判断是 LLM 判断**：`/evaluate` 的 precision = "hy3 判定为真的比例"，不是客观准确率，报告会如实标注。
 
 ---
 
@@ -152,10 +147,10 @@
 
 | 依赖 | 用途 |
 |------|------|
-| opencode | 总指挥（宿主） |
-| CodeBuddy CLI | A 突击员网关 + 写代码的 agent 壳 |
+| opencode | 总指挥 + 修 bug（宿主） |
+| CodeBuddy CLI | glm/hy3 的网关（找 bug + 验证审计员） |
 | kimi CLI / qwen CLI | 独立评审壳 |
-| `DASHSCOPE_API_KEY` | 阿里百炼，一个 key 通吃 Qwen+GLM+Kimi |
+| `DASHSCOPE_API_KEY` | 阿里百炼，通吃 Qwen + GLM + Kimi |
 | `TOKENHUB_API_KEY` | 腾讯云 TokenHub，Hy3 真模型 |
 | `MOONSHOT_API_KEY` | Kimi（可选，备用） |
 
@@ -164,17 +159,18 @@
 ## 十、常用路径速查
 
 ```
-scripts/review-runner.mjs      只读评审（参数化 backend）
-scripts/implement-runner.mjs   写代码（bridge 模式）
-scripts/opencode-mcp-bridge.mjs 反向桥（对讲机）
-scripts/jobs.mjs               任务账本
-scripts/guard.mjs              漂移守卫
-scripts/backends.mjs           backend 定义（codebuddy/kimi/qwen）
-.opencode/agents/*.md          4 个 B 分身子代理
-.opencode/skills/cc-review/    评审技能 + 权重
-docs/verification.md           验证台账
+scripts/review-runner.mjs       只读评审（参数化 backend）
+scripts/evaluate-models.mjs     finding 归一化/共识/裁决/多维度评估
+scripts/models.mjs              4 施工队单一数据源 + 角色常量
+scripts/runner-core.mjs         共享 spawn 原语
+scripts/jobs.mjs                任务账本
+scripts/guard.mjs               漂移守卫
+scripts/backends.mjs            backend 定义（codebuddy/kimi/qwen）
+.opencode/agents/*.md           4 个 B 分身子代理
+.opencode/skills/cc-review/     评审技能 + 权重
+docs/verification.md            验证台账
 ```
 
 ---
 
-*最后更新：2026-08-13。146 个测试全绿，台账 27 条验证结论。*
+*最后更新：2026-08-14。角色重构完成：找 bug(glm+kimi) / 批判员(qwen) / 验证审计员(hy3) / 修 bug(opencode)。*

@@ -140,14 +140,6 @@ describe("parseArgs", () => {
     });
   });
 
-  it("parses --run-implement with model and task", () => {
-    assert.deepEqual(parseArgs(["--run-implement", "--model", "glm-5.2", "--task", "做X"]), {
-      action: "run-implement",
-      model: "glm-5.2",
-      task: "做X",
-    });
-  });
-
   it("parses --worker-sleep with job-id and ms", () => {
     assert.deepEqual(parseArgs(["--worker-sleep", "--job-id", "j1", "--ms", "60000"]), {
       action: "worker-sleep",
@@ -166,13 +158,6 @@ describe("parseArgs", () => {
 
   it("parses --run-audit with file", () => {
     assert.deepEqual(parseArgs(["--run-audit", "--file", "x.js"]), { action: "run-audit", file: "x.js" });
-  });
-
-  it("parses --run-implement with bridge and timeout", () => {
-    assert.deepEqual(
-      parseArgs(["--run-implement", "--model", "glm-5.2", "--task", "做X", "--bridge", "--timeout", "300000"]),
-      { action: "run-implement", model: "glm-5.2", task: "做X", bridge: true, timeout: 300000 }
-    );
   });
 });
 
@@ -194,14 +179,6 @@ describe("buildMeta", () => {
       type: "review",
       model: "glm-5.2",
       task: "x.js",
-    });
-  });
-
-  it("builds implement meta from run-implement", () => {
-    assert.deepEqual(buildMeta({ action: "run-implement", model: "glm-5.2", task: "做X" }), {
-      type: "implement",
-      model: "glm-5.2",
-      task: "做X",
     });
   });
 });
@@ -277,17 +254,15 @@ describe("spawnWorker", () => {
     assert.ok(captured.includes("60000"));
   });
 
-  it("passes --bridge and --dir through for worker-audit/implement", () => {
+  it("passes --dir and --diff through for worker-audit", () => {
     let captured = null;
     spawnWorker(
-      { action: "worker-implement", jobId: "j", bridge: true, dir: "src", timeout: 300000 },
+      { action: "worker-audit", jobId: "j", dir: "src", diff: true },
       { spawn: (c, a) => { captured = a; return { unref() {}, pid: 1 }; } }
     );
-    assert.ok(captured.includes("--bridge"));
     assert.ok(captured.includes("--dir"));
     assert.ok(captured.includes("src"));
-    assert.ok(captured.includes("--timeout"));
-    assert.ok(captured.includes("300000"));
+    assert.ok(captured.includes("--diff"));
   });
 });
 
@@ -324,15 +299,15 @@ describe("parseArgs background and worker", () => {
 });
 
 describe("runAudit", () => {
-  it("runs all 4 workers and aggregates results", async () => {
+  it("runs only find-bug workers (glm + kimi) and aggregates results", async () => {
     const calls = [];
     const review = async ({ model, backend }) => {
       calls.push({ model, backend });
       return { success: true, severity: "low", issues: [], summary: `ok ${model}` };
     };
     const result = await runAudit({ file: "x.js", review });
-    assert.equal(calls.length, 4);
-    assert.equal(result.workers.length, 4);
+    assert.equal(calls.length, 2);
+    assert.equal(result.workers.length, 2);
     assert.deepEqual(
       result.workers.map((w) => w.model),
       AUDIT_WORKERS.map((w) => w.model)
@@ -341,14 +316,14 @@ describe("runAudit", () => {
 
   it("captures a failing worker without rejecting", async () => {
     const review = async ({ model }) => {
-      if (model === "hy3") throw new Error("hy3 down");
+      if (model === "kimi-k2.7-code") throw new Error("kimi down");
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
     const result = await runAudit({ file: "x.js", review });
-    const hy3 = result.workers.find((w) => w.model === "hy3");
-    assert.equal(hy3.success, false);
-    assert.ok(hy3.error.includes("hy3 down"));
-    assert.equal(result.workers.filter((w) => w.success).length, 3);
+    const kimi = result.workers.find((w) => w.model === "kimi-k2.7-code");
+    assert.equal(kimi.success, false);
+    assert.ok(kimi.error.includes("kimi down"));
+    assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
 });
 

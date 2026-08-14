@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { WORKERS, MODEL_ALIASES, canonicalModel, isWorkerModel } from "./models.mjs";
+import { WORKERS, MODEL_ALIASES, canonicalModel, isWorkerModel, FIND_BUG_WORKERS, CRITIC_MODEL, VERIFIER_MODEL } from "./models.mjs";
 
 describe("WORKERS", () => {
   it("defines exactly 4 workers with correct backends and models", () => {
@@ -39,6 +39,34 @@ describe("isWorkerModel", () => {
   it("rejects non-worker models", () => {
     assert.equal(isWorkerModel("deepseek-v4-pro"), false);
     assert.equal(isWorkerModel("custom-local:qwen-coder-plus"), false);
+  });
+});
+
+describe("role constants", () => {
+  it("defines find-bug workers as glm + kimi", () => {
+    assert.deepEqual(
+      FIND_BUG_WORKERS.map((w) => `${w.backend}/${w.model}`),
+      ["codebuddy/glm-5.2", "kimi/kimi-k2.7-code"]
+    );
+  });
+
+  it("defines critic and verifier models", () => {
+    assert.equal(CRITIC_MODEL, "qwen3-coder-plus");
+    assert.equal(VERIFIER_MODEL, "hy3");
+  });
+
+  it("keeps roles mutually exclusive", () => {
+    const findModels = FIND_BUG_WORKERS.map((w) => w.model);
+    assert.ok(!findModels.includes(CRITIC_MODEL), "critic should not also be a find-bug worker");
+    assert.ok(!findModels.includes(VERIFIER_MODEL), "verifier should not also be a find-bug worker");
+    assert.notEqual(CRITIC_MODEL, VERIFIER_MODEL, "critic and verifier must differ");
+  });
+
+  it("find-bug workers are a subset of WORKERS", () => {
+    const workerKeys = new Set(WORKERS.map((w) => `${w.backend}/${w.model}`));
+    for (const w of FIND_BUG_WORKERS) {
+      assert.ok(workerKeys.has(`${w.backend}/${w.model}`), `${w.model} should be in WORKERS`);
+    }
   });
 });
 

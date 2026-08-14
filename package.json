@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "zsh -c 'source ~/.zshrc && node --test scripts/runner-core.test.mjs scripts/models.test.mjs scripts/review-runner.test.mjs scripts/backends.test.mjs scripts/implement-runner.test.mjs scripts/opencode-mcp-bridge.test.mjs scripts/jobs.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs .opencode/skills/cc-review/audit-logger.test.mjs .opencode/skills/cc-review/prompt-builder.test.mjs .opencode/skills/cc-review/weight-analyzer.test.mjs .opencode/skills/cc-review/weekly-sync.test.mjs .opencode/skills/cc-review/weights-validator.test.mjs && node scripts/guard.mjs'",
-    "test:unit": "node --test scripts/runner-core.test.mjs scripts/models.test.mjs scripts/review-runner.test.mjs scripts/backends.test.mjs scripts/implement-runner.test.mjs scripts/opencode-mcp-bridge.test.mjs scripts/jobs.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs .opencode/skills/cc-review/audit-logger.test.mjs .opencode/skills/cc-review/prompt-builder.test.mjs .opencode/skills/cc-review/weight-analyzer.test.mjs .opencode/skills/cc-review/weekly-sync.test.mjs .opencode/skills/cc-review/weights-validator.test.mjs && node scripts/guard.mjs",
+    "test": "zsh -c 'source ~/.zshrc && node --test scripts/runner-core.test.mjs scripts/models.test.mjs scripts/evaluate-models.test.mjs scripts/review-runner.test.mjs scripts/backends.test.mjs scripts/jobs.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs .opencode/skills/cc-review/audit-logger.test.mjs .opencode/skills/cc-review/prompt-builder.test.mjs .opencode/skills/cc-review/weight-analyzer.test.mjs .opencode/skills/cc-review/weekly-sync.test.mjs .opencode/skills/cc-review/weights-validator.test.mjs && node scripts/guard.mjs'",
+    "test:unit": "node --test scripts/runner-core.test.mjs scripts/models.test.mjs scripts/evaluate-models.test.mjs scripts/review-runner.test.mjs scripts/backends.test.mjs scripts/jobs.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs .opencode/skills/cc-review/audit-logger.test.mjs .opencode/skills/cc-review/prompt-builder.test.mjs .opencode/skills/cc-review/weight-analyzer.test.mjs .opencode/skills/cc-review/weekly-sync.test.mjs .opencode/skills/cc-review/weights-validator.test.mjs && node scripts/guard.mjs",
     "test:e2e": "zsh -c 'source ~/.zshrc && node --test scripts/review-e2e.test.mjs'",
     "guard": "node scripts/guard.mjs",
     "preflight": "node scripts/preflight.mjs",
-    "verify": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs && node scripts/verify/verify-bridge.mjs && node scripts/verify/verify-background.mjs'"
+    "verify": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs && node scripts/verify/verify-background.mjs'"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

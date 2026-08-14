@@ -17,7 +17,7 @@ export function buildCommand(backend, { model, prompt }) {
     case "qwen":
       return {
         command: "qwen",
-        args: ["-p", prompt],
+        args: ["--sandbox", "-p", prompt],
         stdin: null,
       };
     default:

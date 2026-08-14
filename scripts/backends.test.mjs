@@ -17,10 +17,11 @@ describe("buildCommand", () => {
     assert.equal(cmd.stdin, null);
   });
 
-  it("qwen passes prompt via -p argument, no stdin", () => {
+  it("qwen passes prompt via -p with --sandbox, no stdin, no -y", () => {
     const cmd = buildCommand("qwen", { model: "qwen3-coder-plus", prompt: "review this" });
     assert.equal(cmd.command, "qwen");
-    assert.deepEqual(cmd.args, ["-p", "review this"]);
+    assert.deepEqual(cmd.args, ["--sandbox", "-p", "review this"]);
+    assert.ok(!cmd.args.includes("-y"), "qwen must stay read-only (no -y)");
     assert.equal(cmd.stdin, null);
   });
 

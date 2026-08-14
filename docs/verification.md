@@ -49,8 +49,13 @@
 | /audit 记入账本（--run-audit） | `jobs.mjs --run-audit --file` 4 模型并行 + 聚合 1 条 job；实测冒烟 4 worker 均 success | 🟢 | 2026-08-14 |
 | /implement 记入账本（--run-implement --bridge） | `jobs.mjs --run-implement` 支持 --bridge/--timeout，实测冒烟记账 completed | 🟢 | 2026-08-14 |
 | B 分身命令（/b-qwen /b-glm /b-kimi /b-hy3） | 4 个薄命令派活给对应 subagent | 🟡（命令已建，待人工跑一次验证派活） | 2026-08-14 |
-| 反向桥 = 权限放大通道（已知风险） | codebuddy 禁了 Bash，但能经 `delegate_to_opencode` 让 opencode（高权限）代劳；现有缓解：桥闸门默认关 + 上限 5 + 边界声明 + 回调记录，**无硬隔离** | 🟡（软缓解，硬隔离未做） | 2026-08-14 |
+| 反向桥 = 权限放大通道（已知风险） | codebuddy 禁了 Bash，但能经 `delegate_to_opencode` 让 opencode（高权限）代劳；现有缓解：桥闸门默认关 + 上限 5 + 边界声明 + 回调记录，**无硬隔离** | 🟡（软缓解，硬隔离未做；⚠️ 角色重构后已删除反向桥） | 2026-08-14 |
+| 角色重构：4 模型 4 角色 | 找 bug=glm+kimi、批判员=qwen、验证审计员=hy3、修 bug=opencode；`models.mjs` 角色常量 + 互斥单测 | 🟢 | 2026-08-14 |
+| 找 bug 精简（4→2） | `runAudit` 用 FIND_BUG_WORKERS（glm+kimi），单测 mock 断言只调 2 次 | 🟢 | 2026-08-14 |
+| qwen 批判员 --sandbox 不破坏评审 | `backends.mjs` qwen 加 `--sandbox`（不传 -y 保持只读）；实测评审 13.7s 出正常 JSON | 🟢 | 2026-08-14 |
+| 验证审计员 hy3 裁决 | `evaluate-models.mjs`：finding 归一化/相似度(Dice)/共识分类/裁决(hy3)/多维度聚合；26 单测 | 🟢 | 2026-08-14 |
+| 废弃 /implement /fix + 反向桥 | 命令+代码全删（implement-runner/opencode-mcp-bridge/bridge-config/verify-bridge），jobs.mjs 移除 implement 路径，249 单测 + guard 绿 | 🟢 | 2026-08-14 |
 
-> 说明：上述评审结论已固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-bridge.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 双向回调 + 真后台真取消。
+> 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
-> 写能力分工（已落地 P4）：qwen / kimi 只做**只读评审**；写代码 / 实现 / 修复走 **codebuddy**（`acceptEdits` = 能写文件、拦 Bash，是"安全写"）。写后不自动合并。qwen / kimi 若要开写，需先上 OS 级沙箱（`sandbox-exec`）硬隔离。
+> 写能力分工（角色重构后）：**修 bug 只由 opencode（总指挥）亲自做**（最了解项目 + TDD）。施工队（glm/kimi/qwen/hy3）全部只读——找 bug / 批判 / 验证。写后不自动合并。

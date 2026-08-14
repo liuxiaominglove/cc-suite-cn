@@ -1,13 +1,13 @@
 # CC-Suite PE
 
-Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥). Four worker models serve as **B-分身** subagents (daily review/fix/implement), while `/audit` additionally dispatches **A-突击员** (independent external reviews via CodeBuddy CLI). Different models have different training data, so they catch different classes of bugs.
+Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥) and the fixer (修 bug). Four worker models each play a distinct role: glm+kimi **找 bug**（audit）, qwen **批判员**（critic）, hy3 **验证审计员**（verifier）. Different models have different training data, so they catch different classes of bugs.
 
 > 给人看的大白话总览见 **`README.md`**；本文是给 AI/opencode 看的机器指令（保持精简，大白话解释放 README）。
 
 ## Architecture
 
 ```
-opencode (DeepSeek V4 Pro)  →  总指挥（唯一发起方、最终拍板方）
+opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终拍板方、亲自修）
   │
   ├─ B 分身（日常 · opencode 子代理，换脑不换身）
   │    ├─ qwen  → alibaba-cn/qwen3-coder-plus
@@ -15,21 +15,19 @@ opencode (DeepSeek V4 Pro)  →  总指挥（唯一发起方、最终拍板方�
   │    ├─ kimi  → alibaba-cn/kimi-k2.6
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
-  └─ A 突击员（独立第三方 · 只读评审 + 写能力）
-       ├─ scripts/review-runner.mjs（参数化 backend，只读评审）
-       │    ├─ codebuddy → glm-5.2 / hy3
-       │    ├─ kimi      → kimi-k2.7-code（独立壳）
-       │    └─ qwen      → qwen3-coder-plus（独立壳，只读）
-       └─ scripts/implement-runner.mjs（写代码，仅 codebuddy，acceptEdits）
-                                    ↓
-                          Unified comparison report
+  └─ 施工队（独立第三方 · 只读）
+       ├─ 找 bug (audit):     glm + kimi（scripts/review-runner.mjs，参数化 backend）
+       ├─ 批判员 (critic):    qwen（只读 + --sandbox）
+       └─ 验证审计员 (verifier): hy3（scripts/evaluate-models.mjs，裁决 finding 真假）
 ```
 
-- **opencode**: 总指挥 — interactive coding assistant (DeepSeek V4 Pro) and orchestrator
+- **opencode**: 总指挥 + 修 bug — interactive coding assistant (DeepSeek V4 Pro)
 - **B 分身** (`.opencode/agents/*.md`): opencode 子代理，用各自模型的大脑做日常审/改/修
-- **A 突击员** (`/audit`): 通过 CodeBuddy CLI 起独立第三方进程，做对抗性审查
+- **找 bug** (`/audit`): glm + kimi 只读评审，产出 finding
+- **批判员** (`/review-qwen`): qwen 独立第二意见（只读 + `--sandbox`）
+- **验证审计员** (`/evaluate`): hy3 逐条裁决 finding 真假，聚合"谁找得多、谁找得准"
 - **review-runner.mjs**: 只读评审（参数化 backend，超时/错误/JSON 解析/结果聚合）
-- **implement-runner.mjs**: 写代码（仅 codebuddy，`acceptEdits` = 能写文件、拦 Bash；写后不自动合并）
+- **evaluate-models.mjs**: finding 归一化/共识分类/裁决/多维度评估
 - **cc-review skill**: Defines the review workflow (`~/.config/opencode/skills/cc-review/SKILL.md`)
 
 ## Prerequisites
@@ -61,11 +59,10 @@ export DASHSCOPE_API_KEY=your-aliyun-dashscope-key
 | `pnpm test` | Run full test suite (loads env from `~/.zshrc`) |
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
-| `pnpm verify` | 一键重跑 4 评审员只读 + 双向回调 + 真后台真取消 |
-| `/audit <path>` | 四施工队并行只读评审（`--run-audit`，记入任务账本） |
-| `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机） |
-| `/implement <task>` | codebuddy 实现功能/写代码（写后不自动合并，可回调，记账本） |
-| `/fix <bug>` | codebuddy 修复 bug（写后不自动合并，记账本） |
+| `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本） |
+| `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
+| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
 | `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
 | `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身 subagent（task 工具） |
@@ -94,7 +91,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 
 The global rule `~/.config/opencode/rules/verification-discipline.md` applies everywhere. This section defines its project-specific instantiation:
 
-- **能力动词清单**: 审 / 改 / 修 / 反向往返 —— 每个动词都要有独立的 🟢 证据，缺一个不许说满。
+- **能力动词清单**: 审 / 改 / 修 —— 每个动词都要有独立的 🟢 证据，缺一个不许说满。
 - **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
 - **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。P3 之后固化真实往返/锁写/负向三个验证。
@@ -117,10 +114,10 @@ Scripts, weights, and skill assets live in **one** canonical location — this g
 | `AGENTS.md` | This file — project conventions and instructions |
 | `~/.config/opencode/commands/audit.md` | Global `/audit` command (thin pointer to this repo) |
 | `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
-| `scripts/implement-runner.mjs` | 写代码 runner（codebuddy，桥回调，写后不合并） |
+| `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
-| `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 模型别名 canonicalModel） |
-| `scripts/jobs.mjs` | 任务账本（run-audit/run-implement/后台/取消） |
+| `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 角色常量 FIND_BUG_WORKERS/CRITIC/VERIFIER + canonicalModel） |
+| `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill + weights |
