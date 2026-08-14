@@ -1,125 +1,55 @@
 ---
 name: cc-review
-description: Multi-model code review — delegates to GLM-5.2, Hy3, Kimi, Qwen via CodeBuddy and their own CLIs, compares findings, and presents a unified report
+description: Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review-qwen, /evaluate, /fix, /verify.
 scope: global
 ---
 
 ## What I Do
 
-I run code reviews using **four worker models** — GLM-5.2, Hy3 (via CodeBuddy gateway), Kimi, Qwen (via their own CLIs) — to get independent perspectives on the same code. Since each model has different training data, they catch different classes of bugs — what one misses, the others often find.
+I orchestrate a **four-role code review** across multiple models, each with a distinct job (谁都不批自己):
+
+| 角色 | 模型 | 干什么 | 入口 |
+|------|------|--------|------|
+| 找 bug | glm-5.2 + kimi-k2.7-code | 只读评审，产出 finding | `/audit`（`--run-audit`） |
+| 批判员 | qwen3-coder-plus | 独立第二意见（只读 + `--sandbox`） | `/review-qwen` |
+| 验证审计员 | hy3 | 逐条裁决 finding 真假 | `/evaluate --arbitrate` |
+| 修 bug | opencode（总指挥） | TDD 修 bug | `/fix` |
+
+Different models have different training data, so they catch different classes of bugs — what one misses, the others often find.
 
 ## When to Use Me
 
 Load this skill when the user:
-- Types `/audit` or `/review`
-- Says "审查这段代码", "review this code", "帮我找bug", "检查一下"
-- Mentions a specific file they want reviewed
-- Asks "这个代码有没有问题" or similar
+- Types `/audit`, `/audit-full`, `/review`, `/review-qwen`, `/evaluate`, `/fix`, `/verify`
+- Says "审查这段代码", "review this code", "帮我找 bug", "检查一下"
 
 ## How I Work
 
-1. Identify the target file(s) from the user's request
-2. Read the code from those files
-3. Generate a **weighted review prompt** per model based on its strengths:
-   - Read `/Users/liuxiaoming/project/cc-suite-pe/.opencode/skills/cc-review/weights.json`
-   - Each capability has a `weight` (0.0–1.0) converted to effort units (weight × 100)
-   - Each capability has a `depth` that controls how thorough the check is
-   - Prompts are generated using effort-unit allocation (e.g., "80 units → Security")
-   - If weights.json is missing, fall back to a balanced default prompt
-4. Run `node /Users/liuxiaoming/project/cc-suite-pe/scripts/review-runner.mjs` **four times in parallel** (each reviewer is read-only):
-   - `--backend codebuddy --model glm-5.2 --prompt "<weighted GLM prompt>" [--allow-external]`
-   - `--backend codebuddy --model hy3 --prompt "<weighted Hy3 prompt>" [--allow-external]`
-   - `--backend kimi --model kimi-k2.7-code --prompt "<weighted Kimi prompt>" [--allow-external]`
-   - `--backend qwen --model qwen3-coder-plus --prompt "<weighted Qwen prompt>" [--allow-external]`
-   (Add `--allow-external` only when the file is outside the cc-suite-pe project directory)
-5. Collect results from all four. If one model times out or errors, still present the others' results with a note about what happened.
-6. Log results to `/Users/liuxiaoming/project/cc-suite-pe/.opencode/skills/cc-review/audit-log.json` for future weight analysis.
-7. Present a unified report:
-
-```
-## Multi-Model Review Report
-
-### Consensus (≥2 models agree)
-- issue 1
-
-### Per-model findings
-- [glm-5.2] issue 2
-- [hy3] issue 3
-- [kimi] issue 4
-- [qwen] issue 5
-```
-
-8. If all models return empty results, state that clearly. Do not fabricate issues.
-
-<example>
-  User: "/audit src/auth.ts"
-  
-  Assistant:
-  ## Multi-Model Review Report: `src/auth.ts`
-
-  ### Consensus (both models agree)
-  - `login()` function missing rate limiting (line 45)
-
-  ### GLM-5.2 found (Qwen missed)
-  - Password hash not using constant-time comparison (line 62)
-
-  ### Qwen Coder Plus found (GLM-5.2 missed)
-  - JWT token missing expiration check (line 78)
-</example>
-
-<example>
-  User: "/review scripts/review-runner.mjs"
-  
-  Assistant:
-  ## Multi-Model Review Report: `scripts/review-runner.mjs`
-
-  ### Consensus (both models agree)
-  - `--file` parameter lacks path validation
-  - JSON parsing silently swallows errors
-
-  ### GLM-5.2 found (Qwen missed)
-  - Argument injection via unvalidated `model` parameter (line 109)
-  - Symlink-based path traversal bypass (line 97)
-</example>
-
-<example>
-  User: "/audit src/"
-  
-  Assistant:
-  Scanning src/ for changed files...
-  Reviewing: src/utils.ts, src/api.ts
-  
-  ## Multi-Model Review Report: `src/utils.ts`
-  ...
-  
-  ## Multi-Model Review Report: `src/api.ts`
-  ...
-</example>
-
-## Weight System
-
-Each model's review prompt is generated dynamically from `weights.json`. The effort-unit format (e.g., `80 units → Security`) tells the AI to allocate review effort proportionally.
-
-- **depth**: `deep` ("examine every line"), `standard` ("focus on common patterns"), `light` ("quick scan")
-- **weight**: `0.0–1.0` — higher value = more effort units in the prompt
-
-Both models review ALL capabilities, but spend more effort on their weighted strengths.
-
-## Weekly Weight Review
-
-Weights are adjusted weekly via a review-and-approval cycle:
-
-1. **`/weight-review`** — analyzes last week's audit data, generates an adjustment proposal with evidence for each change
-2. **Wait for user approval** — never apply changes without explicit confirmation
-3. Apply approved changes to `weights.json`
-
-If weights have not been reviewed in 7+ days, remind the user at the start of the next `/audit` session.
+1. Identify target file(s) from the request.
+2. Run the find-bug workers (glm + kimi, read-only, parameterized backend) via:
+   `node scripts/jobs.mjs --run-audit --file <path>` (记入任务账本 + audit-log)
+   - Large files (>800 lines) are auto-chunked (`chunkCode` + `offsetFindings`).
+   - The被审项目's `AGENTS.md` / `CLAUDE.md` rules are injected into the review prompt (project-specific rules avoid false positives).
+   - Transient failures auto-retry; worker OK/FAIL is shown in the summary.
+3. Optionally get a second opinion: `/review-qwen` (critic, read-only + sandbox).
+4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false and computes per-model precision.
+5. Fix real bugs: `/fix` — opencode fixes with TDD (RED → GREEN → REFACTOR), never commits automatically.
+6. Verify: `/verify` — review `git diff HEAD`.
 
 ## Critical Rules
 
-- Generate **weighted prompts per model** — each model gets a prompt tailored to its strengths
-- Run all four reviews **in parallel** — they are independent
-- If one model fails, **still show the others' results** + a timeout/failure note
-- Do not add your own review opinions. Your job is comparing and presenting, not auditing
-- Log every audit result to `audit-log.json` for cumulative weight analysis
-- **Never adjust weights without user approval** — always present the proposal with evidence and wait for confirmation
+- **谁都不批自己**: 找 bug / 批判 / 裁决 / 修 bug 是四个独立角色，修 bug 只由 opencode（最了解项目 + TDD）亲自做。
+- 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
+- 找 bug 的 finding 用英文（`REVIEW_PROMPT` 要求），跨语言共识才能对齐。
+- If one worker fails, still show the others' results + a failure note.
+- If all models return empty, state that clearly. Do not fabricate issues.
+- 汇报「已验证」必须能在 `docs/verification.md` 找到对应行（三色置信度 🟢🟡🔴）。
+
+## Key Scripts (single source of truth in this repo)
+
+- `scripts/review-runner.mjs` — 只读评审（review/reviewFile/chunkCode/offsetFindings/retry/AGENTS.md 注入）
+- `scripts/evaluate-models.mjs` — finding 归一化/共识/去重/裁决/多维评估
+- `scripts/jobs.mjs` — 任务账本 + runAudit + 后台/取消
+- `scripts/models.mjs` — 4 施工队单一数据源（WORKERS / FIND_BUG_WORKERS / CRITIC_MODEL / VERIFIER_MODEL）
+- `scripts/guard.mjs` — drift guard（单一数据源守护）
+- `.opencode/agents/*.md` — B 分身 subagent 定义

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
 
 function fakeExists(present) {
   return (p) => present.has(p);
@@ -111,5 +111,23 @@ describe("runGuard", () => {
     assert.deepEqual(dupes, [COPY_LOCATIONS[1]]);
     assert.ok(missing.includes(".opencode/skills/cc-review/SKILL.md"));
     assert.equal(staleRefs.length, 1);
+  });
+});
+
+describe("findDeadReferences", () => {
+  it("returns [] when SKILL.md only references existing files", () => {
+    const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses review-runner.mjs and evaluate-models.mjs" });
+    const exists = fakeExists(new Set(["/repo/scripts/review-runner.mjs", "/repo/scripts/evaluate-models.mjs"]));
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    assert.deepEqual(problems, []);
+  });
+
+  it("reports references to nonexistent files", () => {
+    const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses weight-analyzer.mjs and weights.json" });
+    const exists = fakeExists(new Set());
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    assert.equal(problems.length, 2);
+    assert.ok(problems.some((p) => p.includes("weight-analyzer.mjs")));
+    assert.ok(problems.some((p) => p.includes("weights.json")));
   });
 });
