@@ -124,6 +124,7 @@
 | **job 状态** | 任务账本 + 命令面 + 真后台 + 真取消 |
 | **P0补强** | 抽 runner-core、写锁 cwd 隔离、账本打通、模型 ID 统一、权重接线 |
 | **角色重构** | 4 模型 4 角色：找 bug(glm+kimi) / 批判员(qwen+沙箱) / 验证审计员(hy3) / 修 bug(opencode)，废弃 codebuddy 写路径 |
+| **体检修复** | NLPM 体检出 13 项 finding 全修（模型 ID 统一 / PATH 劫持 / kimi 只读护栏 / 文档修复）+ kimi 渠道修正（alibaba-cn → moonshotai-cn） |
 
 ---
 
@@ -142,7 +143,7 @@
 ## 八、安全底线（重要）
 
 1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy3）互相独立，判真假的人不找 bug。
-2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi/qwen 子进程 cwd 设到临时目录，误写也落 temp 而非项目。
+2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi 用 `--agent-file`（`disallowedTools` 锁写工具）+ 子进程 cwd 隔离双保险，误写也落 temp 而非项目。
 3. **修 bug 只由 opencode**：它最了解项目、带 TDD，写后不自动合并，`git diff` 审、`git checkout` 回退。
 4. **⚠️ 验证审计员 hy3 的判断是 LLM 判断**：`/evaluate` 的 precision = "hy3 判定为真的比例"，不是客观准确率，报告会如实标注。
 
@@ -164,9 +165,9 @@
 | opencode | 总指挥 + 修 bug（宿主） |
 | CodeBuddy CLI | glm/hy3 的网关（找 bug + 验证审计员） |
 | kimi CLI / qwen CLI | 独立评审壳 |
-| `DASHSCOPE_API_KEY` | 阿里百炼，通吃 Qwen + GLM + Kimi |
+| `DASHSCOPE_API_KEY` | 阿里百炼，通吃 Qwen + GLM |
 | `TOKENHUB_API_KEY` | 腾讯云 TokenHub，Hy3 真模型 |
-| `MOONSHOT_API_KEY` | Kimi（可选，备用） |
+| `MOONSHOT_API_KEY` | 月之暗面 Moonshot，Kimi（走 Moonshot 直连，非阿里） |
 
 ---
 
@@ -187,4 +188,4 @@ docs/verification.md            验证台账
 
 ---
 
-*最后更新：2026-08-14。角色重构完成：找 bug(glm+kimi) / 批判员(qwen) / 验证审计员(hy3) / 修 bug(opencode)。*
+*最后更新：2026-08-15。*
