@@ -28,7 +28,7 @@ describe("模型 ID 一致性（WI-1）", () => {
   it("kimi.md 走 Moonshot 渠道（moonshotai-cn，非 alibaba-cn）", () => {
     const c = readFileSync(join(ROOT, ".opencode/agents/kimi.md"), "utf8");
     assert.match(c, /moonshotai-cn\/kimi-k2\.7-code/, "kimi.md 应走 Moonshot 渠道");
-    assert.doesNotMatch(c, /alibaba-cn\/kimi/, "阿里百炼没有 Kimi，不应走 alibaba-cn");
+    assert.doesNotMatch(c, /alibaba-cn\/kimi/, "B 分身 kimi 保持 Moonshot 直连，不走 alibaba-cn");
   });
 
   it("AGENTS.md 无 kimi-k2.6 残留", () => {

@@ -38,7 +38,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 | CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code` (A 突击员用) |
 | `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，通吃 Qwen + GLM（B 分身） |
 | `CODEBUDDY_API_KEY` | A 突击员走 CodeBuddy 平台账号登录态，无需单独 key |
-| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 的 B 分身（`moonshotai-cn/kimi-k2.7-code`，阿里百炼无 Kimi） |
+| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 的 B 分身（`moonshotai-cn/kimi-k2.7-code`，走 Moonshot 官方直连） |
 | `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 的 B 分身（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
 
 ## Setup
@@ -104,7 +104,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 
 改任何 provider / model / 渠道 / 外部 CLI 参数前，**先交叉验证，先验后写**：
 
-1. **模型归属交叉验证**：看到 `provider/model` 配置，先问"这个 provider 真的提供这个 model 吗？"——模型是哪家公司的，用背景知识对照；配置与常识矛盾时（如 `alibaba-cn/kimi`），主动查证，**不要盲目信任既有配置**。教训：kimi 是月之暗面（Moonshot）的模型，阿里百炼不代理它；`alibaba-cn/` 前缀只代表"走阿里 API 通道"，不代表"模型是阿里的"（阿里代理了 GLM，但没代理 Kimi）。
+1. **模型归属交叉验证**：看到 `provider/model` 配置，先问"这个 provider 真的提供这个 model 吗？"——模型是哪家公司的，用背景知识对照；配置与常识矛盾时，**查官方 API 文档/模型目录（DashScope API 参考、models.dev）交叉验证，不要只信单一来源**。教训：kimi 是月之暗面（Moonshot）的模型，但阿里百炼的 DashScope API 其实也"直供" Kimi（阿里云直供 + 月之暗面直供两种）——而模型广场界面/客服答复可能与 API 文档不一致；"某 provider 有没有某模型"必须以官方 API 文档为准，而不是凭界面、答复或既有配置下结论。`alibaba-cn/` 前缀只代表"走阿里 API 通道"，不代表"模型是阿里的"。
 2. **CLI 参数组合先实测**：给外部 CLI 加参数前，先跑一次最小验证（如 `kimi --plan -p "hi"`），确认参数能组合、不冲突，再写进代码。教训：`kimi --plan` 与 `-p` 冲突（`Cannot combine --prompt with --plan`）。
 3. **改模型必实测加载**：改完 model/渠道，必须派活实测一次（确认 agent 真的能加载、能响应），不能只改文件就收工。
 
