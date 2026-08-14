@@ -26,10 +26,12 @@ describe("buildCommand", () => {
     assert.equal(cmd.stdin, "review this");
   });
 
-  it("kimi 用绝对路径 + --plan 只读护栏，prompt 走 -p，无 stdin", () => {
+  it("kimi 用绝对路径 + --agent-file 只读护栏，prompt 走 -p，无 stdin", () => {
     const cmd = buildCommand("kimi", { model: "kimi-k2.7-code", prompt: "review this" }, { which: WHICH.kimi });
     assert.equal(cmd.command, "/usr/local/bin/kimi");
-    assert.deepEqual(cmd.args, ["--plan", "-p", "review this"]);
+    assert.equal(cmd.args[0], "--agent-file");
+    assert.match(cmd.args[1], /kimi-readonly-agent\.md$/, "应指向只读 agent 定义文件");
+    assert.deepEqual(cmd.args.slice(2), ["-p", "review this"]);
     assert.equal(cmd.stdin, null);
   });
 
