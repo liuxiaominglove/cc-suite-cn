@@ -112,10 +112,10 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 
 ## Single Source of Truth
 
-Scripts, weights, and skill assets live in **one** canonical location — this git repo. The global `~/.config/opencode/` directory must only hold thin pointers that reference this repo; it must never hold its own copy of `review-runner.mjs`, `weights.json`, or `SKILL.md`.
+Scripts and skill assets live in **one** canonical location — this git repo. The global `~/.config/opencode/` directory must only hold thin pointers that reference this repo; it must never hold its own copy of `review-runner.mjs` or `SKILL.md`.
 
 - Canonical scripts: `scripts/` (git repo)
-- Canonical skill + weights: `.opencode/skills/cc-review/` (git repo)
+- Canonical skill: `.opencode/skills/cc-review/` (git repo)
 - Global thin pointers: `~/.config/opencode/commands/audit.md` and `~/.config/opencode/opencode.jsonc` (`skills.paths`) reference the repo paths
 
 `scripts/guard.mjs` enforces this. It fails if it finds duplicate copies under `~/.config/opencode/`, missing canonical files, or stale references in the global config. `pnpm test` runs the guard — keep it green.
@@ -133,6 +133,6 @@ Scripts, weights, and skill assets live in **one** canonical location — this g
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
-| `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill + weights |
+| `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
 | `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
 | `~/.codebuddy/models.json` | Model endpoint configuration (DeepSeek, Qwen) |

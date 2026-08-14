@@ -8,13 +8,11 @@ const HOME = homedir();
 
 export const CANONICAL_FILES = [
   "scripts/review-runner.mjs",
-  ".opencode/skills/cc-review/weights.json",
   ".opencode/skills/cc-review/SKILL.md",
 ];
 
 export const COPY_LOCATIONS = [
   join(HOME, ".config/opencode/scripts/cc-review/review-runner.mjs"),
-  join(HOME, ".config/opencode/scripts/cc-review/weights.json"),
   join(HOME, ".config/opencode/scripts/cc-review/audit-log.json"),
   join(HOME, ".config/opencode/skills/cc-review/SKILL.md"),
 ];

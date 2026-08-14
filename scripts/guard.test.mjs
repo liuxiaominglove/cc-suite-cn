@@ -21,19 +21,19 @@ describe("findDuplicateCopies", () => {
     assert.deepEqual(findDuplicateCopies(COPY_LOCATIONS, exists), [COPY_LOCATIONS[0]]);
   });
 
-  it("detects a weights copy", () => {
+  it("detects an audit-log copy", () => {
     const exists = fakeExists(new Set([COPY_LOCATIONS[1]]));
     assert.deepEqual(findDuplicateCopies(COPY_LOCATIONS, exists), [COPY_LOCATIONS[1]]);
   });
 
   it("detects a SKILL copy", () => {
-    const exists = fakeExists(new Set([COPY_LOCATIONS[3]]));
-    assert.deepEqual(findDuplicateCopies(COPY_LOCATIONS, exists), [COPY_LOCATIONS[3]]);
+    const exists = fakeExists(new Set([COPY_LOCATIONS[2]]));
+    assert.deepEqual(findDuplicateCopies(COPY_LOCATIONS, exists), [COPY_LOCATIONS[2]]);
   });
 
   it("COPY_LOCATIONS targets the global ~/.config/opencode copies", () => {
     assert.ok(COPY_LOCATIONS.some((p) => p.endsWith(".config/opencode/scripts/cc-review/review-runner.mjs")));
-    assert.ok(COPY_LOCATIONS.some((p) => p.endsWith(".config/opencode/scripts/cc-review/weights.json")));
+    assert.ok(COPY_LOCATIONS.some((p) => p.endsWith(".config/opencode/scripts/cc-review/audit-log.json")));
     assert.ok(COPY_LOCATIONS.some((p) => p.endsWith(".config/opencode/skills/cc-review/SKILL.md")));
   });
 });
@@ -49,7 +49,6 @@ describe("findMissingCanonical", () => {
     const present = new Set(["/repo/scripts/review-runner.mjs"]);
     const exists = fakeExists(present);
     const missing = findMissingCanonical(CANONICAL_FILES, exists, "/repo");
-    assert.ok(missing.includes(".opencode/skills/cc-review/weights.json"));
     assert.ok(missing.includes(".opencode/skills/cc-review/SKILL.md"));
   });
 });
@@ -100,7 +99,7 @@ describe("runGuard", () => {
   it("returns duplicate, missing, and stale problems together", () => {
     const present = new Set(["/repo/scripts/review-runner.mjs", COPY_LOCATIONS[1]]);
     const exists = fakeExists(present);
-    const read = fakeRead({ "audit.md": "~/.config/opencode/scripts/cc-review/weights.json" });
+    const read = fakeRead({ "audit.md": "~/.config/opencode/scripts/cc-review/audit-log.json" });
     const { dupes, missing, staleRefs } = runGuard({
       copies: COPY_LOCATIONS,
       canonicals: CANONICAL_FILES,
@@ -110,7 +109,7 @@ describe("runGuard", () => {
       root: "/repo",
     });
     assert.deepEqual(dupes, [COPY_LOCATIONS[1]]);
-    assert.ok(missing.includes(".opencode/skills/cc-review/weights.json"));
+    assert.ok(missing.includes(".opencode/skills/cc-review/SKILL.md"));
     assert.equal(staleRefs.length, 1);
   });
 });

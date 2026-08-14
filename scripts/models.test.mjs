@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { WORKERS, MODEL_ALIASES, canonicalModel, isWorkerModel, FIND_BUG_WORKERS, CRITIC_MODEL, VERIFIER_MODEL } from "./models.mjs";
 
 describe("WORKERS", () => {
@@ -66,24 +65,6 @@ describe("role constants", () => {
     const workerKeys = new Set(WORKERS.map((w) => `${w.backend}/${w.model}`));
     for (const w of FIND_BUG_WORKERS) {
       assert.ok(workerKeys.has(`${w.backend}/${w.model}`), `${w.model} should be in WORKERS`);
-    }
-  });
-});
-
-describe("weights.json consistency", () => {
-  it("every model key canonicalizes to a worker model", async () => {
-    const raw = await readFile("./.opencode/skills/cc-review/weights.json", "utf-8");
-    const weights = JSON.parse(raw);
-    for (const modelId of Object.keys(weights.models)) {
-      assert.equal(isWorkerModel(canonicalModel(modelId)), true, `weights.json key "${modelId}" is not a known worker model`);
-    }
-  });
-
-  it("contains no legacy alias keys (all keys must be canonical)", async () => {
-    const raw = await readFile("./.opencode/skills/cc-review/weights.json", "utf-8");
-    const weights = JSON.parse(raw);
-    for (const modelId of Object.keys(weights.models)) {
-      assert.equal(canonicalModel(modelId), modelId, `weights.json key "${modelId}" is a legacy alias — rename to "${canonicalModel(modelId)}"`);
     }
   });
 });
