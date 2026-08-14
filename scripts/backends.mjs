@@ -11,7 +11,7 @@ export function buildCommand(backend, { model, prompt }) {
     case "kimi":
       return {
         command: "kimi",
-        args: ["-p", prompt],
+        args: ["-y", "-p", prompt],
         stdin: null,
       };
     case "qwen":

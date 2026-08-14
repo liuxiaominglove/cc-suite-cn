@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -1012,5 +1012,74 @@ describe("reviewFile options", () => {
     const readFn = async () => "const x = 1;";
     await reviewFile({ model: "m", backend: "b", file: "f", readFn, reviewFn, customPrompt: "提示" });
     assert.equal(captured, "提示");
+  });
+});
+
+describe("withRetry", () => {
+  it("retries a transient RunnerError then succeeds", async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls === 1) throw new RunnerError("rate limited", { exitCode: 1 });
+      return "ok";
+    };
+    const result = await withRetry(fn, { maxRetries: 2, backoffMs: [0, 0] });
+    assert.equal(result, "ok");
+    assert.equal(calls, 2);
+  });
+
+  it("retries TimeoutError then succeeds", async () => {
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      if (calls < 3) throw new TimeoutError();
+      return "done";
+    };
+    const result = await withRetry(fn, { maxRetries: 2, backoffMs: [0, 0] });
+    assert.equal(result, "done");
+    assert.equal(calls, 3);
+  });
+
+  it("does not retry AuthError", async () => {
+    let calls = 0;
+    const fn = async () => { calls++; throw new AuthError(); };
+    await assert.rejects(() => withRetry(fn, { maxRetries: 2, backoffMs: [0, 0] }), AuthError);
+    assert.equal(calls, 1);
+  });
+
+  it("gives up after maxRetries", async () => {
+    let calls = 0;
+    const fn = async () => { calls++; throw new RunnerError("boom", { exitCode: 1 }); };
+    await assert.rejects(() => withRetry(fn, { maxRetries: 2, backoffMs: [0, 0] }), RunnerError);
+    assert.equal(calls, 3);
+  });
+});
+
+describe("review retry integration", () => {
+  it("retries the model call when retries > 0", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      if (calls === 1) return createMockProcess({ exitCode: 1, stderr: "rate limited" });
+      return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+    });
+    const result = await review({ model: "kimi-k2.7-code", backend: "kimi", code: "test", retries: 1 });
+    assert.equal(result.success, true);
+    assert.equal(calls, 2);
+    setRetryBackoffMs(null);
+  });
+
+  it("does not retry when retries is not set", async () => {
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      return createMockProcess({ exitCode: 1, stderr: "boom" });
+    });
+    await assert.rejects(
+      () => review({ model: "m", backend: "codebuddy", code: "test" }),
+      RunnerError
+    );
+    assert.equal(calls, 1);
   });
 });

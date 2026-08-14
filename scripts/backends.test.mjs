@@ -10,10 +10,10 @@ describe("buildCommand", () => {
     assert.equal(cmd.stdin, "review this");
   });
 
-  it("kimi passes prompt via -p argument, no stdin", () => {
+  it("kimi passes prompt via -p with -y, no stdin", () => {
     const cmd = buildCommand("kimi", { model: "kimi-k2.7-code", prompt: "review this" });
     assert.equal(cmd.command, "kimi");
-    assert.deepEqual(cmd.args, ["-p", "review this"]);
+    assert.deepEqual(cmd.args, ["-y", "-p", "review this"]);
     assert.equal(cmd.stdin, null);
   });
 

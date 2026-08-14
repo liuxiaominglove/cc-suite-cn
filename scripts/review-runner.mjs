@@ -12,6 +12,29 @@ export const DEFAULT_TIMEOUT = 900000;
 const MAX_FILES_WARN = 50;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
 
+const DEFAULT_RETRY_BACKOFF_MS = [10000, 30000];
+let _retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS;
+
+export function setRetryBackoffMs(ms) {
+  _retryBackoffMs = ms ?? DEFAULT_RETRY_BACKOFF_MS;
+}
+
+export async function withRetry(fn, { maxRetries = 0, backoffMs = _retryBackoffMs } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      const retryable = err instanceof TimeoutError || err instanceof RunnerError;
+      if (!retryable || attempt >= maxRetries) throw err;
+      const delay = backoffMs[attempt] ?? backoffMs[backoffMs.length - 1] ?? 0;
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastErr;
+}
+
 export const REVIEW_PROMPT = "Review the following code for bugs, security issues, and code quality problems. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
 
 export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
@@ -154,7 +177,7 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
   });
 }
 
-export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0 }) {
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -246,20 +269,24 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
-  const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, cwd: resolveReviewCwd(backend) });
+  const { stdout } = await withRetry(async () => {
+    const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, cwd: resolveReviewCwd(backend) });
 
-  if (timedOut) {
-    throw new TimeoutError();
-  }
+    if (timedOut) {
+      throw new TimeoutError();
+    }
 
-  const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
-  if (failed && isAuthError(stderr)) {
-    throw new AuthError();
-  }
+    const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
+    if (failed && isAuthError(stderr)) {
+      throw new AuthError();
+    }
 
-  if (failed) {
-    throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
-  }
+    if (failed) {
+      throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
+    }
+
+    return { stdout };
+  }, { maxRetries: retries });
 
   if (!stdout.trim()) {
     return {
@@ -320,7 +347,7 @@ export function offsetFindings(chunkResults) {
   return all;
 }
 
-export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null }) {
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0 }) {
   const reviewFnUsed = reviewFn ?? review;
   const read = readFn ?? (async (f) => {
     const { readFile } = await import("node:fs/promises");
@@ -332,18 +359,18 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   try {
     code = await read(file);
   } catch (err) {
-    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal });
+    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal, retries });
   }
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, timeout, customPrompt });
+    return reviewFnUsed({ model, backend, code, timeout, customPrompt, retries });
   }
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt, retries });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };

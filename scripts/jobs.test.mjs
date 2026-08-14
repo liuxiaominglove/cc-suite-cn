@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, AUDIT_WORKERS } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, AUDIT_WORKERS } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -375,5 +375,34 @@ describe("runAudit persist audit log", () => {
     const appendAudit = async () => { called = true; };
     await runAudit({ file: "x.js", review, appendAudit, persistAuditLog: false });
     assert.equal(called, false);
+  });
+});
+
+describe("summarizeWorkers", () => {
+  it("shows OK with issue count for success", () => {
+    const s = summarizeWorkers([
+      { model: "glm-5.2", success: true, issues: [{}, {}, {}] },
+    ]);
+    assert.ok(s.includes("glm-5.2: OK(3)"), s);
+  });
+
+  it("shows FAIL with error for failure", () => {
+    const s = summarizeWorkers([
+      { model: "kimi-k2.7-code", success: false, error: "kimi exited with code 1" },
+    ]);
+    assert.ok(s.includes("kimi-k2.7-code: FAIL"), s);
+    assert.ok(s.includes("exited with code 1"), s);
+  });
+});
+
+describe("runAudit retries", () => {
+  it("passes retries=2 to review workers", async () => {
+    let captured = null;
+    const review = async (opts) => {
+      captured = opts.retries;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await runAudit({ file: "x.js", review, appendAudit: async () => {}, persistAuditLog: false });
+    assert.equal(captured, 2);
   });
 });

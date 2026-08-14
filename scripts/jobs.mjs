@@ -222,7 +222,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2 }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -232,8 +232,8 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     AUDIT_WORKERS.map(async ({ backend, model }) => {
       try {
         const r = useChunking
-          ? await reviewFile({ model, backend, file, timeout, reviewFn: review })
-          : await review({ model, backend, file, dir, exts, diff, timeout });
+          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries })
+          : await review({ model, backend, file, dir, exts, diff, timeout, retries });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
         return { backend, model, success: false, error: err.message };
@@ -251,6 +251,17 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   }
 
   return { workers };
+}
+
+export function summarizeWorkers(workers) {
+  return (workers ?? [])
+    .map((w) => {
+      const status = w.success
+        ? `OK(${w.issues?.length ?? 0})`
+        : `FAIL(${w.error ?? "unknown error"})`;
+      return `${w.model}: ${status}`;
+    })
+    .join(" | ");
 }
 
 async function defaultAppendAudit(workers, target) {
@@ -300,7 +311,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     } else {
       const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));
       const job = await store.get(id);
-      console.log(`${id}  [${job.status}]`);
+      const summary = job?.result?.workers ? `  ${summarizeWorkers(job.result.workers)}` : "";
+      console.log(`${id}  [${job.status}]${summary}`);
     }
   } else if (parsed.action === "worker-review") {
     const { review } = await import("./review-runner.mjs");
