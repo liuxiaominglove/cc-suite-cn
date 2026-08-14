@@ -97,6 +97,9 @@
 | 审查 NL 工件反思 WI-4: 内置 NL 工件评审维度 | `NL_REVIEW_PROMPT` + `isNLArtifact`（.md 命令/技能/agent 自动切换，--prompt 可覆盖）；3 单测 | 🟢 | 2026-08-14 |
 | 审查 NL 工件反思 WI-5: adjudicate 防幻觉声明 | `buildAdjudicatorPrompt` 加"不要声称搜索仓库（无权访问）"；消除 hy3 对文档 finding 的"全仓搜索零匹配"假阴；1 单测 | 🟢 | 2026-08-14 |
 | 本轮 6 WI 全绿 | `pnpm test:unit` 272 全绿 + guard 通过 | 🟢 | 2026-08-14 |
+| 体检 13 finding 修复（TDD） | `docs-consistency.test.mjs`（14 用例：模型一致性/幽灵路径/Key Files/常量名/角色概念/命令规格/打分 finding）+ `backends.test.mjs` 更新；全量 288 全绿 + guard 通过 | 🟢 | 2026-08-14 |
+| M-1: resolveCli 绝对路径防 PATH 劫持 | `backends.mjs` 加 `resolveCli`（`command -v` 解析绝对路径，`which` 可注入测试），buildCommand 三后端统一走它；2 单测 | 🟢 | 2026-08-14 |
+| M-2: kimi 加 `--plan` 只读护栏 | kimi backend args 加 `--plan`；但「--plan 是否真锁写」未实测——参照第 11 行「kimi 无头锁写 🔴」（deny 规则拦不住 -p 模式写）教训，--plan 效果待真实验证 | 🟡 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
