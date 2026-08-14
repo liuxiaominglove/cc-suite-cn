@@ -70,6 +70,8 @@
 | ELTA 实战：找 bug（Swift 项目） | 19 个 Swift 文件 glm+kimi 各 19/19 全覆盖（306 finding → 去重 283）；大文件分块正常 | 🟢 | 2026-08-14 |
 | ELTA 实战：hy3 裁决纠错 | top 10 候选 → hy3 判 5 真 5 假，并纠正 opencode 3 个误判（shortName 是硬编码字面量非用户输入 / sRGB 恒可用 / UTF-8 编码永不失败） | 🟢 | 2026-08-14 |
 | ELTA 实战：修 5 个真 bug（TDD） | 迁移写失败丢key + setApiKey明文残留 + keychain先删后加丢key + 401/403误报成功 + keyCode=0哨兵丢Cmd+A；新增 8 测试，176 全绿 | 🟢 | 2026-08-14 |
+| ELTA 实战第二轮：裁决 12 候选（7 真 5 假） | hy3 又纠正 5 个误判（SWC:320 已返回自定义endpoint / RWC:69 passRetained 是契约 / TP:80 仅日志用 / RWC:96 CFMachPort 自动释放 / SWC:801 主线程无竞态） | 🟢 | 2026-08-14 |
+| ELTA 实战第二轮：修 7 个真 bug（TDD） | substringInRange UTF-16偏移(emoji) + 划词日志隐私 + 剪贴板restore先清后写 + NSRegularExpression缓存 + loadKey可见性复位 + providerChanged顺序 + reset完整复位；179 全绿 | 🟢 | 2026-08-14 |
 | review() 重试（瞬时限速自动恢复） | `withRetry`（maxRetries=2 退避 10s/30s），只对 TimeoutError/RunnerError 重试、AuthError 不重试；runAudit 传 retries=2 | 🟢 | 2026-08-14 |
 | 失败醒目化（--run-audit 显示 worker OK/FAIL） | `summarizeWorkers` 输出 `glm-5.2: OK(8) \| kimi-k2.7-code: FAIL(...)`；实测 kimi 失败时前台立刻可见 | 🟢 | 2026-08-14 |
 | ⚠ 评审员缺项目 AGENTS.md 上下文 → 误报 | qwen/kimi 把「CFTypeRef 强转」当 bug 报，但被审项目 AGENTS.md 明确此为正确做法（typeID 判断会 SIGSEGV）；review() 未把项目 AGENTS.md 注入 prompt | 🟡（已知缺陷，待修） | 2026-08-14 |
