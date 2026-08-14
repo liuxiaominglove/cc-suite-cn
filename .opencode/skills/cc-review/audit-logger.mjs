@@ -1,3 +1,8 @@
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+export const AUDIT_LOG_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "audit-log.json");
+
 export function appendAuditEntry(log, entry) {
   if (!entry || !entry.timestamp) {
     throw new Error("entry must have a timestamp");
@@ -64,4 +69,24 @@ export function computeStats(log) {
   }
 
   return { total_runs: totalRuns, total_issues: totalIssues, models };
+}
+
+export async function persistAuditEntries(entries, filePath) {
+  const { readFile, writeFile, rename } = await import("node:fs/promises");
+  const { dirname, join } = await import("node:path");
+
+  let log = [];
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) log = parsed;
+  } catch {
+    log = [];
+  }
+
+  const updated = [...log, ...entries];
+  const tmpPath = join(dirname(filePath), `.audit-${Date.now()}.tmp`);
+  await writeFile(tmpPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
+  await rename(tmpPath, filePath);
+  return updated;
 }

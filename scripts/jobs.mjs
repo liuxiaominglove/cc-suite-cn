@@ -222,7 +222,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000 }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -240,7 +240,26 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
       }
     })
   );
+
+  if (persistAuditLog) {
+    try {
+      const append = appendAudit ?? defaultAppendAudit;
+      await append(workers, file ?? dir ?? "diff");
+    } catch (e) {
+      // persist failure must not break the audit
+    }
+  }
+
   return { workers };
+}
+
+async function defaultAppendAudit(workers, target) {
+  const { fromReviewResult, persistAuditEntries, AUDIT_LOG_PATH } = await import("../.opencode/skills/cc-review/audit-logger.mjs");
+  const entries = workers
+    .filter((w) => w.success)
+    .map((w) => fromReviewResult(w, target));
+  if (entries.length === 0) return;
+  await persistAuditEntries(entries, AUDIT_LOG_PATH);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

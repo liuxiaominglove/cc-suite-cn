@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { appendAuditEntry, computeStats, fromReviewResult } from "./audit-logger.mjs";
+import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { appendAuditEntry, computeStats, fromReviewResult, persistAuditEntries } from "./audit-logger.mjs";
 
 function makeEntry(overrides = {}) {
   return {
@@ -134,5 +137,44 @@ describe("audit-logger", () => {
     assert.equal(entry.issues[0].file, "src/auth.js", "should keep per-issue file");
     assert.equal(entry.issues[0].line, 5, "should keep per-issue line");
     assert.equal(entry.issues[1].line, 12);
+  });
+});
+
+describe("persistAuditEntries", () => {
+  it("creates a new log file with the given entries", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-log-"));
+    const path = join(dir, "audit-log.json");
+    const entries = [makeEntry({ model: "glm-5.2" }), makeEntry({ model: "kimi-k2.7-code" })];
+    await persistAuditEntries(entries, path);
+    const raw = await readFile(path, "utf-8");
+    const log = JSON.parse(raw);
+    assert.equal(log.length, 2);
+    assert.equal(log[0].model, "glm-5.2");
+    assert.equal(log[1].model, "kimi-k2.7-code");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("appends to an existing log without losing original entries", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-log-"));
+    const path = join(dir, "audit-log.json");
+    await persistAuditEntries([makeEntry({ model: "A" })], path);
+    await persistAuditEntries([makeEntry({ model: "B" })], path);
+    const log = JSON.parse(await readFile(path, "utf-8"));
+    assert.equal(log.length, 2);
+    assert.equal(log[0].model, "A");
+    assert.equal(log[1].model, "B");
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("treats a corrupted existing file as empty (no crash)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "audit-log-"));
+    const path = join(dir, "audit-log.json");
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(path, "{corrupted", "utf-8");
+    await persistAuditEntries([makeEntry({ model: "glm-5.2" })], path);
+    const log = JSON.parse(await readFile(path, "utf-8"));
+    assert.equal(log.length, 1);
+    assert.equal(log[0].model, "glm-5.2");
+    await rm(dir, { recursive: true, force: true });
   });
 });

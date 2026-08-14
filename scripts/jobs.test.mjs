@@ -357,3 +357,23 @@ describe("cancelJob", () => {
     assert.equal(result.status, "cancelled");
   });
 });
+
+describe("runAudit persist audit log", () => {
+  it("calls appendAudit with workers and target after completion", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let appended = null;
+    const appendAudit = async (workers, target) => { appended = { workers, target }; };
+    await runAudit({ file: "x.js", review, appendAudit });
+    assert.ok(appended, "should call appendAudit");
+    assert.equal(appended.workers.length, 2);
+    assert.equal(appended.target, "x.js");
+  });
+
+  it("skips appendAudit when persistAuditLog is false", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let called = false;
+    const appendAudit = async () => { called = true; };
+    await runAudit({ file: "x.js", review, appendAudit, persistAuditLog: false });
+    assert.equal(called, false);
+  });
+});
