@@ -123,6 +123,7 @@ const MIN_SAMPLES = 5;
 
 export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null }) {
   const perModel = {};
+  const allFindings = [];
 
   for (const audit of audits) {
     const workers = audit.workers || [];
@@ -139,7 +140,6 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
           uniqueCount: 0,
           trueCount: 0,
           uniqueTrue: 0,
-          uniqueFindings: [],
         };
       }
       const m = perModel[w.model];
@@ -157,13 +157,13 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       for (const item of g.items) {
         const m = perModel[item.model];
         if (!m) continue;
-        if (g.type === "consensus") {
+        const isConsensus = g.type === "consensus";
+        if (isConsensus) {
           m.consensusCount += 1;
-          m.trueCount += 1;
         } else {
           m.uniqueCount += 1;
-          m.uniqueFindings.push({ model: item.model, issue: item.issue, auditFile: audit.file || null });
         }
+        allFindings.push({ model: item.model, issue: item.issue, auditFile: audit.file || null, isConsensus, m });
       }
     }
   }
@@ -174,24 +174,18 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   }
 
   if (arbitrate) {
-    const tasks = [];
-    for (const m of Object.values(perModel)) {
-      for (const uf of m.uniqueFindings) {
-        tasks.push({ m, uf });
-      }
-    }
     const results = await Promise.all(
-      tasks.map(async ({ m, uf }) => {
-        const file = uf.auditFile || uf.issue?.file || "";
+      allFindings.map(async (f) => {
+        const file = f.auditFile || f.issue?.file || "";
         const code = resolveCode ? await resolveCode(file) : "";
-        const result = await adjudicateFn({ finding: uf.issue?.finding || "", code: code || "" });
-        return { m, verdict: result && result.verdict };
+        const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "" });
+        return { f, verdict: result && result.verdict };
       })
     );
-    for (const { m, verdict } of results) {
+    for (const { f, verdict } of results) {
       if (verdict === "true") {
-        m.uniqueTrue += 1;
-        m.trueCount += 1;
+        f.m.trueCount += 1;
+        if (!f.isConsensus) f.m.uniqueTrue += 1;
       }
     }
   }

@@ -223,7 +223,7 @@ describe("evaluateModels", () => {
     assert.equal(r.perModel["glm-5.2"].precision, 1);
   });
 
-  it("counts consensus findings as true without arbitration", async () => {
+  it("counts consensus findings without arbitration", async () => {
     const audits = [{ workers: [
       { model: "glm-5.2", success: true, issues: [{ finding: "shared" }] },
       { model: "kimi-k2.7-code", success: true, issues: [{ finding: "shared" }] },
@@ -231,5 +231,16 @@ describe("evaluateModels", () => {
     const r = await evaluateModels({ audits });
     assert.equal(r.perModel["glm-5.2"].consensusCount, 1);
     assert.equal(r.perModel["glm-5.2"].consensusRate, 1);
+  });
+
+  it("adjudicates consensus findings too (not default true)", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "shared but wrong finding" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "shared but wrong finding" }] },
+    ]}];
+    const adjudicateFn = async () => ({ verdict: "false" });
+    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "" });
+    assert.equal(r.perModel["glm-5.2"].trueCount, 0);
+    assert.equal(r.perModel["glm-5.2"].precision, 0);
   });
 });
