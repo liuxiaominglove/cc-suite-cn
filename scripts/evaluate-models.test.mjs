@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 
 afterEach(() => setSpawn(null));
@@ -247,6 +247,19 @@ describe("evaluateModels", () => {
     assert.equal(r.perModel["glm-5.2"].trueCount, 0);
     assert.equal(r.perModel["glm-5.2"].precision, 0);
   });
+
+  it("adjudicates deduplicated findings only (one call per unique bug)", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "same bug in a", file: "a.js" }, { finding: "same bug in a 2", file: "a.js" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "same bug in a variant", file: "a.js" }] },
+    ]}];
+    let calls = 0;
+    const adjudicateFn = async () => { calls += 1; return { verdict: "true" }; };
+    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
+    assert.equal(calls, 1, "near-identical findings should be adjudicated once");
+    assert.equal(r.perModel["glm-5.2"].trueCount, 2);
+    assert.equal(r.perModel["kimi-k2.7-code"].trueCount, 1);
+  });
 });
 
 describe("timeout defaults", () => {
@@ -325,5 +338,82 @@ describe("evaluateModels passes line to adjudicator", () => {
     const adjudicateFn = async ({ line }) => { seen.push(line); return { verdict: "false" }; };
     await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
     assert.deepEqual(seen.sort((a, b) => a - b), [7, 42]);
+  });
+});
+
+describe("dedupJobsByTask", () => {
+  it("keeps only the latest job per task", () => {
+    const jobs = [
+      { task: "a.js", startedAt: "2026-01-01T00:00:00Z", id: "old" },
+      { task: "a.js", startedAt: "2026-01-02T00:00:00Z", id: "new" },
+    ];
+    const out = dedupJobsByTask(jobs);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].id, "new");
+  });
+
+  it("keeps all distinct tasks", () => {
+    const jobs = [
+      { task: "a.js", startedAt: "2026-01-01T00:00:00Z" },
+      { task: "b.js", startedAt: "2026-01-01T00:00:00Z" },
+    ];
+    assert.equal(dedupJobsByTask(jobs).length, 2);
+  });
+
+  it("returns empty for empty input", () => {
+    assert.deepEqual(dedupJobsByTask([]), []);
+  });
+
+  it("is deterministic when startedAt is missing", () => {
+    const jobs = [
+      { task: "a.js", startedAt: null, id: "x" },
+      { task: "a.js", startedAt: null, id: "y" },
+    ];
+    const out = dedupJobsByTask(jobs);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].id, "y");
+  });
+});
+
+describe("dedupFindings", () => {
+  it("merges similar findings", () => {
+    const findings = [
+      { model: "a", file: "x.js", line: 1, issue: { finding: "removeItem null deref" } },
+      { model: "b", file: "x.js", line: 2, issue: { finding: "removeItem null deref causes crash" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 1);
+  });
+
+  it("keeps dissimilar findings separate", () => {
+    const findings = [
+      { model: "a", file: "x.js", line: 1, issue: { finding: "missing semicolon" } },
+      { model: "b", file: "x.js", line: 2, issue: { finding: "unhandled promise rejection" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 2);
+  });
+
+  it("does not merge findings from different files", () => {
+    const findings = [
+      { model: "a", file: "x.js", line: 1, issue: { finding: "null deref in removeItem" } },
+      { model: "b", file: "y.js", line: 1, issue: { finding: "null deref in removeItem" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 2);
+  });
+
+  it("returns empty for empty input", () => {
+    assert.deepEqual(dedupFindings([]), []);
+  });
+
+  it("keeps cluster members for consensus counting", () => {
+    const findings = [
+      { model: "glm", file: "x.js", issue: { finding: "null deref" } },
+      { model: "kimi", file: "x.js", issue: { finding: "null deref causes crash" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].cluster.length, 2);
   });
 });

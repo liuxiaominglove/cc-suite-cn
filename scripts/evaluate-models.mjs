@@ -186,8 +186,9 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   }
 
   if (arbitrate) {
+    const unique = dedupFindings(allFindings);
     const results = await Promise.all(
-      allFindings.map(async (f) => {
+      unique.map(async (f) => {
         const file = f.auditFile || f.issue?.file || "";
         const code = resolveCode ? await resolveCode(file) : "";
         const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line });
@@ -196,8 +197,10 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
     );
     for (const { f, verdict } of results) {
       if (verdict === "true") {
-        f.m.trueCount += 1;
-        if (!f.isConsensus) f.m.uniqueTrue += 1;
+        for (const member of f.cluster ?? [f]) {
+          member.m.trueCount += 1;
+          if (!member.isConsensus) member.m.uniqueTrue += 1;
+        }
       }
     }
   }
@@ -214,9 +217,36 @@ export async function loadAudits() {
   const { defaultStore } = await import("./jobs.mjs");
   const store = defaultStore();
   const jobs = await store.list();
-  return jobs
-    .filter((j) => j.type === "audit" && j.status === "completed" && j.result && Array.isArray(j.result.workers))
-    .map((j) => ({ workers: j.result.workers, file: j.task }));
+  const completed = jobs.filter((j) => j.type === "audit" && j.status === "completed" && j.result && Array.isArray(j.result.workers));
+  return dedupJobsByTask(completed).map((j) => ({ workers: j.result.workers, file: j.task }));
+}
+
+export function dedupJobsByTask(jobs) {
+  const latest = new Map();
+  for (const j of jobs) {
+    const key = j.task ?? j.file ?? "";
+    const prev = latest.get(key);
+    const ts = j.startedAt ?? "";
+    if (!prev || ts >= (prev.startedAt ?? "")) {
+      latest.set(key, j);
+    }
+  }
+  return [...latest.values()];
+}
+
+export function dedupFindings(findings, { threshold = 0.6 } = {}) {
+  const clusters = [];
+  for (const f of findings) {
+    const file = f.auditFile ?? f.file ?? f.issue?.file ?? "";
+    const text = f.issue?.finding ?? f.finding ?? "";
+    const existing = clusters.find((c) => c.file === file && findingMatches(text, c.representative, { threshold }));
+    if (existing) {
+      existing.members.push(f);
+      continue;
+    }
+    clusters.push({ file, representative: text, members: [f] });
+  }
+  return clusters.map((c) => ({ ...c.members[0], cluster: c.members }));
 }
 
 export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr } = {}) {
