@@ -162,7 +162,7 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
           m.trueCount += 1;
         } else {
           m.uniqueCount += 1;
-          m.uniqueFindings.push({ model: item.model, issue: item.issue });
+          m.uniqueFindings.push({ model: item.model, issue: item.issue, auditFile: audit.file || null });
         }
       }
     }
@@ -174,14 +174,24 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   }
 
   if (arbitrate) {
-    for (const [model, m] of Object.entries(perModel)) {
+    const tasks = [];
+    for (const m of Object.values(perModel)) {
       for (const uf of m.uniqueFindings) {
-        const code = resolveCode ? await resolveCode(uf.issue?.file || "") : "";
+        tasks.push({ m, uf });
+      }
+    }
+    const results = await Promise.all(
+      tasks.map(async ({ m, uf }) => {
+        const file = uf.auditFile || uf.issue?.file || "";
+        const code = resolveCode ? await resolveCode(file) : "";
         const result = await adjudicateFn({ finding: uf.issue?.finding || "", code: code || "" });
-        if (result && result.verdict === "true") {
-          m.uniqueTrue += 1;
-          m.trueCount += 1;
-        }
+        return { m, verdict: result && result.verdict };
+      })
+    );
+    for (const { m, verdict } of results) {
+      if (verdict === "true") {
+        m.uniqueTrue += 1;
+        m.trueCount += 1;
       }
     }
   }

@@ -222,14 +222,14 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 300000 }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
   const workers = await Promise.all(
     AUDIT_WORKERS.map(async ({ backend, model }) => {
       try {
-        const r = await review({ model, backend, file, dir, exts, diff });
+        const r = await review({ model, backend, file, dir, exts, diff, timeout });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
         return { backend, model, success: false, error: err.message };

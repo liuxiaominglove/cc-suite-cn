@@ -325,6 +325,16 @@ describe("runAudit", () => {
     assert.ok(kimi.error.includes("kimi down"));
     assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
+
+  it("passes a default 300000ms timeout to review", async () => {
+    let captured = null;
+    const review = async (opts) => {
+      captured = opts.timeout;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await runAudit({ file: "x.js", review });
+    assert.equal(captured, 300000);
+  });
 });
 
 describe("cancelJob", () => {
