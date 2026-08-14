@@ -100,6 +100,14 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 5. **无测试框架的项目**：先用 Node 内置 `node:test` 搭考场（`.mjs` 扩展名天然 ESM，**零 npm**），把纯逻辑抽成模块再测。DOM 类改动无法无 jsdom 单测时，用"语法检查 + 浏览器手动验证"兜底，并在验证台账标 🟡。
 6. **能力动词逐个测**：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 测试证据。
 
+### 外部依赖改动铁律（配置 / 渠道 / CLI）
+
+改任何 provider / model / 渠道 / 外部 CLI 参数前，**先交叉验证，先验后写**：
+
+1. **模型归属交叉验证**：看到 `provider/model` 配置，先问"这个 provider 真的提供这个 model 吗？"——模型是哪家公司的，用背景知识对照；配置与常识矛盾时（如 `alibaba-cn/kimi`），主动查证，**不要盲目信任既有配置**。教训：kimi 是月之暗面（Moonshot）的模型，阿里百炼不代理它；`alibaba-cn/` 前缀只代表"走阿里 API 通道"，不代表"模型是阿里的"（阿里代理了 GLM，但没代理 Kimi）。
+2. **CLI 参数组合先实测**：给外部 CLI 加参数前，先跑一次最小验证（如 `kimi --plan -p "hi"`），确认参数能组合、不冲突，再写进代码。教训：`kimi --plan` 与 `-p` 冲突（`Cannot combine --prompt with --plan`）。
+3. **改模型必实测加载**：改完 model/渠道，必须派活实测一次（确认 agent 真的能加载、能响应），不能只改文件就收工。
+
 ## Verification Discipline
 
 The global rule `~/.config/opencode/rules/verification-discipline.md` applies everywhere. This section defines its project-specific instantiation:
