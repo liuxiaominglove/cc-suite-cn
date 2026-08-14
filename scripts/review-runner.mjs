@@ -288,6 +288,79 @@ export async function review({ model, code, customPrompt, timeout = 60000, file,
   };
 }
 
+export function chunkCode(code, { chunkSize = 800, overlap = 10 } = {}) {
+  const text = typeof code === "string" ? code : "";
+  const lines = text.split("\n");
+  if (lines.length <= chunkSize) {
+    return [{ code: text, startLine: 1 }];
+  }
+  const chunks = [];
+  let start = 0;
+  while (start < lines.length) {
+    const end = Math.min(start + chunkSize, lines.length);
+    chunks.push({ code: lines.slice(start, end).join("\n"), startLine: start + 1 });
+    if (end >= lines.length) break;
+    start = end - overlap;
+  }
+  return chunks;
+}
+
+export function offsetFindings(chunkResults) {
+  const all = [];
+  for (const { startLine, result } of chunkResults) {
+    if (!result || result.success === false) continue;
+    for (const issue of result.issues || []) {
+      const line = typeof issue.line === "number" ? issue.line + startLine - 1 : issue.line;
+      all.push({ ...issue, line });
+    }
+  }
+  return all;
+}
+
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = 900000, reviewFn = null, readFn = null }) {
+  const reviewFnUsed = reviewFn ?? review;
+  const read = readFn ?? (async (f) => {
+    const { readFile } = await import("node:fs/promises");
+    const resolved = validateFilePath(f, process.cwd());
+    return readFile(resolved, "utf-8");
+  });
+
+  let code;
+  try {
+    code = await read(file);
+  } catch (err) {
+    return reviewFnUsed({ model, backend, file, timeout });
+  }
+
+  const chunks = chunkCode(code, { chunkSize, overlap });
+  if (chunks.length === 1) {
+    return reviewFnUsed({ model, backend, code, timeout });
+  }
+
+  const chunkResults = await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout });
+        return { startLine: chunk.startLine, result: r };
+      } catch (err) {
+        return { startLine: chunk.startLine, result: { success: false, error: err.message } };
+      }
+    })
+  );
+
+  const issues = offsetFindings(chunkResults);
+  const severity = chunkResults.find((c) => c.result?.severity)?.result?.severity ?? "unknown";
+
+  return {
+    model,
+    success: chunkResults.some((c) => c.result?.success),
+    severity,
+    issues,
+    summary: `分 ${chunks.length} 块评审`,
+    chunkCount: chunks.length,
+  };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const modelIdx = args.indexOf("--model");

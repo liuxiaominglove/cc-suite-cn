@@ -55,6 +55,11 @@
 | qwen 批判员 --sandbox 不破坏评审 | `backends.mjs` qwen 加 `--sandbox`（不传 -y 保持只读）；实测评审 13.7s 出正常 JSON | 🟢 | 2026-08-14 |
 | 验证审计员 hy3 裁决 | `evaluate-models.mjs`：finding 归一化/相似度(Dice)/共识分类/裁决(hy3)/多维度聚合；26 单测 | 🟢 | 2026-08-14 |
 | 废弃 /implement /fix + 反向桥 | 命令+代码全删（implement-runner/opencode-mcp-bridge/bridge-config/verify-bridge），jobs.mjs 移除 implement 路径，249 单测 + guard 绿 | 🟢 | 2026-08-14 |
+| 超时 900s | run-audit 默认超时 900s；44KB 文件实测 kimi 300s 超时、600s 勉强，提到 900s 留余量 | 🟢 | 2026-08-14 |
+| 大文件自动分块 | `chunkCode`(800行/块+10行重叠) + `offsetFindings`(行号偏移) + `reviewFile`(读→切→逐块审→合并)；12 单测；实测 1461 行 index.html 切成 2 块(800+671,startLine 1/791) | 🟢 | 2026-08-14 |
+| 分块后行号偏移正确 | 块2(startLine=791) finding line 15 → 偏移后 805；单测覆盖 | 🟢 | 2026-08-14 |
+| 某块失败不拖垮 | reviewFile 单块失败，其余块结果仍返回；单测覆盖 | 🟢 | 2026-08-14 |
+| TDD 铁律入 AGENTS.md | 修 bug 必须 RED→GREEN→REFACTOR；无测试框架先用 node:test 搭；DOM 类改动标 🟡 | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

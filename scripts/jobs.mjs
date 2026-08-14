@@ -226,10 +226,14 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
+  const { reviewFile } = await import("./review-runner.mjs");
+  const useChunking = !!(file && !dir && !diff);
   const workers = await Promise.all(
     AUDIT_WORKERS.map(async ({ backend, model }) => {
       try {
-        const r = await review({ model, backend, file, dir, exts, diff, timeout });
+        const r = useChunking
+          ? await reviewFile({ model, backend, file, timeout, reviewFn: review })
+          : await review({ model, backend, file, dir, exts, diff, timeout });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
         return { backend, model, success: false, error: err.message };

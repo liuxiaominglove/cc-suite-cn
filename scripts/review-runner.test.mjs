@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode, resolveReviewCwd } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, VERIFY_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -870,5 +870,118 @@ describe("VERIFY_PROMPT", () => {
     assert.ok(VERIFY_PROMPT.includes("回归"));
     assert.ok(VERIFY_PROMPT.includes("逐处"));
     assert.ok(VERIFY_PROMPT.includes("遗漏"));
+  });
+});
+
+describe("chunkCode", () => {
+  it("returns a single chunk for small code", () => {
+    const chunks = chunkCode("a\nb\nc");
+    assert.equal(chunks.length, 1);
+    assert.equal(chunks[0].startLine, 1);
+    assert.equal(chunks[0].code, "a\nb\nc");
+  });
+
+  it("does not split when code equals chunkSize", () => {
+    const lines = Array(800).fill("x").join("\n");
+    const chunks = chunkCode(lines, { chunkSize: 800 });
+    assert.equal(chunks.length, 1);
+  });
+
+  it("splits code larger than chunkSize into multiple chunks", () => {
+    const lines = Array(1600).fill("x").join("\n");
+    const chunks = chunkCode(lines, { chunkSize: 800, overlap: 10 });
+    assert.ok(chunks.length >= 2, "should split");
+    for (const c of chunks) {
+      assert.ok(c.code.split("\n").length <= 800, "each chunk <= chunkSize");
+    }
+  });
+
+  it("overlaps consecutive chunks", () => {
+    const lines = Array(1600).fill("x").join("\n");
+    const chunks = chunkCode(lines, { chunkSize: 800, overlap: 10 });
+    const c1 = chunks[0].code.split("\n");
+    const c2 = chunks[1].code.split("\n");
+    assert.deepEqual(c1.slice(-10), c2.slice(0, 10), "last 10 lines of chunk1 == first 10 lines of chunk2");
+  });
+
+  it("tracks correct startLine per chunk", () => {
+    const lines = Array(1600).fill("x").join("\n");
+    const chunks = chunkCode(lines, { chunkSize: 800, overlap: 10 });
+    assert.equal(chunks[0].startLine, 1);
+    assert.equal(chunks[1].startLine, 791);
+  });
+
+  it("handles empty and non-string input without crashing", () => {
+    assert.equal(chunkCode("").length, 1);
+    assert.equal(chunkCode(null).length, 1);
+  });
+});
+
+describe("offsetFindings", () => {
+  it("offsets line numbers by chunk startLine", () => {
+    const results = [
+      { startLine: 1, result: { issues: [{ file: "x", line: 15, finding: "a" }] } },
+      { startLine: 791, result: { issues: [{ file: "x", line: 15, finding: "b" }] } },
+    ];
+    const issues = offsetFindings(results);
+    assert.equal(issues[0].line, 15);
+    assert.equal(issues[1].line, 805);
+  });
+
+  it("ignores non-numeric line numbers", () => {
+    const results = [{ startLine: 791, result: { issues: [{ finding: "no line" }] } }];
+    const issues = offsetFindings(results);
+    assert.equal(issues[0].line, undefined);
+  });
+
+  it("skips failed chunk results", () => {
+    const results = [
+      { startLine: 1, result: { success: false, error: "boom" } },
+      { startLine: 791, result: { success: true, issues: [{ line: 1, finding: "x" }] } },
+    ];
+    const issues = offsetFindings(results);
+    assert.equal(issues.length, 1);
+  });
+});
+
+describe("reviewFile", () => {
+  it("reviews a small file in a single call", async () => {
+    const calls = [];
+    const reviewFn = async ({ code }) => {
+      calls.push(code);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => "const x = 1;\nconst y = 2;";
+    const r = await reviewFile({ model: "glm-5.2", backend: "codebuddy", file: "small.js", readFn, reviewFn });
+    assert.equal(calls.length, 1);
+    assert.equal(r.success, true);
+  });
+
+  it("reviews a large file in multiple chunks with offset lines", async () => {
+    const calls = [];
+    const reviewFn = async ({ code }) => {
+      const n = code.split("\n").length;
+      calls.push(n);
+      return { success: true, severity: "low", issues: [{ file: "big.js", line: 5, finding: "f" }], summary: "ok" };
+    };
+    const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
+    const r = await reviewFile({ model: "glm-5.2", backend: "codebuddy", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 10 });
+    assert.equal(calls.length, 3);
+    assert.equal(r.chunkCount, 3);
+    // each chunk reported line 5; offset per chunk startLine
+    const lines = r.issues.map(i => i.line).sort((a, b) => a - b);
+    assert.deepEqual(lines, [5, 795, 1585]);
+  });
+
+  it("keeps other chunks' results when one chunk fails", async () => {
+    const reviewFn = async ({ code }) => {
+      if (code.includes("chunk-fail")) throw new Error("chunk down");
+      return { success: true, severity: "low", issues: [{ line: 1, finding: "ok" }], summary: "ok" };
+    };
+    const readFn = async () => "chunk-fail\n" + Array(800).fill("x").join("\n");
+    const r = await reviewFile({ model: "glm-5.2", backend: "codebuddy", file: "big.js", readFn, reviewFn, chunkSize: 800 });
+    // 801 lines → 2 chunks (800 + 1, with overlap 10 it's 2 chunks)
+    assert.equal(r.chunkCount, 2);
+    assert.equal(r.success, true);
   });
 });
