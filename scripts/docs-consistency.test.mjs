@@ -12,6 +12,12 @@ describe("模型 ID 一致性（WI-1）", () => {
     assert.doesNotMatch(c, /kimi-k2\.6/, "kimi.md 仍含旧模型 kimi-k2.6");
   });
 
+  it("kimi.md 走 Moonshot 渠道（moonshotai-cn，非 alibaba-cn）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/agents/kimi.md"), "utf8");
+    assert.match(c, /moonshotai-cn\/kimi-k2\.7-code/, "kimi.md 应走 Moonshot 渠道");
+    assert.doesNotMatch(c, /alibaba-cn\/kimi/, "阿里百炼没有 Kimi，不应走 alibaba-cn");
+  });
+
   it("AGENTS.md 无 kimi-k2.6 残留", () => {
     const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
     assert.doesNotMatch(c, /kimi-k2\.6/, "AGENTS.md 仍含旧模型 kimi-k2.6");
@@ -20,6 +26,19 @@ describe("模型 ID 一致性（WI-1）", () => {
   it("models.json 无 qwen-coder-plus 旧名（统一到 qwen3-coder-plus）", () => {
     const c = readFileSync(join(process.env.HOME, ".codebuddy/models.json"), "utf8");
     assert.doesNotMatch(c, /qwen-coder-plus/, "models.json 仍含旧名 qwen-coder-plus");
+  });
+
+  it("AGENTS.md 架构图 kimi 走 Moonshot（无 alibaba-cn/kimi）", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /moonshotai-cn\/kimi/, "架构图应走 Moonshot 渠道");
+    assert.doesNotMatch(c, /alibaba-cn\/kimi/, "阿里没有 Kimi，架构图不应走 alibaba-cn/kimi");
+  });
+
+  it("AGENTS.md MOONSHOT_API_KEY 标必需（非可选）", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    const m = c.match(/\| `MOONSHOT_API_KEY` \| ([^|]+) \|/);
+    assert.ok(m, "应有 MOONSHOT_API_KEY 行");
+    assert.doesNotMatch(m[1], /可选/, "MOONSHOT 应标必需而非可选");
   });
 });
 

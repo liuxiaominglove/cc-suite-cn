@@ -100,6 +100,7 @@
 | 体检 13 finding 修复（TDD） | `docs-consistency.test.mjs`（14 用例：模型一致性/幽灵路径/Key Files/常量名/角色概念/命令规格/打分 finding）+ `backends.test.mjs` 更新；全量 288 全绿 + guard 通过 | 🟢 | 2026-08-14 |
 | M-1: resolveCli 绝对路径防 PATH 劫持 | `backends.mjs` 加 `resolveCli`（`command -v` 解析绝对路径，`which` 可注入测试），buildCommand 三后端统一走它；2 单测 | 🟢 | 2026-08-14 |
 | M-2: kimi `--agent-file` 只读护栏（disallowedTools 锁写） | 初版 `--plan` 与 `-p` 冲突（`Cannot combine --prompt with --plan`，评审会坏）已废弃；改用 `--agent-file` 加载 `scripts/kimi-readonly-agent.md`（`disallowedTools: [Bash, Write, Edit]`）；实测诱导写文件被拒（kimi 明说"只读审查者禁止创建/修改/删除文件"）、文件未创建；`verify-kimi-sandbox.mjs` 固化 | 🟢 | 2026-08-15 |
+| kimi 渠道错误修正（alibaba-cn → moonshotai-cn） | 阿里百炼**无 Kimi**（用户从阿里官方确认）；B 分身 kimi 原本 `alibaba-cn/kimi-k2.6` 从始至终是坏的（opencode 从未连 Moonshot，分身从未真正跑过）；修正 `kimi.md` model → `moonshotai-cn/kimi-k2.7-code`（models.dev 权威）+ AGENTS.md 三处（架构图 / DASHSCOPE 去掉"通吃 Kimi" / MOONSHOT_API_KEY 从可选改必需）；实测 kimi 分身**能响应**（Moonshot 凭据通），但当前会话缓存旧 model（报 k2.6），重启 opencode 后验证 k2.7-code 真正生效 | 🟡（待重启后复测转 🟢） | 2026-08-15 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

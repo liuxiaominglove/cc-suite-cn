@@ -12,7 +12,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
   ├─ B 分身（日常 · opencode 子代理，换脑不换身）
   │    ├─ qwen  → alibaba-cn/qwen3-coder-plus
   │    ├─ glm   → alibaba-cn/glm-5.2
-    │    ├─ kimi  → alibaba-cn/kimi-k2.7-code
+  │    ├─ kimi  → moonshotai-cn/kimi-k2.7-code（Moonshot，非阿里）
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
   └─ 施工队（独立第三方 · 只读）
@@ -36,9 +36,9 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 |-------------|-----------------|
 | Node.js | >= 18.0 |
 | CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code` (A 突击员用) |
-| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，一个 key 通吃 Qwen + GLM + Kimi（B 分身） |
+| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，通吃 Qwen + GLM（B 分身） |
 | `CODEBUDDY_API_KEY` | A 突击员走 CodeBuddy 平台账号登录态，无需单独 key |
-| `MOONSHOT_API_KEY` | 可选 — 仅当 Kimi 直连 Moonshot 时才需要（B 分身走阿里通道，用不上） |
+| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 的 B 分身（`moonshotai-cn/kimi-k2.7-code`，阿里百炼无 Kimi） |
 | `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 的 B 分身（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
 
 ## Setup
