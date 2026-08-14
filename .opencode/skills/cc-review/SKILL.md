@@ -1,6 +1,15 @@
 ---
 name: cc-review
-description: Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review-qwen, /evaluate, /fix, /verify.
+description: |
+  Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review-qwen, /evaluate, /fix, /verify.
+  <example>
+  Context: User runs /audit src/file.ts
+  assistant: Run glm+kimi read-only review, produce consensus + per-model findings report.
+  </example>
+  <example>
+  Context: User runs /evaluate --arbitrate
+  assistant: hy3 adjudicates each deduplicated finding true/false and computes per-model precision.
+  </example>
 scope: global
 ---
 

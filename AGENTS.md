@@ -12,7 +12,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
   ├─ B 分身（日常 · opencode 子代理，换脑不换身）
   │    ├─ qwen  → alibaba-cn/qwen3-coder-plus
   │    ├─ glm   → alibaba-cn/glm-5.2
-  │    ├─ kimi  → alibaba-cn/kimi-k2.6
+    │    ├─ kimi  → alibaba-cn/kimi-k2.7-code
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
   └─ 施工队（独立第三方 · 只读）
@@ -28,7 +28,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 - **验证审计员** (`/evaluate`): hy3 逐条裁决 finding 真假，聚合"谁找得多、谁找得准"
 - **review-runner.mjs**: 只读评审（参数化 backend，超时/错误/JSON 解析/结果聚合）
 - **evaluate-models.mjs**: finding 归一化/共识分类/裁决/多维度评估
-- **cc-review skill**: Defines the review workflow (`~/.config/opencode/skills/cc-review/SKILL.md`)
+- **cc-review skill**: Defines the review workflow (`.opencode/skills/cc-review/SKILL.md`)
 
 ## Prerequisites
 
@@ -129,10 +129,12 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
 | `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
-| `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 角色常量 FIND_BUG_WORKERS/CRITIC/VERIFIER + canonicalModel） |
+| `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 角色常量 FIND_BUG_WORKERS/CRITIC_MODEL/VERIFIER_MODEL + canonicalModel） |
+| `scripts/backends.mjs` | 3 个 backend 的 CLI 命令构建（resolveCli 绝对路径防 PATH 劫持 + 只读护栏） |
+| `scripts/preflight.mjs` | 环境自检（codebuddy CLI 可用性检查） |
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
 | `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
-| `~/.codebuddy/models.json` | Model endpoint configuration (DeepSeek, Qwen) |
+| `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.2/hy3 走 codebuddy 平台账号，无需本地 endpoint） |

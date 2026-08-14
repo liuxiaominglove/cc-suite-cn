@@ -1,22 +1,38 @@
+import { execSync } from "node:child_process";
+
 export const READ_ONLY_DECLARATION = "你是只读代码评审员：禁止创建、修改、删除任何文件，禁止运行任何命令；只分析下方提供的代码，输出评审结果。";
 
-export function buildCommand(backend, { model, prompt }) {
+function defaultWhich(command) {
+  try {
+    const out = execSync(`command -v "${command}"`, { encoding: "utf8" }).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveCli(command, { which = null } = {}) {
+  const resolver = which ?? defaultWhich;
+  return resolver(command) || command;
+}
+
+export function buildCommand(backend, { model, prompt }, { which = null } = {}) {
   switch (backend) {
     case "codebuddy":
       return {
-        command: "codebuddy",
+        command: resolveCli("codebuddy", { which }),
         args: ["--model", model, "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"],
         stdin: prompt,
       };
     case "kimi":
       return {
-        command: "kimi",
-        args: ["-p", prompt],
+        command: resolveCli("kimi", { which }),
+        args: ["--plan", "-p", prompt],
         stdin: null,
       };
     case "qwen":
       return {
-        command: "qwen",
+        command: resolveCli("qwen", { which }),
         args: ["--sandbox", "-p", prompt],
         stdin: null,
       };
