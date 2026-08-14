@@ -1,7 +1,8 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { resolve, sep, join, relative } from "node:path";
+import { resolve, sep, join, relative, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { jsonrepair } from "jsonrepair";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
 
@@ -36,6 +37,23 @@ export async function withRetry(fn, { maxRetries = 0, backoffMs = _retryBackoffM
 }
 
 export const REVIEW_PROMPT = "Review the following code for bugs, security issues, and code quality problems. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+
+export const NL_REVIEW_PROMPT = "Review the following natural-language prompt artifact (an opencode command, skill, agent, or rule definition), NOT executable code. Evaluate quality across these dimensions: (1) trigger description clarity; (2) explicit output format; (3) error-path coverage (empty input, missing files, malformed input); (4) vague quantifiers; (5) prohibitions without alternatives; (6) internal consistency with companion SKILL.md or AGENTS.md. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+
+export function isNLArtifact(file) {
+  if (typeof file !== "string" || !file) return false;
+  const f = file.toLowerCase();
+  if (!f.endsWith(".md")) return false;
+  return (
+    f.includes("/commands/") ||
+    f.includes("/skills/") ||
+    f.includes("/agents/") ||
+    f.includes("/rules/") ||
+    f.endsWith("skill.md") ||
+    f.endsWith("agents.md") ||
+    f.endsWith("claude.md")
+  );
+}
 
 export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
 
@@ -117,29 +135,38 @@ export function validateFilePath(filePath, baseDir = process.cwd(), opts = {}) {
 }
 
 export function extractJson(text) {
-  try {
-    return JSON.parse(text);
-  } catch {}
+  if (typeof text !== "string" || !text.trim()) return null;
+
+  const candidates = [];
+  const push = (c) => {
+    const t = (c ?? "").trim();
+    if (t && !candidates.includes(t)) candidates.push(t);
+  };
+
+  push(text);
 
   const jsonBlock = text.match(/```json\s*([\s\S]*?)```\s*$/m);
-  if (jsonBlock) {
-    try {
-      return JSON.parse(jsonBlock[1].trim());
-    } catch {}
-  }
+  if (jsonBlock) push(jsonBlock[1]);
 
   const anyBlock = text.match(/```\s*([\s\S]*?)```\s*$/m);
-  if (anyBlock) {
-    try {
-      return JSON.parse(anyBlock[1].trim());
-    } catch {}
-  }
+  if (anyBlock) push(anyBlock[1]);
 
   const firstBrace = text.indexOf("{");
   const lastBrace = text.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    push(text.substring(firstBrace, lastBrace + 1));
+  }
+
+  for (const c of candidates) {
     try {
-      return JSON.parse(text.substring(firstBrace, lastBrace + 1));
+      return JSON.parse(c);
+    } catch {}
+  }
+
+  for (const c of candidates) {
+    if (!/[{[[]/.test(c)) continue;
+    try {
+      return JSON.parse(jsonrepair(c));
     } catch {}
   }
 
@@ -207,7 +234,9 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
   });
 }
 
-export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null }) {
+
+  let ruleCwd = cwd;
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -243,6 +272,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 
     const { readFile } = await import("node:fs/promises");
     const resolvedDir = validateFilePath(dir, process.cwd(), { allowExternal });
+    ruleCwd = resolvedDir;
     const resolvedExts = exts ?? DEFAULT_EXTS;
     const srcFiles = await collectSourceFiles(resolvedDir, resolvedExts);
 
@@ -290,13 +320,15 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     const { readFile } = await import("node:fs/promises");
     const resolved = validateFilePath(file, process.cwd(), { allowExternal });
     code = await readFile(resolved, "utf-8");
+    ruleCwd = dirname(resolved);
   }
 
-  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : REVIEW_PROMPT);
+  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
 
   const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
-  const rules = projectRules ?? (await collectProjectRules({ cwd }));
-  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}\n\nCODE:\n${frameCode(code)}`;
+  const rules = projectRules ?? (await collectProjectRules({ cwd: ruleCwd }));
+  const fileLabel = fileName ? `\n\nFILE: ${fileName}` : "";
+  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
@@ -395,13 +427,13 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, timeout, customPrompt, retries });
+    return reviewFnUsed({ model, backend, code, timeout, customPrompt, retries, fileName: file });
   }
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt, retries });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt, retries, fileName: file });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };

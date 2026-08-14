@@ -2,6 +2,8 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
+import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
@@ -165,6 +167,20 @@ describe("extractJson", () => {
     assert.ok(result);
     assert.equal(result.x, 1);
   });
+
+  it("should recover fenced JSON with single-quoted strings", () => {
+    const text = "```json\n{'severity':'low','issues':[]}\n```";
+    const result = extractJson(text);
+    assert.ok(result, "should parse single-quoted JSON");
+    assert.equal(result.severity, "low");
+  });
+
+  it("should recover JSON with a trailing comma", () => {
+    const text = '```json\n{"severity":"low","issues":[],}\n```';
+    const result = extractJson(text);
+    assert.ok(result, "should parse despite trailing comma");
+    assert.equal(result.severity, "low");
+  });
 });
 
 describe("review-runner", () => {
@@ -217,6 +233,19 @@ describe("review-runner", () => {
     await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1" });
 
     assert.ok(stdinWritten.includes("只读代码评审员"), "codebuddy should get the read-only declaration");
+  });
+
+  it("labels FILE in prompt when fileName is provided", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1", fileName: "commands/tdd.md" });
+
+    assert.ok(stdinWritten.includes("FILE: commands/tdd.md"), "prompt should label the file name");
   });
 
   it("should throw TimeoutError when process exceeds timeout", async () => {
@@ -997,6 +1026,29 @@ describe("reviewFile", () => {
     assert.equal(r.chunkCount, 2);
     assert.equal(r.success, true);
   });
+
+  it("passes fileName to reviewFn on single-chunk review", async () => {
+    let captured = null;
+    const reviewFn = async (opts) => {
+      captured = opts.fileName;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => "const x = 1;";
+    await reviewFile({ model: "m", backend: "b", file: "f.js", readFn, reviewFn });
+    assert.equal(captured, "f.js");
+  });
+
+  it("passes fileName to reviewFn on every chunk of a large file", async () => {
+    const names = [];
+    const reviewFn = async (opts) => {
+      names.push(opts.fileName);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
+    await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800 });
+    assert.equal(names.length, 3);
+    assert.ok(names.every((n) => n === "big.js"), "every chunk should carry the file name");
+  });
 });
 
 describe("prompt language requirement", () => {
@@ -1188,5 +1240,82 @@ describe("review project rules injection", () => {
 
     assert.ok(stdinWritten, "should write to stdin");
     assert.ok(!stdinWritten.includes("[项目规则]"), "should not include rules section when none found");
+  });
+
+  it("collects rules from the reviewed file's directory when reviewing an external file", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-rule-"));
+    try {
+      await writeFile(join(tmp, "AGENTS.md"), "外部项目规则 XYZ");
+      const target = join(tmp, "target.md");
+      await writeFile(target, "# 目标文件");
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", file: target, allowExternal: true });
+
+      assert.ok(stdinWritten.includes("外部项目规则 XYZ"), "rules should come from the reviewed file's directory, not cwd");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("NL artifact review prompt", () => {
+  afterEach(() => {
+    setSpawn(null);
+  });
+
+  const capturePrompt = async (opts) => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await review(opts);
+    return stdinWritten;
+  };
+
+  it("uses NL review prompt for command files", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-nl-"));
+    try {
+      await mkdir(join(tmp, "commands"), { recursive: true });
+      await writeFile(join(tmp, "commands", "tdd.md"), "# command");
+      const stdin = await capturePrompt({ model: "m", backend: "codebuddy", file: join(tmp, "commands", "tdd.md"), allowExternal: true });
+      assert.ok(stdin.includes("natural-language prompt artifact"), "should use NL prompt for command files");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps code review prompt for source files", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-nl-"));
+    try {
+      await mkdir(join(tmp, "src"), { recursive: true });
+      await writeFile(join(tmp, "src", "foo.ts"), "const x = 1;");
+      const stdin = await capturePrompt({ model: "m", backend: "codebuddy", file: join(tmp, "src", "foo.ts"), allowExternal: true });
+      assert.ok(!stdin.includes("natural-language prompt artifact"), "should not use NL prompt for source files");
+      assert.ok(stdin.includes("bugs"), "should use code review prompt for source files");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("customPrompt overrides NL detection", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-nl-"));
+    try {
+      await mkdir(join(tmp, "commands"), { recursive: true });
+      await writeFile(join(tmp, "commands", "tdd.md"), "# command");
+      const stdin = await capturePrompt({ model: "m", backend: "codebuddy", file: join(tmp, "commands", "tdd.md"), allowExternal: true, customPrompt: "只找安全问题" });
+      assert.ok(stdin.includes("只找安全问题"), "should use custom prompt");
+      assert.ok(!stdin.includes("natural-language prompt artifact"), "should not auto-switch when customPrompt given");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });

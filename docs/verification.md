@@ -90,6 +90,13 @@
 | 风险1: codebuddy 只读不设防 → 修复 | 负向实测：`--print` 非交互默认拒 Edit/Write，但 Bash 会挂起等审批；加 `--disallowedTools "Edit Write Bash"` 后 25s 内明确拒绝且不挂起（文件未变）。所有后端统一加 READ_ONLY_DECLARATION | 🟢 | 2026-08-14 |
 | 风险2: hy3 裁决注入项目规则 | `buildAdjudicatorPrompt` 加 rules 段 + `adjudicate` 透传 + `evaluateModels` 加 resolveRules（CLI 从 cwd 读 AGENTS.md）；3 单测 | 🟢 | 2026-08-14 |
 | 风险3: adjudicate 加重试 | `adjudicate` 用 withRetry（retries 默认0，CLI 传2），transient 失败重试而非直接 uncertain；2 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-1: reviewFile 单块/每块评审传 fileName | `review()` 加 `fileName` 参数（prompt 加 `FILE:` 标注）+ `reviewFile` 透传；修 qwen 把 file 字段标错的根因；3 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-2: extractJson 用 jsonrepair 兜底 | 引 `jsonrepair`；候选列表 + 严格/宽松双解析；修 glm 非法 JSON（尾随逗号/单引号）丢 finding；2 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-6: allowExternal 规则跟被审文件目录 | `review()` `ruleCwd` = file 目录（或 dir）；`collectProjectRules` 从被审目录收 AGENTS.md；1 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-3: run-audit/run-review 支持 --allow-external + --prompt | `jobs.mjs` parseArgs/runAudit/spawnWorker/CLI 全链路透传，外部文件评审可记账本；3 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-4: 内置 NL 工件评审维度 | `NL_REVIEW_PROMPT` + `isNLArtifact`（.md 命令/技能/agent 自动切换，--prompt 可覆盖）；3 单测 | 🟢 | 2026-08-14 |
+| 审查 NL 工件反思 WI-5: adjudicate 防幻觉声明 | `buildAdjudicatorPrompt` 加"不要声称搜索仓库（无权访问）"；消除 hy3 对文档 finding 的"全仓搜索零匹配"假阴；1 单测 | 🟢 | 2026-08-14 |
+| 本轮 6 WI 全绿 | `pnpm test:unit` 272 全绿 + guard 通过 | 🟢 | 2026-08-14 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

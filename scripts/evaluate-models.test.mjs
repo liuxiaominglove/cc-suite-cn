@@ -159,6 +159,12 @@ describe("buildAdjudicatorPrompt", () => {
     const p = buildAdjudicatorPrompt("removeItem null crash", "function x(){}");
     assert.ok(!p.includes("[项目规则]"), p);
   });
+
+  it("warns the adjudicator not to claim a repository search", () => {
+    const p = buildAdjudicatorPrompt("finding", "code");
+    assert.ok(p.includes("不要声称搜索"), "should include anti-hallucination clause");
+    assert.ok(p.includes("无权访问"), "should state the adjudicator cannot access the filesystem");
+  });
 });
 
 describe("parseVerdict", () => {

@@ -98,10 +98,12 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
     ["--dir", spec.dir],
     ["--exts", spec.exts],
     ["--ms", spec.ms],
+    ["--prompt", spec.prompt],
   ]) {
     if (val) args.push(flag, String(val));
   }
   if (spec.diff) args.push("--diff");
+  if (spec.allowExternal) args.push("--allow-external");
   const stdio = logPath ? ["ignore", openLog(logPath, "a"), openLog(logPath, "a")] : "ignore";
   const child = spawn("node", args, { detached: true, stdio });
   child.unref();
@@ -173,10 +175,13 @@ export function parseArgs(args) {
       const file = flag("file");
       const backend = flag("backend");
       const maxConcurrent = flag("max-concurrent");
+      const prompt = flag("prompt");
       if (model) r.model = model;
       if (file) r.file = file;
       if (backend) r.backend = backend;
       if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
+      if (prompt) r.prompt = prompt;
+      if (rest.includes("--allow-external")) r.allowExternal = true;
       if (hasBackground) r.background = true;
       return r;
     }
@@ -186,11 +191,14 @@ export function parseArgs(args) {
       const dir = flag("dir");
       const exts = flag("exts");
       const maxConcurrent = flag("max-concurrent");
+      const prompt = flag("prompt");
       if (file) r.file = file;
       if (dir) r.dir = dir;
       if (exts) r.exts = exts.split(",").map((e) => e.trim());
       if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
+      if (prompt) r.prompt = prompt;
       if (rest.includes("--diff")) r.diff = true;
+      if (rest.includes("--allow-external")) r.allowExternal = true;
       if (hasBackground) r.background = true;
       return r;
     }
@@ -200,11 +208,14 @@ export function parseArgs(args) {
       const file = flag("file");
       const dir = flag("dir");
       const exts = flag("exts");
+      const prompt = flag("prompt");
       if (jobId) r.jobId = jobId;
       if (file) r.file = file;
       if (dir) r.dir = dir;
       if (exts) r.exts = exts.split(",").map((e) => e.trim());
+      if (prompt) r.prompt = prompt;
       if (rest.includes("--diff")) r.diff = true;
+      if (rest.includes("--allow-external")) r.allowExternal = true;
       return r;
     }
     case "--worker-review": {
@@ -213,10 +224,13 @@ export function parseArgs(args) {
       const model = flag("model");
       const file = flag("file");
       const backend = flag("backend");
+      const prompt = flag("prompt");
       if (jobId) r.jobId = jobId;
       if (model) r.model = model;
       if (file) r.file = file;
       if (backend) r.backend = backend;
+      if (prompt) r.prompt = prompt;
+      if (rest.includes("--allow-external")) r.allowExternal = true;
       return r;
     }
     case "--worker-sleep": {
@@ -244,7 +258,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2 }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -254,8 +268,8 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     AUDIT_WORKERS.map(async ({ backend, model }) => {
       try {
         const r = useChunking
-          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries })
-          : await review({ model, backend, file, dir, exts, diff, timeout, retries });
+          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt })
+          : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
         return { backend, model, success: false, error: err.message };
@@ -317,30 +331,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   } else if (parsed.action === "run-review") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-review", model: parsed.model, file: parsed.file, backend: parsed.backend }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
+      const id = await runJobBackground(store, meta, { action: "worker-review", model: parsed.model, file: parsed.file, backend: parsed.backend, prompt: parsed.prompt, allowExternal: parsed.allowExternal }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
       const { review } = await import("./review-runner.mjs");
-      const id = await runJob(store, meta, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy" }));
+      const id = await runJob(store, meta, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy", allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
       const job = await store.get(id);
       console.log(`${id}  [${job.status}]`);
     }
   } else if (parsed.action === "run-audit") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
+      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, prompt: parsed.prompt, allowExternal: parsed.allowExternal }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
-      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));
+      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
       const job = await store.get(id);
       const summary = job?.result?.workers ? `  ${summarizeWorkers(job.result.workers)}` : "";
       console.log(`${id}  [${job.status}]${summary}`);
     }
   } else if (parsed.action === "worker-review") {
     const { review } = await import("./review-runner.mjs");
-    await updateJobWithResult(store, parsed.jobId, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy" }));
+    await updateJobWithResult(store, parsed.jobId, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy", allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
   } else if (parsed.action === "worker-audit") {
-    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff }));
+    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
   } else if (parsed.action === "worker-sleep") {
     await updateJobWithResult(store, parsed.jobId, () => new Promise((resolve) => setTimeout(resolve, parsed.ms ?? 1000)));
   } else {

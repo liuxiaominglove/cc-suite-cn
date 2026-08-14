@@ -159,6 +159,18 @@ describe("parseArgs", () => {
   it("parses --run-audit with file", () => {
     assert.deepEqual(parseArgs(["--run-audit", "--file", "x.js"]), { action: "run-audit", file: "x.js" });
   });
+
+  it("parses --allow-external and --prompt on run-audit", () => {
+    const r = parseArgs(["--run-audit", "--file", "x.md", "--allow-external", "--prompt", "评审NL工件"]);
+    assert.equal(r.allowExternal, true);
+    assert.equal(r.prompt, "评审NL工件");
+  });
+
+  it("parses --allow-external and --prompt on run-review", () => {
+    const r = parseArgs(["--run-review", "--model", "glm-5.2", "--file", "x.md", "--allow-external", "--prompt", "评审"]);
+    assert.equal(r.allowExternal, true);
+    assert.equal(r.prompt, "评审");
+  });
 });
 
 describe("defaultStore", () => {
@@ -339,6 +351,20 @@ describe("runAudit", () => {
     };
     await runAudit({ file: "x.js", review });
     assert.equal(captured, 900000);
+  });
+
+  it("passes allowExternal and customPrompt through to review", async () => {
+    const captured = [];
+    const review = async (opts) => {
+      captured.push({ allowExternal: opts.allowExternal, customPrompt: opts.customPrompt });
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await runAudit({ file: "x.js", review, allowExternal: true, customPrompt: "评审NL工件" });
+    assert.equal(captured.length, 2);
+    for (const c of captured) {
+      assert.equal(c.allowExternal, true);
+      assert.equal(c.customPrompt, "评审NL工件");
+    }
   });
 });
 

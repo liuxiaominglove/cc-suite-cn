@@ -97,7 +97,7 @@ export function classifyConsensus(results) {
 
 export function buildAdjudicatorPrompt(finding, code, rules = "") {
   const rulesSection = (rules ?? "").trim() ? `\n\n[项目规则]\n${rules}` : "";
-  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}\n\nCODE:\n${frameCode(code)}`;
+  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。下方 CODE 就是完整的被审内容——你只能基于它判断，不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}\n\nCODE:\n${frameCode(code)}`;
 }
 
 export function parseVerdict(text) {
