@@ -87,6 +87,17 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 - Only mock external boundaries (network, filesystem, child_process) — never mock business logic
 - Run tests before committing: `pnpm test`
 
+### 修 bug 铁律（适用于 opencode 修任何项目，包括被审项目）
+
+修 bug 时**必须走 TDD，禁止跳过 RED**：
+
+1. **RED 先行**：先列测试清单（场景 / 输入 / 期望输出），再写失败测试，确认测试红，才准写实现。
+2. **GREEN 最少代码**：只写让测试通过的代码，不加额外功能、不提前优化。
+3. **REFACTOR**：整理命名/去重，跑全部测试仍绿。
+4. **边界必测**：空值、null、undefined、极值、错误路径。
+5. **无测试框架的项目**：先用 Node 内置 `node:test` 搭考场（`.mjs` 扩展名天然 ESM，**零 npm**），把纯逻辑抽成模块再测。DOM 类改动无法无 jsdom 单测时，用"语法检查 + 浏览器手动验证"兜底，并在验证台账标 🟡。
+6. **能力动词逐个测**：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 测试证据。
+
 ## Verification Discipline
 
 The global rule `~/.config/opencode/rules/verification-discipline.md` applies everywhere. This section defines its project-specific instantiation:
