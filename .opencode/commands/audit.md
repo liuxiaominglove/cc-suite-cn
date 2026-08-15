@@ -27,6 +27,7 @@ node scripts/audit-baseline.mjs --detect "<项目根目录>"
 | 输出 | 处理 |
 |------|------|
 | `isGit: false` | 非 git 仓库，跳过本步，直接全量审 |
+| `dirty: true` | **工作区有未提交改动**——提示用户「工作区未提交改动不在 `git diff` 对比内，增量结果可能不完整」，询问「先提交再增量审 / 继续全量审」 |
 | `firstAudit: true` | 首次审计，直接全量审 |
 | `changed: false` | 自上次审计无变更，提示用户并询问是否仍要审 |
 | `changed: true` + `files` 非空 | **主动询问用户：「检测到上次审计后 N 个文件变更，是否增量审查（只审变更文件）？」** |

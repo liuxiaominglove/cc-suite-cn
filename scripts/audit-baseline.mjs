@@ -13,6 +13,15 @@ export function gitHead(cwd = process.cwd(), exec = execSync) {
   }
 }
 
+export function gitDirty(cwd = process.cwd(), exec = execSync) {
+  try {
+    const out = exec("git status --porcelain", { cwd, encoding: "utf8" });
+    return out.trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
 export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync) {
   if (typeof baseCommit !== "string" || !/^[a-f0-9]{7,40}$/.test(baseCommit)) {
     return [];
@@ -69,17 +78,18 @@ export async function detectAuditScope(project, { cwd = process.cwd(), exec = ex
   const baseline = await loadBaseline(path);
   const prev = baseline[project];
   const head = gitHead(cwd, exec);
+  const dirty = gitDirty(cwd, exec);
   if (!head) {
-    return { isGit: false, changed: false, files: [], head: null };
+    return { isGit: false, changed: false, files: [], head: null, dirty };
   }
   if (!prev || !prev.commit) {
-    return { isGit: true, changed: true, firstAudit: true, files: null, head };
+    return { isGit: true, changed: true, firstAudit: true, files: null, head, dirty };
   }
   if (prev.commit === head) {
-    return { isGit: true, changed: false, files: [], head };
+    return { isGit: true, changed: false, files: [], head, dirty };
   }
   const files = gitChangedFiles(prev.commit, cwd, exec);
-  return { isGit: true, changed: true, firstAudit: false, files, baseCommit: prev.commit, head };
+  return { isGit: true, changed: true, firstAudit: false, files, baseCommit: prev.commit, head, dirty };
 }
 
 export function parseSaveArgs(args) {

@@ -639,3 +639,29 @@ describe("makeResolveCode", () => {
     assert.equal(await resolveCode("a.js"), "");
   });
 });
+
+describe("buildAdjudicatorPrompt 技术栈", () => {
+  it("传 stackContext 时含 [技术栈] 段", () => {
+    const p = buildAdjudicatorPrompt("x", "code", "", "", "Node.js (node >=22)");
+    assert.ok(p.includes("[技术栈]"), p);
+    assert.ok(p.includes("Node.js"), p);
+  });
+
+  it("不传 stackContext 时不含 [技术栈]", () => {
+    const p = buildAdjudicatorPrompt("x", "code");
+    assert.ok(!p.includes("[技术栈]"), p);
+  });
+});
+
+describe("adjudicate 技术栈", () => {
+  it("adjudicate 传 stackContext 进 prompt", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"true","evidence":"e"}');
+      return captured;
+    });
+    await adjudicate({ finding: "x", code: "y", stackContext: "Node.js (node >=22)" });
+    assert.ok(captured.stdinWritten.includes("[技术栈]"), "prompt 应含技术栈段");
+    assert.ok(captured.stdinWritten.includes("Node.js"), "prompt 应含技术栈内容");
+  });
+});

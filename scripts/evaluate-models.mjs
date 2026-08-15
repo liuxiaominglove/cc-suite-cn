@@ -105,10 +105,11 @@ export function classifyConsensus(results) {
   return { groups, perModel };
 }
 
-export function buildAdjudicatorPrompt(finding, code, rules = "", relatedCode = "") {
+export function buildAdjudicatorPrompt(finding, code, rules = "", relatedCode = "", stackContext = "") {
   const rulesSection = (rules ?? "").trim() ? `\n\n[项目规则]\n${rules}` : "";
   const relatedSection = (relatedCode ?? "").trim() ? `\n\n[相关模块源码]（本文件 import 的本地模块，判断 finding 时请查阅其中函数的真实实现）\n${relatedCode}` : "";
-  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
+  const stackSection = (stackContext ?? "").trim() ? `\n\n[技术栈] ${stackContext}` : "";
+  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${stackSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
 }
 
 export function parseVerdict(text) {
@@ -149,10 +150,10 @@ async function mapLimit(items, limit, fn) {
 
 export const ADJUDICATE_MAX_CTX_LINES = 800;
 
-export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", retries = 0 }) {
+export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", stackContext = "", retries = 0 }) {
   const lineCount = code ? String(code).split("\n").length : 0;
   const ctx = line && lineCount > ADJUDICATE_MAX_CTX_LINES ? extractContext(code, line, { contextLines }) : code;
-  const prompt = buildAdjudicatorPrompt(finding, ctx, rules, relatedCode);
+  const prompt = buildAdjudicatorPrompt(finding, ctx, rules, relatedCode, stackContext);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
 
   let stdout;
@@ -175,7 +176,7 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
 
 const MIN_SAMPLES = 5;
 
-export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, resolveImportContext = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY }) {
+export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, resolveImportContext = null, resolveStackContext = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY }) {
   const perModel = {};
   const allFindings = [];
   let verdicts = [];
@@ -235,7 +236,8 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       const file = f.auditFile || f.issue?.file || "";
       const code = resolveCode ? await resolveCode(file) : "";
       const relatedCode = resolveImportContext ? await resolveImportContext(file) : "";
-      const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, relatedCode, retries });
+      const stackContext = resolveStackContext ? await resolveStackContext(file) : "";
+      const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, relatedCode, stackContext, retries });
       return {
         f,
         verdict: result && result.verdict,

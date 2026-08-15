@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitHead, gitChangedFiles, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs } from "./audit-baseline.mjs";
+import { gitHead, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs } from "./audit-baseline.mjs";
 
 function fakeExec(handler) {
   return (cmd, opts) => {
@@ -218,5 +218,38 @@ describe("saveBaseline 并发安全", () => {
     const b = await loadBaseline(p);
     assert.equal(b["/a"].commit, "c1");
     assert.equal(b["/b"].commit, "c2");
+  });
+});
+
+describe("gitDirty / detectAuditScope dirty", () => {
+  it("gitDirty 有未提交改动返回 true", () => {
+    const exec = (cmd) => (cmd.includes("status --porcelain") ? " M a.js\n" : "");
+    assert.equal(gitDirty("/repo", exec), true);
+  });
+
+  it("gitDirty 干净返回 false", () => {
+    const exec = (cmd) => (cmd.includes("status --porcelain") ? "" : "");
+    assert.equal(gitDirty("/repo", exec), false);
+  });
+
+  it("gitDirty git 失败返回 false", () => {
+    const exec = () => { throw new Error("not git"); };
+    assert.equal(gitDirty("/repo", exec), false);
+  });
+
+  it("detectAuditScope 返回 dirty 字段", async () => {
+    const p = await (async () => {
+      const dir = await mkdtemp(join(tmpdir(), "baseline-"));
+      return join(dir, "b.json");
+    })();
+    await saveBaseline("/proj", { commit: "abc123def456" }, p);
+    const exec = (cmd) => {
+      if (cmd.includes("rev-parse")) return "def456abc789\n";
+      if (cmd.includes("status --porcelain")) return " M x.js\n";
+      if (cmd.includes("diff --name-only")) return "";
+      return "";
+    };
+    const r = await detectAuditScope("/proj", { cwd: "/repo", exec, path: p });
+    assert.equal(r.dirty, true, "应返回 dirty=true");
   });
 });

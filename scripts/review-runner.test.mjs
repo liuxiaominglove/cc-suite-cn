@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -1544,5 +1544,115 @@ describe("reviewFile 空文件", () => {
     const r = await reviewFile({ model: "m", backend: "b", file: "empty.js", readFn, reviewFn });
     assert.ok(captured.file, "空文件单块路径应传 file（否则 review 抛 'code or file required'）");
     assert.equal(r.success, true);
+  });
+});
+
+describe("collectStackContext", () => {
+  async function makeProj(files) {
+    const dir = await mkdtemp(join(tmpdir(), "cc-stack-"));
+    for (const [rel, content] of Object.entries(files)) {
+      const p = join(dir, rel);
+      await mkdir(join(p, ".."), { recursive: true });
+      await writeFile(p, content);
+    }
+    return dir;
+  }
+
+  it("读 package.json 提取技术栈摘要", async () => {
+    const dir = await makeProj({
+      "package.json": JSON.stringify({
+        name: "x",
+        engines: { node: ">=22" },
+        dependencies: { react: "^18" },
+        devDependencies: { vitest: "^2" },
+        scripts: { test: "node --test" },
+      }),
+    });
+    const s = await collectStackContext(dir);
+    assert.match(s, /Node\.js/, "应含 Node.js");
+    assert.match(s, /node >=22/, "应含 node 版本");
+    assert.match(s, /react/, "应含依赖 react");
+    assert.match(s, /node --test/, "应含 test 脚本");
+  });
+
+  it("子目录向上查找根 package.json", async () => {
+    const dir = await makeProj({ "package.json": JSON.stringify({ engines: { node: ">=22" } }) });
+    const s = await collectStackContext(join(dir, "src", "sub"));
+    assert.match(s, /Node\.js/, "应向上找到根 package.json");
+  });
+
+  it("无技术栈文件返回空串", async () => {
+    const dir = await makeProj({ "README.md": "x" });
+    assert.equal(await collectStackContext(dir), "");
+  });
+
+  it("损坏 package.json 不抛错", async () => {
+    const dir = await makeProj({ "package.json": "{ bad" });
+    assert.equal(await collectStackContext(dir), "");
+  });
+
+  it("requirements.txt 识别 Python + 依赖", async () => {
+    const dir = await makeProj({ "requirements.txt": "fastapi\npytest\n" });
+    const s = await collectStackContext(dir);
+    assert.match(s, /Python/);
+    assert.match(s, /fastapi/);
+  });
+
+  it("go.mod 识别 Go", async () => {
+    const dir = await makeProj({ "go.mod": "module x\n\ngo 1.21\n" });
+    assert.match(await collectStackContext(dir), /Go/);
+  });
+
+  it("Cargo.toml 识别 Rust", async () => {
+    const dir = await makeProj({ "Cargo.toml": "[package]\nname = \"x\"\n" });
+    assert.match(await collectStackContext(dir), /Rust/);
+  });
+});
+
+describe("review 注入技术栈", () => {
+  afterEach(() => setSpawn(null));
+
+  it("file 模式注入 [技术栈] 段", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-stk-"));
+    try {
+      await writeFile(join(tmp, "package.json"), JSON.stringify({ engines: { node: ">=22" }, dependencies: { react: "^18" } }));
+      const target = join(tmp, "a.js");
+      await writeFile(target, "export const x = 1;");
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", file: target, allowExternal: true });
+
+      assert.ok(stdinWritten.includes("[技术栈]"), "应含技术栈段");
+      assert.ok(stdinWritten.includes("react"), "应含依赖 react");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("无技术栈文件不注入 [技术栈]", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-stk-"));
+    try {
+      const target = join(tmp, "a.js");
+      await writeFile(target, "export const x = 1;");
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", file: target, allowExternal: true });
+
+      assert.ok(!stdinWritten.includes("[技术栈]"), "无技术栈文件不应注入");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 });

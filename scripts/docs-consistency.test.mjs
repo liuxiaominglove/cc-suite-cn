@@ -106,11 +106,13 @@ describe("命令/规格（WI-5）", () => {
     assert.match(c, /增量审查/, "audit.md 缺增量审查说明");
     assert.match(c, /audit-baseline\.mjs/, "audit.md 缺基线检测命令");
     assert.match(c, /--save/, "audit.md 缺审完更新基线");
+    assert.match(c, /未提交改动|工作区/, "audit.md 缺工作区未提交提示");
   });
 
   it("fix.md 含审计前置两道闸门", () => {
     const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
     assert.match(c, /审计前置两道闸门/, "fix.md 缺审计前置闸门声明");
+    assert.match(c, /可选.*修复计划|修复计划.*可选/, "fix.md 缺可选修复计划提示");
   });
 
   it("SKILL.md 含审计前置两道闸门", () => {

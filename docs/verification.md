@@ -408,3 +408,27 @@
 - `pnpm test:unit`：388 全绿 + guard 绿。
 - 三件套闭环数据流全部实测通过。
 - 基线已更新至 `1a6154e`（本次审完状态，供下次增量对比）。
+
+---
+
+# 技术栈感知 + 工作区确认 + 修复计划（三个改进）
+
+## 改动
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| SC-5: `collectStackContext`（技术栈感知） | 读 package.json（engines/deps/test）/requirements.txt/pyproject.toml/go.mod/Cargo.toml，向上查找；`review-runner.test.mjs` +7 用例 | 🟢 | 2026-08-15 |
+| SC-6: review 注入 `[技术栈]` 段 | file 模式 collectStackContext → fullPrompt 加 stackSection；+2 集成用例 | 🟢 | 2026-08-15 |
+| SC-7: adjudicate 注入技术栈 | buildAdjudicatorPrompt/adjudicate 加 stackContext，evaluateModels 加 resolveStackContext；+3 用例 | 🟢 | 2026-08-15 |
+| SC-8: `gitDirty` + detectAuditScope 返回 dirty | `git status --porcelain` 检测工作区；+4 用例 | 🟢 | 2026-08-15 |
+| SC-9: audit.md Step 0 工作区未提交提示 | dirty=true 时提示「未提交改动不在 git diff 内，增量可能不完整」 | 🟢 | 2026-08-15 |
+| SC-10: fix.md 可选修复计划 | ≥2 文件时先列 3 行计划，单文件跳过（轻量） | 🟢 | 2026-08-15 |
+
+## 实测
+
+- `collectStackContext` 对 learnunk → `Node.js (node >=22.5.0) | test: node --test`；对 cc-suite-pe → `Node.js | deps: jsonrepair, ... | test: ...`（test 脚本超 60 字符截断）✅
+- `pnpm test:unit`：404 全绿 + guard 绿。
+
+## 依据（为什么做技术栈感知）
+
+台账历史误报根因：learnunk 的 `node:sqlite`（评审员误报缺依赖）、`~ 展开`（不懂 os.homedir）、`tailwind` vs `tailwindcss`——都是"评审员不懂技术栈"。技术栈感知是"上下文注入"思路的根本性延伸，从源头降误报/假阴。

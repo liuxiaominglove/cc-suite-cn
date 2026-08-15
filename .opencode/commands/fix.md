@@ -41,6 +41,8 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 ## Step 4: 修 bug（opencode 亲自，严格 TDD）
 
+> **可选**：若 bug 涉及 ≥2 个文件或跨模块，先列 3 行修复计划（改哪些文件 / 核心改法 / 影响面）再动手；单文件单行修复可跳过。
+
 对终审确认的真 bug，opencode 用 TDD 修：
 
 1. **RED 先行**：先列测试清单 → 写失败测试 → 确认红

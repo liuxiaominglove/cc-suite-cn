@@ -197,6 +197,65 @@ export async function collectImportContext(filePath, { readFile = null } = {}) {
   return parts.length ? parts.join("\n\n") : "";
 }
 
+function summarizeStack(filename, content) {
+  if (filename === "package.json") {
+    try {
+      const pkg = JSON.parse(content);
+      if (!pkg || typeof pkg !== "object") return "";
+      const parts = [];
+      const engine = pkg.engines?.node;
+      parts.push(`Node.js${engine ? ` (node ${engine})` : ""}`);
+      const deps = [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
+      if (deps.length) parts.push(`deps: ${deps.slice(0, 10).join(", ")}`);
+      if (pkg.scripts?.test) {
+        const t = String(pkg.scripts.test);
+        parts.push(`test: ${t.length > 60 ? t.slice(0, 60) + "…" : t}`);
+      }
+      return parts.join(" | ");
+    } catch {
+      return "";
+    }
+  }
+  if (filename === "requirements.txt") {
+    const deps = content
+      .split("\n")
+      .map((l) => l.trim().split(/[<>=!~\s\[]/)[0])
+      .filter((d) => d && !d.startsWith("#") && !d.startsWith("-"))
+      .slice(0, 10);
+    return `Python${deps.length ? ` | deps: ${deps.join(", ")}` : ""}`;
+  }
+  if (filename === "pyproject.toml") {
+    return "Python";
+  }
+  if (filename === "go.mod") {
+    const m = content.match(/^go (\d+\.\d+)/m);
+    return `Go${m ? ` (go ${m[1]})` : ""}`;
+  }
+  if (filename === "Cargo.toml") {
+    return "Rust";
+  }
+  return "";
+}
+
+export async function collectStackContext(dir, { readFile = null } = {}) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  const stackFiles = ["package.json", "requirements.txt", "pyproject.toml", "go.mod", "Cargo.toml"];
+  let cur = dir;
+  for (;;) {
+    for (const f of stackFiles) {
+      const content = await read(join(cur, f)).catch(() => null);
+      if (content != null) {
+        const summary = summarizeStack(f, content);
+        if (summary) return summary;
+      }
+    }
+    const parent = dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return "";
+}
+
 let _gitSpawn = null;
 
 export function setGitSpawn(fn) {
@@ -348,6 +407,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 
   let ruleCwd = cwd;
   let importContext = "";
+  let stackContext = "";
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -434,6 +494,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     ruleCwd = dirname(resolved);
     if (!isNLArtifact(fileName ?? file)) {
       importContext = await collectImportContext(resolved);
+      stackContext = await collectStackContext(ruleCwd);
     }
   }
 
@@ -443,7 +504,8 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   const rules = projectRules ?? (await collectProjectRules({ cwd: ruleCwd }));
   const fileLabel = fileName ? `\n\nFILE: ${fileName}` : "";
   const importSection = importContext ? `\n\n[项目上下文] 本文件 import 的本地模块：\n${importContext}` : "";
-  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
+  const stackSection = stackContext ? `\n\n[技术栈] ${stackContext}` : "";
+  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${stackSection}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
