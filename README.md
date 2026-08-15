@@ -1,87 +1,16 @@
 # cc-suite-cn — AI 施工队协作系统
 
-**Multi-model code review orchestration for opencode.** glm + kimi find bugs, qwen critiques, hy3 verifies — opencode (DeepSeek) orchestrates and fixes with TDD. Different vendors, different training data, different blind spots.
+> 受 [李笑来 cc-suite](https://github.com/xiaolai/cc-suite) 启发重写的**中国大陆版**——opencode 当总指挥，五个**国产大模型**各司其职，交叉查代码、**谁都不批自己**。
 
-> [Installation (EN)](#installation) · [中文说明](#一它解决了什么问题大白话)
-
-一个让 **opencode（DeepSeek）当总指挥兼修 bug、四个 AI 模型各司其职**、交叉查代码的协作系统。
-
-> 一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy3 当裁判判真假。**
+**English TL;DR** — A mainland-China rework of [Li Xiaolai's cc-suite](https://github.com/xiaolai/cc-suite): multi-model code review orchestration running on opencode. DeepSeek orchestrates and fixes; GLM + Kimi find bugs, Qwen critiques, Hy3 verifies — all domestic Chinese models, no VPN needed. Five models, four independent roles, and **nobody reviews their own work**.
 
 ---
 
-## Installation
+## 一、这是什么
 
-### What it does
+一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy3 当裁判判真假，DeepSeek 亲自修。**
 
-One model misses bugs another catches. cc-suite-cn splits review into four independent roles — and **nobody reviews their own work**:
-
-| Role | Model | Job |
-|------|-------|-----|
-| Find bugs | GLM-5.2 + Kimi K2 | read-only review, produce findings |
-| Critic | Qwen3 Coder Plus | independent second opinion (sandboxed) |
-| Verifier | Hy3 | adjudicates each finding true/false |
-| Orchestrator + Fixer | opencode (DeepSeek) | fixes real bugs with TDD |
-
-### Prerequisites
-
-- [opencode](https://opencode.ai) — the host orchestrator
-- Node.js ≥ 18
-- 3 worker CLIs: `@tencent-ai/codebuddy-code`, `@moonshot-ai/kimi-code`, `@qwen-code/qwen-code`
-- 3 API keys: `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`, `TOKENHUB_API_KEY`
-
-### Install
-
-```bash
-git clone https://github.com/liuxiaominglove/cc-suite-cn.git
-cd cc-suite-cn
-
-# 1. Install the 3 worker CLIs
-npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
-
-# 2. Set API keys (add to ~/.zshrc for persistence)
-export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen (Alibaba DashScope)
-export MOONSHOT_API_KEY=your-moonshot-key     # Kimi (Moonshot)
-export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3 (Tencent TokenHub)
-
-# 3. codebuddy CLI uses your CodeBuddy platform account (GLM-5.2 + Hy3 gateway).
-#    Run `codebuddy` once and follow its auth prompt, or set CODEBUDDY_API_KEY.
-
-# 4. Verify everything is ready
-pnpm preflight
-```
-
-### Use
-
-Open opencode inside this repo. The project commands (`.opencode/commands/`) load automatically:
-
-```
-/audit src/file.ts        → glm+kimi find bugs (recorded to the job ledger)
-/audit-full src/file.ts   → find bugs + critic (qwen) + verdict (hy3)
-/fix <bug>                → find → adjudicate → fix (TDD) → verify
-/evaluate --arbitrate     → who finds more, who finds accurately
-/verify                   → review git diff only
-/jobs / /result <id>      → inspect the job ledger
-```
-
-### Test
-
-```bash
-pnpm test        # unit tests + drift guard (no API calls)
-pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
-```
-
-### License
-
-[MIT](LICENSE)
-
----
-
-## 一、它解决了什么问题（大白话）
-
-以前用 AI 写代码，你只能指望**一个 AI** 干活，它错了你未必知道。
-
-现在这套系统：
+以前用 AI 写代码，你只能指望**一个 AI** 干活，它错了你未必知道。这套系统：
 
 1. **多个 AI 交叉审代码**——一个 AI 漏掉的 bug，另一个能抓到（不同公司、不同训练数据、盲区不同）。
 2. **分工明确、各司其职**——找 bug 的、挑毛病的、判真假的、修 bug 的，各干各的，不"自己批自己"。
@@ -90,7 +19,35 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 二、架构（一张图看懂）
+## 二、与原版 cc-suite 的关系（改版说明）
+
+原版 [`xiaolai/cc-suite`](https://github.com/xiaolai/cc-suite) 是一个以 **Claude Code 为中心**的插件，把 Claude Code / Codex CLI / Antigravity CLI / Grok / Qwen / Kimi 等多个 AI 编程 CLI 桥接起来、互相委派任务，模型以海外为主（Claude、Grok）。
+
+**cc-suite-cn** 是它的**中国大陆改版**（受启发重写，非 fork）：
+
+| 维度 | 原版 cc-suite | 本版 cc-suite-cn |
+|------|---------------|------------------|
+| 中心 CLI | Claude Code | **opencode** |
+| 模型 | 海外为主（Claude / Grok） | **全国产**（DeepSeek / GLM / Kimi / Qwen / Hy3），大陆直连、无需 VPN |
+| 聚焦方向 | 跨 CLI 桥接与互相委派 | **多模型交叉代码审查**（找 bug → 批判 → 裁决 → 修） |
+
+---
+
+## 三、五个国产大模型（阵容）
+
+| 模型 | 公司 | 角色 | 干什么 | 为什么是它 |
+|------|------|------|--------|-----------|
+| **DeepSeek V4 Pro** | 深度求索 | 总指挥 + 修 bug | 最懂项目，带 TDD 亲自修 | 逻辑强、代码能力顶尖 |
+| **GLM-5.2** | 智谱 AI | 找 bug | 广撒网，报得多 | 覆盖面广 |
+| **Kimi K2.7 Code** | 月之暗面 | 找 bug | 报得准，质量高 | 长上下文、代码理解强 |
+| **Qwen3 Coder Plus** | 阿里（通义） | 批判员 | 独立第二意见（只读 + 沙箱） | 独立视角挑刺 |
+| **Hy3** | 腾讯混元 | 验证审计员 | 逐条判 finding 真假（只读） | 公正裁决 |
+
+> **核心原则：谁都不批自己。** 找 bug 的不判真假，判真假的不找 bug，修 bug 的（opencode/DeepSeek）最了解项目但只负责修。
+
+---
+
+## 四、机制（一张图看懂）
 
 ```
                      你（老板）
@@ -107,21 +64,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
    （只读评审）     （只读 + 沙箱）    （只读，判 finding 真假）
 ```
 
-### 四个施工队（模型）+ 分工
-
-| 角色 | AI | 公司 | 干什么 |
-|------|-----|------|--------|
-| 找 bug | **GLM-5.2** | 智谱 | 报得多（广撒网） |
-| 找 bug | **Kimi** | 月之暗面 | 报得准（质量高） |
-| 批判员 | **Qwen** | 阿里 | 独立第二意见（只读 + `--sandbox`） |
-| 验证审计员 | **Hy3** | 腾讯混元 | 逐条判 finding 真假（只读） |
-| 总指挥 + 修 bug | **DeepSeek** | 深度求索 | 最了解项目，亲自修（带 TDD） |
-
-> **核心原则：谁都不批自己。** 找 bug 的不判真假，判真假的不找 bug，修 bug 的（opencode）最了解项目但只负责修。
-
----
-
-## 三、核心概念（大白话 + 类比）
+### 核心概念（大白话 + 类比）
 
 | 概念 | 大白话 | 类比 |
 |------|--------|------|
@@ -135,7 +78,41 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 四、命令清单
+## 五、前提条件与安装
+
+### 前提条件
+
+| 依赖 | 说明 |
+|------|------|
+| [opencode](https://opencode.ai) | 宿主 / 总指挥（DeepSeek 跑在它上面） |
+| Node.js ≥ 18 | 运行时 |
+| 3 个 worker CLI | `@tencent-ai/codebuddy-code`（GLM + Hy3 网关）、`@moonshot-ai/kimi-code`、`@qwen-code/qwen-code` |
+| 3 个 API key | `DASHSCOPE_API_KEY`（Qwen）、`MOONSHOT_API_KEY`（Kimi）、`TOKENHUB_API_KEY`（Hy3） |
+
+### 安装
+
+```bash
+git clone https://github.com/liuxiaominglove/cc-suite-cn.git
+cd cc-suite-cn
+
+# 1. 装 3 个 worker CLI
+npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
+
+# 2. 设 API key（建议写进 ~/.zshrc 持久化）
+export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼）
+export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
+export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
+
+# 3. codebuddy CLI 走平台账号登录态（GLM-5.2 + Hy3 网关），无需单独 key。
+#    运行一次 codebuddy，按提示登录即可。
+
+# 4. 自检是否就绪
+pnpm preflight
+```
+
+---
+
+## 六、快速上手（命令）
 
 ### A. opencode 里敲的斜杠命令（重启 opencode 后生效）
 
@@ -168,7 +145,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 五、典型工作流（完整闭环）
+## 七、典型工作流（完整闭环）
 
 ```
 1. 找 bug：  /audit 文件       → glm+kimi 审，出共识 + 各模型报告
@@ -183,7 +160,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 六、各阶段做了什么（演进史）
+## 八、各阶段做了什么（演进史）
 
 | 阶段 | 干了什么 |
 |------|---------|
@@ -201,7 +178,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 七、验证纪律（项目的"质量铁律"）
+## 九、验证纪律（项目的"质量铁律"）
 
 1. **结论 ≤ 证据**：报告的措辞强度，不能超过实际验证到的层次。
 2. **能力动词逐个测**：声称"能做 A/B/C"，就分别测 A、B、C。
@@ -213,7 +190,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 八、安全底线（重要）
+## 十、安全底线（重要）
 
 1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy3）互相独立，判真假的人不找 bug。
 2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi 用 `--agent-file`（`disallowedTools` 锁写工具）+ 子进程 cwd 隔离双保险，误写也落 temp 而非项目。
@@ -222,7 +199,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 九、工程健壮性（大文件也能扛）
+## 十一、工程健壮性（大文件也能扛）
 
 1. **大文件自动分块**：超过 800 行自动切成块（每块重叠 10 行防漏），逐块审，行号自动偏移回原文件。
 2. **超时统一 900s**：找 bug / 批判员 / 验证审计员三个环节都 900 秒，慢 AI（如 kimi）不再被误杀。
@@ -231,7 +208,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 十、环境依赖
+## 十二、环境依赖速查（后端 → 模型 → 通道）
 
 | 依赖 | 用途 |
 |------|------|
@@ -244,7 +221,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 
 ---
 
-## 十一、常用路径速查
+## 十三、常用路径速查
 
 ```
 scripts/review-runner.mjs       只读评审（参数化 backend）
@@ -261,5 +238,9 @@ docs/verification.md            验证台账
 ```
 
 ---
+
+## License
+
+[MIT](LICENSE)
 
 *最后更新：2026-08-15。*
