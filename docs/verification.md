@@ -314,3 +314,36 @@
 - cc-suite-pe `pnpm test:unit`：352 全绿 + guard 绿。
 - learnunk `npm test`：108 全绿。
 - 四角色流程补齐：找 bug → **批判（qwen 复核清单）** → 裁决（hy3）→ 终审（opencode）。
+
+---
+
+# learnunk 增量审核（批判员重定位后首次实战）
+
+**检测**：git 精确识别「上次审核后的新增代码」= `ui.js`（computeSessionViewport 滚动视窗 + allConcepts/viewHeight 概念选择合并 + 会话滚动渲染）+ `explainer.js`（三段式讲解 prompt）。**范围**：只审这 2 文件，triage 聚焦新增行。
+
+## 四环节实战（首次全流程跑通含批判员）
+
+| 环节 | 结果 |
+|------|------|
+| 找 bug（glm+kimi） | 2 文件 6 finding |
+| 批判（qwen criticize） | ui.js 4 条判 agree；**explainer prompt injection 判 disagree（过滤假阳）** |
+| 裁决（hy3） | 6 条落库：4 true / 2 false；**识破 kimi 的「renderContext 未识别」假阳**（`[].join()` 返回 "" 是 falsy，`||` 实际生效） |
+| 终审（opencode） | 确认 3 真 bug + 3 假阳 |
+
+## 三层判断互补（关键发现）
+
+- qwen 批判「同意」了 renderContext 假阳（没识破），hy3 裁决「反对」（识破了）——**两层互相纠错**，正是多角色价值。
+- qwen 批判 + hy3 裁决都正确识别 prompt injection 为假阳（本地工具无信任边界）。
+
+## 真 bug 修复台账（learnunk，TDD）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| LB-8: `pickSession` 切会话不清 `extraConcepts`（AI 概念残留到下一会话） | 加 `this.extraConcepts = []`；`ui.test.js` +1 用例 | 🟢 | 2026-08-15 |
+| LB-9: `refresh` 对 collect 返回 null 无守卫（snapshot 从有效变 null 时 TypeError） | 加 `if (!snapshot)` 优雅降级；`ui.test.js` +1 用例 | 🟢 | 2026-08-15 |
+| LB-10: `explainWithAI`/`extractConceptsWithAI` 无效 timeoutMs 立即超时 | `Number.isFinite(ms) && ms>0 ? ms : 30000`；`explainer.test.js` +1 用例（慢 fetch 验证不立即 abort） | 🟢 | 2026-08-15 |
+
+## 结果
+
+- learnunk `npm test`：111 全绿（+3 用例）。
+- 3 假阳归档：prompt injection、renderContext「未识别」优先级、wrap 缩进（视觉噪音）。
