@@ -101,6 +101,27 @@ describe("命令/规格（WI-5）", () => {
     assert.ok(existsSync(join(ROOT, ".opencode/commands/review.md")), "review.md 应存在于 repo .opencode/commands/");
   });
 
+  it("audit.md 含基线检测 + 增量审查说明", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/audit.md"), "utf8");
+    assert.match(c, /增量审查/, "audit.md 缺增量审查说明");
+    assert.match(c, /audit-baseline\.mjs/, "audit.md 缺基线检测命令");
+    assert.match(c, /--save/, "audit.md 缺审完更新基线");
+  });
+
+  it("fix.md 含审计前置两道闸门", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
+    assert.match(c, /审计前置两道闸门/, "fix.md 缺审计前置闸门声明");
+  });
+
+  it("SKILL.md 含审计前置两道闸门", () => {
+    const c = readFileSync(join(ROOT, ".opencode/skills/cc-review/SKILL.md"), "utf8");
+    assert.match(c, /审计前置两道闸门/, "SKILL.md 缺审计前置闸门声明");
+  });
+
+  it("trace.md 命令存在（变更追溯）", () => {
+    assert.ok(existsSync(join(ROOT, ".opencode/commands/trace.md")), "trace.md 应存在于 repo .opencode/commands/");
+  });
+
   it("specs/orchestrator.spec.md 已删除", () => {
     assert.ok(!existsSync(join(ROOT, "specs", "orchestrator.spec.md")), "specs 应已删除");
   });

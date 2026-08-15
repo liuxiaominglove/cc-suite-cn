@@ -11,6 +11,8 @@ import {
   loadVerdicts,
   getActionableFindings,
   isVerdictStale,
+  markFixed,
+  getTrace,
 } from "./verdict-log.mjs";
 
 describe("hashContent", () => {
@@ -132,5 +134,53 @@ describe("persistVerdicts 并发安全", () => {
     const files = await readdir(dir);
     const tmps = files.filter((f) => f.includes(".verdict-") && f.endsWith(".tmp"));
     assert.equal(tmps.length, 0, "不应残留 .tmp 文件");
+  });
+});
+
+describe("markFixed / getTrace", () => {
+  it("markFixed 给匹配 finding 追加 fixed 字段", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", codeHash: "h1" }], p);
+    const r = await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "test:foo" }, p);
+    assert.ok(r, "应找到匹配条目");
+    assert.equal(r.fixed.commit, "c1");
+    assert.equal(r.fixed.testEvidence, "test:foo");
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].fixed.commit, "c1", "持久化后 fixed 字段应存在");
+  });
+
+  it("markFixed 匹配不上返回 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const r = await markFixed("x.js", 1, "不存在", { commit: "c1" }, p);
+    assert.equal(r, null);
+  });
+
+  it("markFixed finding 为 null 安全返回 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const r = await markFixed("a.js", 1, null, { commit: "c1" }, p);
+    assert.equal(r, null);
+  });
+
+  it("getTrace 返回完整链路", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", evidence: "e", codeHash: "h1" }], p);
+    await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t" }, p);
+    const trace = await getTrace("a.js", 1, "f", p);
+    assert.equal(trace.verdict, "true");
+    assert.equal(trace.evidence, "e");
+    assert.equal(trace.codeHash, "h1");
+    assert.equal(trace.fixed.commit, "c1");
+    assert.equal(trace.fixed.testEvidence, "t");
+  });
+
+  it("getTrace 无记录返回 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const trace = await getTrace("不存在", 1, "f", p);
+    assert.equal(trace, null);
   });
 });

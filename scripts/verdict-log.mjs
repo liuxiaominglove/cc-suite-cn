@@ -63,3 +63,26 @@ export function isVerdictStale(verdict, currentContent) {
   if (!verdict?.codeHash) return true;
   return hashContent(currentContent) !== verdict.codeHash;
 }
+
+export async function markFixed(file, line, finding, { commit, testEvidence, fixedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
+  const log = await loadVerdicts(filePath);
+  const key = verdictKey({ file, line, finding });
+  const target = log.find((v) => verdictKey(v) === key);
+  if (!target) return null;
+  const updated = { ...target, fixed: { commit, testEvidence, fixedAt } };
+  await persistVerdicts([updated], filePath);
+  return updated;
+}
+
+export async function getTrace(file, line, finding, filePath = VERDICT_LOG_PATH) {
+  const log = await loadVerdicts(filePath);
+  const key = verdictKey({ file, line, finding });
+  const target = log.find((v) => verdictKey(v) === key);
+  if (!target) return null;
+  return {
+    verdict: target.verdict,
+    evidence: target.evidence ?? "",
+    codeHash: target.codeHash ?? null,
+    fixed: target.fixed ?? null,
+  };
+}

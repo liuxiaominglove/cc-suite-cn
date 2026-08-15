@@ -347,3 +347,33 @@
 
 - learnunk `npm test`：111 全绿（+3 用例）。
 - 3 假阳归档：prompt injection、renderContext「未识别」优先级、wrap 缩进（视觉噪音）。
+
+---
+
+# 审计生命周期三件套：基线 + 审计前置 + 变更追溯
+
+**动机**：审已审项目靠手动 git diff（痛点）；opencode 修代码的审计前置缺明确声明；修复链路分散无统一追溯。
+
+## 改动
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| LC-1: `scripts/audit-baseline.mjs`（增量审查基线） | `gitHead`/`gitChangedFiles`(diff+untracked)/`loadBaseline`/`saveBaseline`/`detectAuditScope`(四分支) + CLI `--detect/--save`；`audit-baseline.test.mjs` 15 用例 | 🟢 | 2026-08-15 |
+| LC-2: `audit.md` 集成 Step 0 基线检测 | 主动询问「检测到 N 个文件变更，是否增量审查」；审完 `--save` 更新基线；docs-consistency +1 用例 | 🟢 | 2026-08-15 |
+| LC-3: `fix.md`/`SKILL.md` 审计前置两道闸门声明 | 「opencode 修代码前必须过 ① hy3 裁决 ② opencode 终审，未过闸门不得修」；docs-consistency +2 用例 | 🟢 | 2026-08-15 |
+| LC-4: `verdict-log.mjs` markFixed + getTrace | 修完 bug 追加 `fixed:{commit,testEvidence,fixedAt}`；`getTrace` 返回完整链路；`verdict-log.test.mjs` +5 用例 | 🟢 | 2026-08-15 |
+| LC-5: `/trace` 命令（变更追溯） | `.opencode/commands/trace.md`：查报→裁→修链路；docs-consistency +1 用例 | 🟢 | 2026-08-15 |
+
+## 实测
+
+- 基线流程：`--detect` learnunk（首次 firstAudit=true）→ `--save`（记 fd18c94）→ 再 `--detect`（changed=false）✅
+- `pnpm test:unit`：376 全绿 + guard 绿。
+
+## 数据流（审计生命周期闭环）
+
+```
+审前：audit-baseline.mjs --detect（基线对比，主动问增量审查）
+审中：hy3 裁决 → opencode 终审（审计前置两道闸门，修 bug 硬门槛）
+审后：markFixed（修复 commit + 测试证据）→ /trace 追溯完整链路
+      + audit-baseline.mjs --save（更新基线，供下次增量对比）
+```

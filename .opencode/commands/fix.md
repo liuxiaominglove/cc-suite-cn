@@ -67,6 +67,7 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 ## Critical Rules
 
 - **修 bug 只由 opencode**（最了解项目 + TDD）
+- **审计前置两道闸门**：opencode 修代码前，必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。
 - **裁决前置**：只修 hy3 判 `true` 且 codeHash 未失效的 finding；跳过裁决 = 违规
 - **Override 出口（客观标准）**：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时，可跳过裁决直接修；必须满足两条——① 在 `docs/verification.md` 台账标"未经裁决" ② 附代码级证据 + 🟢 测试。不得以"紧急/小 bug"这类模糊理由跳过。
 - hy3 是 LLM 判断，只当**初筛**；opencode 的代码级核实 + 🟢 测试才是 ground truth

@@ -14,6 +14,26 @@ agent: build
 
 > 完整 4 角色流程见 `/audit-full`（找 bug + 批判员 qwen + 验证审计员 hy3 裁决）。
 
+## Step 0: 基线检测（增量审查，若项目是 git 仓库）
+
+若 `$ARGUMENTS` 是**项目根目录**（git 仓库），先用 Bash 检测是否审过、有无变更：
+
+```
+node scripts/audit-baseline.mjs --detect "<项目根目录>"
+```
+
+按输出分支处理：
+
+| 输出 | 处理 |
+|------|------|
+| `isGit: false` | 非 git 仓库，跳过本步，直接全量审 |
+| `firstAudit: true` | 首次审计，直接全量审 |
+| `changed: false` | 自上次审计无变更，提示用户并询问是否仍要审 |
+| `changed: true` + `files` 非空 | **主动询问用户：「检测到上次审计后 N 个文件变更，是否增量审查（只审变更文件）？」** |
+
+- 用户选**增量**：只对 `files` 列表里的每个文件跑 `--run-audit --file <file>`
+- 用户选**全量**：照常审整个目录
+
 ## Step 1: Determine Target
 
 | Input | Behavior |
@@ -69,3 +89,4 @@ node scripts/jobs.mjs --get "<job-id>"
 - 某个模型失败/超时，展示其余结果 + 失败说明
 - 不伪造问题——全部返回空就如实说
 - 只比较、不自己审——你是汇总者，不是评审员
+- **审完更新基线**（若做了 Step 0 且项目是 git 仓库）：`node scripts/audit-baseline.mjs --save "<项目根目录>"`，下次审计才能增量对比
