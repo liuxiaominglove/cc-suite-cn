@@ -151,7 +151,7 @@ pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
 | `/jobs` | 查任务账本（审计自动记账） | 看订单列表 |
 | `/result <job-id>` | 看某任务详细结果 | 点进订单看详情 |
 | `/cancel <job-id>` | 取消某任务（真杀进程） | 取消订单 |
-| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应施工队分身（换脑不换身） | 直接点名某个工人干活 |
+| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身（换脑不换身） | 直接点名某个工人干活 |
 
 ### B. 终端里敲的命令（在项目目录）
 

@@ -1,5 +1,6 @@
 ---
 description: 修复闭环 — 找 bug → 裁决(hy3) → 读待修清单 → 修 bug(TDD) → 验证
+argument-hint: <path>
 agent: build
 ---
 

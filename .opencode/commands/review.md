@@ -1,5 +1,6 @@
 ---
 description: 找 bug — /audit 别名（glm + kimi 双施工队并行只读评审，记入任务账本）
+argument-hint: <path>
 agent: build
 ---
 

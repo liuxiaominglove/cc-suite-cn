@@ -1,11 +1,14 @@
 ---
 description: 完整审计 — 找 bug(glm+kimi) + 批判员(qwen) + 验证审计员(hy3 裁决)
+argument-hint: <path>
 agent: build
 ---
 
 # 完整审计（找 bug + 批判 + 裁决）
 
 对 `$ARGUMENTS` 跑完整 4 角色流程（三个只读环节）：
+
+> `$ARGUMENTS` 是**路径**（文件或目录）。空参数 → 提示用户「请指定文件或目录，如 `/audit-full src/file.ts`」，不继续。
 
 | 环节 | 角色 | 干什么 |
 |------|------|--------|

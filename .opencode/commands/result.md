@@ -1,5 +1,6 @@
 ---
 description: 查看某个任务的详细结果（需传 job id）
+argument-hint: <job-id>
 agent: build
 ---
 

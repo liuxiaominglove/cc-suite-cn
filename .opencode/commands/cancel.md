@@ -1,5 +1,6 @@
 ---
 description: 取消某个任务（需传 job id）
+argument-hint: <job-id>
 agent: build
 ---
 

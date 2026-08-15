@@ -1,11 +1,14 @@
 ---
 description: 变更追溯 — 查某个 finding 的报→裁→修完整链路
+argument-hint: <keyword|file:line>
 agent: build
 ---
 
 # 变更追溯
 
 查 `$ARGUMENTS`（finding 关键词、或 `file:line`）对应的完整链路：谁报的 → hy3 怎么裁决的 → 是否已修 → 测试证据。
+
+> 空参数 → 提示用户「请给 finding 关键词或 `file:line`，如 `/trace scripts/jobs.mjs:25`」。
 
 ## Step 1: 在裁决账本里找条目
 

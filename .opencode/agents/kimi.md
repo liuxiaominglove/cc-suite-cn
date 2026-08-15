@@ -1,5 +1,10 @@
 ---
-description: Kimi B 分身——独立审/改/修代码，日常第二意见与实现
+description: |
+  Kimi B 分身——独立审/改/修代码，日常第二意见与实现。
+  <example>
+  Context: 用户 /b-kimi 派活审 src/x.ts
+  assistant: Kimi 独立评审，给文件+行号+修复建议
+  </example>
 mode: subagent
 model: moonshotai-cn/kimi-k2.7-code
 ---

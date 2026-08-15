@@ -74,6 +74,7 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
 | `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身 subagent（task 工具） |
 | `/review <path>` | Same as `/audit` |
+| `/trace <keyword|file:line>` | 变更追溯（查 finding 的报 → 裁 → 修完整链路） |
 
 ## Usage
 
@@ -148,7 +149,8 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 
 - Canonical scripts: `scripts/` (git repo)
 - Canonical skill: `.opencode/skills/cc-review/` (git repo)
-- Global thin pointers: `~/.config/opencode/commands/audit.md` and `~/.config/opencode/opencode.jsonc` (`skills.paths`) reference the repo paths
+- Canonical commands: `.opencode/commands/` (git repo) — 命令本体已全部迁回 repo，全局不再持命令指针
+- Global thin pointer: `~/.config/opencode/opencode.jsonc` (`skills.paths`) references the repo skill paths
 
 `scripts/guard.mjs` enforces this. It fails if it finds duplicate copies under `~/.config/opencode/`, missing canonical files, or stale references in the global config. `pnpm test` runs the guard — keep it green.
 
@@ -157,7 +159,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | Path | Purpose |
 |------|---------|
 | `AGENTS.md` | This file — project conventions and instructions |
-| `~/.config/opencode/commands/audit.md` | Global `/audit` command (thin pointer to this repo) |
+| `.opencode/commands/*.md` | 16 个斜杠命令（audit/fix/evaluate/verify/trace/jobs 等，项目级自动加载） |
 | `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
 | `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
@@ -171,6 +173,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
 | `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
+| `opencode.json` | provider 定义（仅 `tencent/hy3` 在仓库自定义；glm/qwen/kimi 走 models.dev 内置 `alibaba-cn`/`moonshotai-cn` provider） |
 | `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
 | `docs/features.md` | 功能基线清单（每次总结"触达功能"对照的单一数据源） |
 | `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.2/hy3 走 codebuddy 平台账号，无需本地 endpoint） |

@@ -432,3 +432,36 @@
 ## 依据（为什么做技术栈感知）
 
 台账历史误报根因：learnunk 的 `node:sqlite`（评审员误报缺依赖）、`~ 展开`（不懂 os.homedir）、`tailwind` vs `tailwindcss`——都是"评审员不懂技术栈"。技术栈感知是"上下文注入"思路的根本性延伸，从源头降误报/假阴。
+
+---
+
+# NLPM 全量审核 + 修复（23 工件）
+
+**范围**：16 命令 + 4 agent + 1 skill + opencode.json + AGENTS.md（23 工件）。**执行**：派只读 NLPM agent（scanner/scorer/vague-scanner/checker）收集 finding → opencode triage + 修复。
+
+## 审核结果（修复前）
+
+| 维度 | 结果 |
+|------|------|
+| 打分 | 无 <70；最低 85（4 agent + 6 命令）；SKILL 97 / AGENTS 100 未退化 |
+| 模糊量词 R01 | 0 需修命中（历史已清理干净） |
+| 一致性 | 5 finding：F1 引用断裂 / F2 provider 软断裂 / F3 矛盾 / F4 命令表漏列 / F5 触发词漏列 |
+
+## 修复台账
+
+| 结论 | 修复 | 置信度 |
+|------|------|--------|
+| F1: AGENTS.md/guard 残留幽灵薄指针 `~/.config/opencode/commands/audit.md`（产品化已删） | AGENTS.md 措辞改「命令已迁回 repo」；Key Files 改指 `.opencode/commands/*.md`；guard `GLOBAL_REF_FILES` 移除 audit.md | 🟢 |
+| F3: b-*.md 把「B 分身」误标「施工队分身」（与"施工队只读"矛盾）+ README 残留 | 4 命令 + README 的「施工队分身」→「B 分身」 | 🟢 |
+| R09: 4 agent 零 `<example>` 块（-15） | 4 agent description 加 `<example>` 触发块 | 🟢 |
+| R15: 6 命令无空输入处理（-10） | audit-full/review-qwen/trace/4×b-* 加空参数提示 | 🟢 |
+| R18: 13 命令缺 argument-hint（-5） | 13 命令 frontmatter 加 `argument-hint` | 🟢 |
+| F2: 3 agent provider 未在仓库 opencode.json 定义 | AGENTS.md Key Files 加「glm/qwen/kimi 走 models.dev 内置 provider」说明 | 🟢 |
+| F4: /trace 不在 AGENTS.md Commands 表 | 补一行 `/trace` | 🟢 |
+| F5: SKILL 触发词漏 /review-kimi、/trace | description + When to Use Me 补两词 | 🟢 |
+
+## 结果
+
+- 修复后：16 命令 + 4 agent + opencode.json + AGENTS.md 全 100，SKILL 97（R07 scope note 未动，历史稳定值）。
+- `pnpm test:unit`：404 全绿 + guard 绿。
+- 趋势快照已更新（overall 81→95→100→99→**100**，本次首次覆盖全 23 工件）。

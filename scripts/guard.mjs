@@ -18,7 +18,6 @@ export const COPY_LOCATIONS = [
 ];
 
 export const GLOBAL_REF_FILES = [
-  join(HOME, ".config/opencode/commands/audit.md"),
   join(HOME, ".config/opencode/opencode.jsonc"),
 ];
 

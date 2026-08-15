@@ -1,9 +1,12 @@
 ---
-description: 派活给 GLM-5.2 施工队分身（B 身份，独立审/改/修，换脑不换身）
+description: 派活给 GLM-5.2 B 分身（独立审/改/修，换脑不换身）
+argument-hint: <task>
 agent: build
 ---
 
-# GLM-5.2 施工队分身
+# GLM-5.2 B 分身
+
+> 空参数 → 提示用户「请描述要派给 B 分身的任务」，不继续。
 
 把 `$ARGUMENTS` 描述的任务派给 **glm** 子代理（用 GLM-5.2 大脑的独立分身）完成。
 

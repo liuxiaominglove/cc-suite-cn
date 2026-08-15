@@ -1,5 +1,6 @@
 ---
 description: 用 Kimi CLI（独立壳）只读评审文件或目录
+argument-hint: <path>
 agent: build
 ---
 

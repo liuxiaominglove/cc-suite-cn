@@ -1,5 +1,6 @@
 ---
 description: 找 bug — GLM + Kimi 两个施工队并行只读评审（记入任务账本）
+argument-hint: <path>
 agent: build
 ---
 
