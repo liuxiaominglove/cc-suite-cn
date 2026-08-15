@@ -90,18 +90,15 @@ describe("角色概念（WI-4）", () => {
 });
 
 describe("命令/规格（WI-5）", () => {
-  it("verify.md 无「四施工队」/「4 评审员」/「四模型」", (t) => {
-    const c = readGlobalOrSkip(t, ".config", "opencode", "commands", "verify.md");
-    if (c === null) return;
+  it("verify.md 无「四施工队」/「4 评审员」/「四模型」", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/verify.md"), "utf8");
     assert.doesNotMatch(c, /四施工队/, "verify.md 仍写四施工队");
     assert.doesNotMatch(c, /4 评审员/, "verify.md 仍写 4 评审员");
     assert.doesNotMatch(c, /四模型/, "verify.md 仍写四模型");
   });
 
-  it("review.md 命令文件存在（/audit 别名）", (t) => {
-    const p = globalFile(".config", "opencode", "commands", "review.md");
-    if (!p) return t.skip("HOME 未设置");
-    assert.ok(existsSync(p), "review.md 应存在");
+  it("review.md 命令文件存在（/audit 别名）", () => {
+    assert.ok(existsSync(join(ROOT, ".opencode/commands/review.md")), "review.md 应存在于 repo .opencode/commands/");
   });
 
   it("specs/orchestrator.spec.md 已删除", () => {

@@ -1,6 +1,7 @@
 import { runProcess, RunnerError, TimeoutError } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry, collectProjectRules } from "./review-runner.mjs";
+import { hashContent } from "./verdict-log.mjs";
 
 export function normalizeFinding(text) {
   if (typeof text !== "string" || text.trim() === "") {
@@ -164,6 +165,7 @@ const MIN_SAMPLES = 5;
 export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY }) {
   const perModel = {};
   const allFindings = [];
+  let verdicts = [];
 
   for (const audit of audits) {
     const workers = audit.workers || [];
@@ -220,7 +222,12 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       const file = f.auditFile || f.issue?.file || "";
       const code = resolveCode ? await resolveCode(file) : "";
       const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, retries });
-      return { f, verdict: result && result.verdict };
+      return {
+        f,
+        verdict: result && result.verdict,
+        evidence: result && result.evidence,
+        codeHash: hashContent(code),
+      };
     });
     for (const { f, verdict } of results) {
       if (verdict === "true") {
@@ -230,6 +237,15 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
         }
       }
     }
+    verdicts = results.map((r) => ({
+      file: r.f.auditFile || r.f.issue?.file || "",
+      line: r.f.issue?.line ?? null,
+      finding: r.f.issue?.finding || "",
+      verdict: r.verdict,
+      evidence: r.evidence ?? "",
+      codeHash: r.codeHash,
+      timestamp: new Date().toISOString(),
+    }));
   }
 
   for (const m of Object.values(perModel)) {
@@ -237,7 +253,7 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
     m.sampleInsufficient = m.runs < MIN_SAMPLES;
   }
 
-  return { perModel, minSamples: MIN_SAMPLES, arbitrated: arbitrate };
+  return { perModel, minSamples: MIN_SAMPLES, arbitrated: arbitrate, verdicts };
 }
 
 export async function loadAudits() {
@@ -276,6 +292,21 @@ export function dedupFindings(findings, { threshold = 0.6 } = {}) {
   return clusters.map((c) => ({ ...c.members[0], cluster: c.members }));
 }
 
+export function makeResolveCode(allowedFiles, readFileFn = null) {
+  const read = readFileFn ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  const allowed = new Set([...(allowedFiles ?? [])].filter(Boolean));
+  return async (file) => {
+    if (!file) return "";
+    // 只读 audit 明确记录的 file，防 LLM 幻觉的 file 字段读取任意文件
+    if (!allowed.has(file)) return "";
+    try {
+      return await read(file);
+    } catch {
+      return "";
+    }
+  };
+}
+
 export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr } = {}) {
   try {
     const arbitrate = args.includes("--arbitrate");
@@ -286,19 +317,17 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
       return 0;
     }
 
-    const resolveCode = async (file) => {
-      if (!file) return "";
-      const { readFile } = await import("node:fs/promises");
-      try {
-        return await readFile(file, "utf-8");
-      } catch {
-        return "";
-      }
-    };
+    const resolveCode = makeResolveCode(audits.map((a) => a.file));
 
     const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
 
-    const { perModel, minSamples, arbitrated } = await evaluateModels({ audits, arbitrate, resolveCode, resolveRules, retries: 2 });
+    const { perModel, minSamples, arbitrated, verdicts } = await evaluateModels({ audits, arbitrate, resolveCode, resolveRules, retries: 2 });
+
+    if (arbitrated && verdicts.length) {
+      const { persistVerdicts } = await import("./verdict-log.mjs");
+      await persistVerdicts(verdicts);
+      stdout.write(`已落库 ${verdicts.length} 条裁决到 .cc-suite-pe/verdict-log.json\n`);
+    }
 
     stdout.write("模型性能评估\n");
     stdout.write("=".repeat(60) + "\n");

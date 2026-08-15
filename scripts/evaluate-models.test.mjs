@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-runner.mjs";
 
@@ -279,6 +279,25 @@ describe("evaluateModels", () => {
     assert.equal(r.perModel["glm-5.2"].precision, 1);
   });
 
+  it("returns verdicts with codeHash when arbitrating", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
+    ]}];
+    const adjudicateFn = async () => ({ verdict: "true", evidence: "real" });
+    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "const x = 1;" });
+    assert.equal(r.verdicts.length, 1);
+    assert.equal(r.verdicts[0].verdict, "true");
+    assert.equal(r.verdicts[0].evidence, "real");
+    assert.equal(r.verdicts[0].file, "f.js");
+    assert.match(r.verdicts[0].codeHash, /^[a-f0-9]{64}$/, "codeHash 应为 sha256");
+  });
+
+  it("returns empty verdicts without arbitration", async () => {
+    const audits = [{ workers: [{ model: "glm-5.2", success: true, issues: [] }] }];
+    const r = await evaluateModels({ audits });
+    assert.deepEqual(r.verdicts, []);
+  });
+
   it("counts consensus findings without arbitration", async () => {
     const audits = [{ workers: [
       { model: "glm-5.2", success: true, issues: [{ finding: "shared" }] },
@@ -495,5 +514,34 @@ describe("dedupFindings", () => {
     const out = dedupFindings(findings);
     assert.equal(out.length, 1);
     assert.equal(out[0].cluster.length, 2);
+  });
+});
+
+describe("makeResolveCode", () => {
+  it("只读白名单内的文件", async () => {
+    const read = async (p) => `content of ${p}`;
+    const resolveCode = makeResolveCode(["a.js", "b.js"], read);
+    assert.equal(await resolveCode("a.js"), "content of a.js");
+    assert.equal(await resolveCode("b.js"), "content of b.js");
+  });
+
+  it("拒绝白名单外的路径（防 LLM 幻觉 file 字段读任意文件）", async () => {
+    const read = async () => "should not be read";
+    const resolveCode = makeResolveCode(["a.js"], read);
+    assert.equal(await resolveCode("/etc/passwd"), "");
+    assert.equal(await resolveCode("~/.ssh/id_rsa"), "");
+    assert.equal(await resolveCode(""), "");
+  });
+
+  it("空白名单拒绝一切", async () => {
+    const read = async () => "should not be read";
+    const resolveCode = makeResolveCode([], read);
+    assert.equal(await resolveCode("a.js"), "");
+  });
+
+  it("读取失败返回空字符串不抛错", async () => {
+    const read = async () => { throw new Error("ENOENT"); };
+    const resolveCode = makeResolveCode(["a.js"], read);
+    assert.equal(await resolveCode("a.js"), "");
   });
 });

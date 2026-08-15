@@ -145,3 +145,92 @@
 
 - 新增 `scripts/self-audit.mjs`（`selfAudit()` 依次对 8 核心脚本跑 glm+kimi 找 bug）+ `scripts/self-audit.test.mjs`（2 用例）+ `pnpm self-audit`。**每次 release 前跑一次**。
 - 自审结论定义（破循环三步）：**AI 报 → opencode 用代码级证据确认 → 🟢 测试落账**，缺一不宣称"质量提升"；单测是 ground truth，AI 审只找"测试没盖到的"。
+
+---
+
+# 外部项目实战：learnunk 审核（dogfooding 第二实例）
+
+**范围**：`learnunk/src/*.js` 8 个文件（893 行，Node ESM + `node:sqlite`）。**流程**：glm+kimi 找 bug（16/16 worker 成功，约 130 条 finding）→ opencode 逐条代码级 triage → TDD 修复。**未单独跑 hy3 裁决**（triage 用代码级证据替代，且修后代码已变，再裁会误判）。
+
+## triage 结果
+
+- **真 bug 修复 7 项**（下表，全部 TDD + learnunk `npm test` 71 绿）。
+- **确认假阳（关键）**：① glm+kimi 均报「`~` 路径不展开」——实际 `db.js resolveDbPath` 已处理（`openDb` 内部展开），假阳；② collector「getMessages/match 没 await」——两者是 sync 回调（`getRecentTextParts`/`matchConcepts` 均 sync），假阳；③ kimi 报 `resolveDbPath` 的 `path.join` 重置到根——混淆了 join/resolve，假阳。
+- **归档（设计/噪音）**：SSRF、prompt-injection（本地工具，输入是用户自己的对话，非不可信）；`readJsonSafe` 吞 JSON 错误（有测试固化，对外部项目容错合理）；`stop()` 调 `process.exit`、temperature/model 硬编码、retry、null 防御、keywordRegex 性能、`__proto__` 污染（本地概念库）等。
+
+## 真 bug 修复台账
+
+| 结论 | 证据（learnunk 测试） | 置信度 | 日期 |
+|------|----------------------|--------|------|
+| LB-1: `parseConcept` frontmatter `---` 状态机——body 里的水平线会重新触发 meta 解析，丢弃后续内容 | `test/concepts.test.js` 新增"--- 水平线不重新触发"用例（10 绿） | 🟢 | 2026-08-15 |
+| LB-2: `project.js` `tailwind` 包名错误（实际 npm 包是 `tailwindcss`）+ Python 框架 fastapi/django/flask 死代码（`deps` 只在 Node 分支填充） | `FRAMEWORK_PACKAGES` 别名映射 + `readRequirementsDeps` 解析 requirements.txt；`test/project.test.js` 新增 2 用例（7 绿） | 🟢 | 2026-08-15 |
+| LB-3: `db.js` `LIKE '%"type":"text"%'` 漏带空格的 JSON（`{"type": "text"}`），文本消息静默丢失 | 改 `json_extract(p.data, '$.type') = 'text'`；新建 `test/db.test.js`（node:sqlite 内存库，5 用例） | 🟢 | 2026-08-15 |
+| LB-4: `ui.js` down 箭头空列表时 `selected`/`sessionIdx` 变 -1（`Math.min(-1, ...)`），后续 `matched[-1]` 崩溃 | `Math.max(0, len-1)` 兜底；`test/ui.test.js` 新增 2 用例（29 绿） | 🟢 | 2026-08-15 |
+| LB-5: `explainer.js`/`extractor.js` `fetch` 无超时（AI 挂起永久阻塞）+ `baseUrl` 无校验 | 加 `AbortController` + `timeoutMs`（默认 30s）+ `fetchFn` 注入 + baseUrl 校验；两个 test 各新增超时/正常用例 | 🟢 | 2026-08-15 |
+| LB-6: `index.js` `loadConfig` bare catch 吞 JSON 语法错误（配置写错无反馈）+ 缺 ESM 入口保护（import 会触发 main()） | 区分 ENOENT（静默）/其他（warn）+ `pathToFileURL` 入口保护 + `maxSessions` 默认值归位；新建 `test/index.test.js`（3 用例） | 🟢 | 2026-08-15 |
+| LB-7: `ui.js` footer 不提 `f` 键（功能不可见）+ `extractConceptsWithAI` 不限制 6 个概念 | footer 加「f 找更多」+ `.slice(0, 6)`；`test/ui.test.js` 新增 footer 用例 | 🟢 | 2026-08-15 |
+
+## 结果
+
+- learnunk `npm test`：71 全绿（新增 19 用例：concepts+1 / project+2 / db+5 / ui+3 / explainer+3 / extractor+2 / index+3）。
+- 改动 12 文件（7 src + 5 test 改 + 2 新 test），**未 commit**，`git diff` 由用户审。
+
+---
+
+# 裁决前置：把 hy3 变成修 bug 的硬门槛
+
+**起因**：learnunk 审核暴露「先修后验」——opencode 跳过 hy3 裁决直接 triage+修，等 hy3 上场时代码已变、误判成假阳。根因：hy3 裁决结果（verdict）算完即丢、不落库，也没有"修前必须裁决"的约束。
+
+## 改动
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| VD-1: 新增 `scripts/verdict-log.mjs`（裁决账本） | `hashContent`(sha256) / `persistVerdicts`(原子写+按 file:line:finding 去重) / `loadVerdicts`(容错) / `getActionableFindings`(筛 true) / `isVerdictStale`(codeHash 校验)；`verdict-log.test.mjs` 12 用例 | 🟢 | 2026-08-15 |
+| VD-2: `evaluate-models.mjs` 裁决落库 + codeHash | `evaluateModels` 裁决时算文件 sha256 存 codeHash、返回 `verdicts` 数组；`cli --arbitrate` 落库到 `.cc-suite-pe/verdict-log.json`；`evaluate-models.test.mjs` 新增 2 用例（verdicts+codeHash / 无裁决返回空） | 🟢 | 2026-08-15 |
+| VD-3: `/fix` 命令裁决前置 + override 出口 | `.opencode/commands/fix.md` 重写：找 bug → **裁决(强制)** → 读待修清单(verdict=true) → 终审+codeHash 校验 → TDD 修 → verify；override 出口须台账标"未经裁决" | 🟢 | 2026-08-15 |
+| VD-4: SKILL.md 三层分工 + 裁决前置规则 | How I Work 加三层分工图（找 bug→批判→裁决→终审修）+ Critical Rules 加"裁决前置硬门槛" | 🟢 | 2026-08-15 |
+| VD-5: docs-consistency 测试指向 repo 命令 | 产品化删全局命令后，`review.md`/`verify.md` 测试改指 repo `.opencode/commands/`（原指向已删除的 `~/.config/opencode/commands/`，导致 pnpm test 红） | 🟢 | 2026-08-15 |
+| VD-6: 端到端真模型验证 | 真 hy3 裁决 2 个 demo audit 25 条 → 落库成功；`getActionableFindings` 筛出 23 条 true；`isVerdictStale` 同内容=false、改后内容=true | 🟢 | 2026-08-15 |
+
+## 结果
+
+- `pnpm test:unit`：325 全绿（新增 verdict-log 12 + evaluate-models 2）+ guard 绿。
+- 数据流：`audit-log` → `/evaluate --arbitrate`(hy3 裁决+codeHash) → `.cc-suite-pe/verdict-log.json` → `/fix` 读 `getActionableFindings`（verdict=true 且 codeHash 未失效）→ opencode 终审 + TDD 修。
+- verdict-log.json 在 `.cc-suite-pe/`（已 gitignore，运行时数据不进仓库）。
+
+---
+
+# 完整闭环 dogfooding：审裁决前置机制本身
+
+**对象**：刚写的裁决前置代码（`verdict-log.mjs` + `evaluate-models.mjs`）+ NL 工件（`fix.md` + `SKILL.md`）。**流程**：找 bug(glm+kimi) → 批判员(qwen) → 裁决(hy3 落库) → 终审(opencode) → TDD 修。首次走通完整闭环（不再跳过任何角色）。
+
+## 四角色表现（本次真跑通）
+
+| 环节 | 结果 |
+|------|------|
+| 找 bug（glm+kimi） | 4 文件 × 2 模型 = 8/8 成功，约 85 条 finding |
+| 批判员（qwen） | 4 文件全审，补第二意见（verdictKey/loadVerdicts/uniqueTrue 等） |
+| 裁决（hy3） | 69 条落库 verdict-log.json（真 hy3），45 条 verdict=true |
+| 终审（opencode） | 代码级核实，发现 **hy3 假阴**（见下） |
+
+## 关键发现：hy3 假阴（验证"初筛 + 终审"必要性）
+
+- glm 报的真安全 bug「`resolveCode` 路径遍历——LLM 幻觉的 file 字段可读任意文件」被 hy3 判 false 漏掉；opencode 终审用代码级证据确认是真 bug，补回修复清单。
+- 同理 glm 报的「`verdict-log.mjs` 未同步 `AGENTS.md` Key Files（单一数据源）」也被 hy3 判 false，终审补回。
+- **结论**：hy3 裁决只能当初筛，opencode 终审兜假阴，正是设计预期。
+
+## 修复台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| CC-1: `evaluate-models` `resolveCode` 白名单（防 LLM 幻觉 file 字段读任意文件） | 新增 `makeResolveCode(allowedFiles)`，只读 audit 明确记录的 file；`evaluate-models.test.mjs` +4 用例（拒绝 /etc/passwd、~/.ssh、空白名单） | 🟢 | 2026-08-15 |
+| CC-2: `verdict-log` `persistVerdicts` 并发安全 + tmp 随机名 + finally 清理 + 去死绑定 | 模块级写队列串行化 + `randomBytes` tmp 名 + `unlink` 清理；`verdict-log.test.mjs` +2 用例（并发 3 写不丢失、无 .tmp 残留） | 🟢 | 2026-08-15 |
+| CC-3: `fix.md` 重写 | $ARGUMENTS 明确为路径、零 actionable 停止条件、override 改客观标准（仅 hy3 假阴 + 代码级证据）、Step 6 补两节总结、job-id 关联说明 | 🟢 | 2026-08-15 |
+| CC-4: `SKILL.md` 修正 | description 补 `/review`、"三层分工"改"四角色五步"、codeHash 失效定义、override 客观标准 | 🟢 | 2026-08-15 |
+| CC-5: `AGENTS.md` 同步 | `/fix <bug>` → `/fix <path>`、Key Files 补 `verdict-log.mjs`（单一数据源） | 🟢 | 2026-08-15 |
+
+## 结果
+
+- `pnpm test:unit`：331 全绿（新增 makeResolveCode 4 + persistVerdicts 并发 2）+ guard 绿。
+- 完整闭环四角色全跑通；verdict-log.json 由真 hy3 落库（非 mock）。
+- 改动 10 文件（3 新 verdict-log 相关 + 7 改），**未 commit**。

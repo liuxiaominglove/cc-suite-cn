@@ -1,7 +1,7 @@
 ---
 name: cc-review
 description: |
-  Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review-qwen, /evaluate, /fix, /verify.
+  Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review, /review-qwen, /evaluate, /fix, /verify.
   <example>
   Context: User runs /audit src/file.ts
   assistant: Run glm+kimi read-only review, produce consensus + per-model findings report.
@@ -34,6 +34,16 @@ Load this skill when the user:
 
 ## How I Work
 
+**四角色五步**（判真假走"裁决初筛 + 终审"，谁都不批自己）：
+
+```
+1. 找 bug（glm + kimi）      → 产出 finding 池
+2. 批判员（qwen）            → 补充第二意见，追加漏报（可选）
+3. 裁决（hy3）              → 初筛：逐条判真假，verdict 落库 + codeHash【修 bug 前置硬门槛】
+4. 终审 + 修 bug（opencode） → 对 verdict=true 的做代码级核实 + TDD 修
+5. 验证（/verify）          → diff 审查
+```
+
 1. Identify target file(s) from the request.
 2. Run the find-bug workers (glm + kimi, read-only, parameterized backend) via:
    `node scripts/jobs.mjs --run-audit --file <path>` (记入任务账本 + audit-log)
@@ -41,13 +51,14 @@ Load this skill when the user:
    - The被审项目's `AGENTS.md` / `CLAUDE.md` rules are injected into the review prompt (project-specific rules avoid false positives).
    - Transient failures auto-retry; worker OK/FAIL is shown in the summary.
 3. Optionally get a second opinion: `/review-qwen` (critic, read-only + sandbox).
-4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false and computes per-model precision.
+4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-pe/` 裁决账本).
 5. Fix real bugs: `/fix` — opencode fixes with TDD (RED → GREEN → REFACTOR), never commits automatically.
 6. Verify: `/verify` — review `git diff HEAD`.
 
 ## Critical Rules
 
 - **谁都不批自己**: 找 bug / 批判 / 裁决 / 修 bug 是四个独立角色，修 bug 只由 opencode（最了解项目 + TDD）亲自做。
+- **裁决前置（硬门槛）**: 修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
 - 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
 - 找 bug 的 finding 用英文（`REVIEW_PROMPT` 要求），跨语言共识才能对齐。
 - If one worker fails, still show the others' results + a failure note.
@@ -74,7 +85,8 @@ Load this skill when the user:
 ## Key Scripts (single source of truth in this repo)
 
 - `scripts/review-runner.mjs` — 只读评审（review/reviewFile/chunkCode/offsetFindings/retry/AGENTS.md 注入）
-- `scripts/evaluate-models.mjs` — finding 归一化/共识/去重/裁决/多维评估
+- `scripts/evaluate-models.mjs` — finding 归一化/共识/去重/裁决/多维评估（`--arbitrate` 落库 verdict）
+- `scripts/verdict-log.mjs` — 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash）
 - `scripts/jobs.mjs` — 任务账本 + runAudit + 后台/取消
 - `scripts/models.mjs` — 4 施工队单一数据源（WORKERS / FIND_BUG_WORKERS / CRITIC_MODEL / VERIFIER_MODEL）
 - `scripts/guard.mjs` — drift guard（单一数据源守护）

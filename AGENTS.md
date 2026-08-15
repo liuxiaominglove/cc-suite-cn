@@ -67,7 +67,7 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
 | `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
-| `/fix <bug>` | 修复闭环：找 → 裁 → 修 bug(TDD) → 验证 |
+| `/fix <path>` | 修复闭环：找 → 裁 → 修 bug(TDD) → 验证 |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
@@ -166,6 +166,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/preflight.mjs` | 环境自检（codebuddy CLI 可用性检查） |
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
+| `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash） |
 | `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
