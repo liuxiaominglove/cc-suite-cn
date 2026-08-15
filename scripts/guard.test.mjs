@@ -56,8 +56,8 @@ describe("findMissingCanonical", () => {
 describe("findStaleReferences", () => {
   it("returns [] when references are clean", () => {
     const read = fakeRead({
-      "audit.md": "/Users/liuxiaoming/project/cc-suite-pe/scripts/review-runner.mjs",
-      "opencode.jsonc": "/Users/liuxiaoming/project/cc-suite-pe/.opencode/skills/cc-review",
+      "audit.md": "/repo/scripts/review-runner.mjs",
+      "opencode.jsonc": "/repo/.opencode/skills/cc-review",
     });
     assert.deepEqual(findStaleReferences(["audit.md", "opencode.jsonc"], read), []);
   });

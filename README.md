@@ -1,8 +1,79 @@
 # cc-suite-pe — AI 施工队协作系统
 
+**Multi-model code review orchestration for opencode.** glm + kimi find bugs, qwen critiques, hy3 verifies — opencode (DeepSeek) orchestrates and fixes with TDD. Different vendors, different training data, different blind spots.
+
+> [Installation (EN)](#installation) · [中文说明](#一它解决了什么问题大白话)
+
 一个让 **opencode（DeepSeek）当总指挥兼修 bug、四个 AI 模型各司其职**、交叉查代码的协作系统。
 
 > 一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy3 当裁判判真假。**
+
+---
+
+## Installation
+
+### What it does
+
+One model misses bugs another catches. cc-suite-pe splits review into four independent roles — and **nobody reviews their own work**:
+
+| Role | Model | Job |
+|------|-------|-----|
+| Find bugs | GLM-5.2 + Kimi K2 | read-only review, produce findings |
+| Critic | Qwen3 Coder Plus | independent second opinion (sandboxed) |
+| Verifier | Hy3 | adjudicates each finding true/false |
+| Orchestrator + Fixer | opencode (DeepSeek) | fixes real bugs with TDD |
+
+### Prerequisites
+
+- [opencode](https://opencode.ai) — the host orchestrator
+- Node.js ≥ 18
+- 3 worker CLIs: `@tencent-ai/codebuddy-code`, `@moonshot-ai/kimi-code`, `@qwen-code/qwen-code`
+- 3 API keys: `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`, `TOKENHUB_API_KEY`
+
+### Install
+
+```bash
+git clone https://github.com/liuxiaominglove/cc-suite-pe.git
+cd cc-suite-pe
+
+# 1. Install the 3 worker CLIs
+npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
+
+# 2. Set API keys (add to ~/.zshrc for persistence)
+export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen (Alibaba DashScope)
+export MOONSHOT_API_KEY=your-moonshot-key     # Kimi (Moonshot)
+export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3 (Tencent TokenHub)
+
+# 3. codebuddy CLI uses your CodeBuddy platform account (GLM-5.2 + Hy3 gateway).
+#    Run `codebuddy` once and follow its auth prompt, or set CODEBUDDY_API_KEY.
+
+# 4. Verify everything is ready
+pnpm preflight
+```
+
+### Use
+
+Open opencode inside this repo. The project commands (`.opencode/commands/`) load automatically:
+
+```
+/audit src/file.ts        → glm+kimi find bugs (recorded to the job ledger)
+/audit-full src/file.ts   → find bugs + critic (qwen) + verdict (hy3)
+/fix <bug>                → find → adjudicate → fix (TDD) → verify
+/evaluate --arbitrate     → who finds more, who finds accurately
+/verify                   → review git diff only
+/jobs / /result <id>      → inspect the job ledger
+```
+
+### Test
+
+```bash
+pnpm test        # unit tests + drift guard (no API calls)
+pnpm test:e2e    # real 4-model round-trip (needs the CLIs + keys)
+```
+
+### License
+
+[MIT](LICENSE)
 
 ---
 

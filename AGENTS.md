@@ -35,21 +35,26 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 | Requirement | Version/Details |
 |-------------|-----------------|
 | Node.js | >= 18.0 |
-| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code` (A 突击员用) |
-| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，通吃 Qwen + GLM（B 分身） |
-| `CODEBUDDY_API_KEY` | A 突击员走 CodeBuddy 平台账号登录态，无需单独 key |
-| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 的 B 分身（`moonshotai-cn/kimi-k2.7-code`，走 Moonshot 官方直连） |
-| `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 的 B 分身（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
+| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.2 + hy3 网关，走平台账号登录态） |
+| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，Qwen 用 |
+| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`moonshotai-cn/kimi-k2.7-code`，走 Moonshot 官方直连） |
+| `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 用（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
 
 ## Setup
 
+完整安装步骤见 `README.md` 的 Installation 一节。速查：
+
 ```bash
-# Install dependencies
-npm install -g @tencent-ai/codebuddy-code
+# Install worker CLIs
+npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
 
 # Set API keys (add to ~/.zshrc for persistence)
-export CODEBUDDY_API_KEY=your-tencent-key
-export DASHSCOPE_API_KEY=your-aliyun-dashscope-key
+export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼）
+export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
+export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
+
+# codebuddy CLI 走平台账号登录态（GLM-5.2 + Hy3 网关），无需单独 key
+# 自检：pnpm preflight
 ```
 
 ## Commands

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { checkCodebuddy, setSpawn } from "./preflight.mjs";
+import { checkCodebuddy, setSpawn, checkCli, checkEnvKeys, preflightAll, REQUIRED_CLIS, REQUIRED_KEYS } from "./preflight.mjs";
 
 function createMockProc() {
   const proc = new EventEmitter();
@@ -53,5 +53,47 @@ describe("checkCodebuddy", () => {
     const result = await checkCodebuddy({ timeoutMs: 20 });
     assert.equal(result.ok, false);
     assert.equal(result.reason, "timeout");
+  });
+});
+
+describe("checkCli", () => {
+  it("returns the resolved path when found", () => {
+    assert.equal(checkCli("codebuddy", { which: () => "/usr/local/bin/codebuddy" }), "/usr/local/bin/codebuddy");
+  });
+
+  it("returns null when not found", () => {
+    assert.equal(checkCli("codebuddy", { which: () => null }), null);
+  });
+});
+
+describe("checkEnvKeys", () => {
+  it("marks keys set vs missing", () => {
+    const keys = checkEnvKeys({ DASHSCOPE_API_KEY: "x", MOONSHOT_API_KEY: "y" });
+    const map = Object.fromEntries(keys.map((k) => [k.name, k.set]));
+    assert.equal(map.DASHSCOPE_API_KEY, true);
+    assert.equal(map.MOONSHOT_API_KEY, true);
+    assert.equal(map.TOKENHUB_API_KEY, false);
+  });
+
+  it("treats blank strings as missing", () => {
+    const keys = checkEnvKeys({ DASHSCOPE_API_KEY: "   " });
+    assert.equal(keys.find((k) => k.name === "DASHSCOPE_API_KEY").set, false);
+  });
+});
+
+describe("preflightAll", () => {
+  it("aggregates clis + keys and computes ok", () => {
+    const which = (c) => ({ codebuddy: "/x/codebuddy", kimi: "/x/kimi", qwen: "/x/qwen" }[c] ?? null);
+    const env = { DASHSCOPE_API_KEY: "a", MOONSHOT_API_KEY: "b", TOKENHUB_API_KEY: "c" };
+    const r = preflightAll({ env, which });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.clis.map((c) => c.name), REQUIRED_CLIS);
+    assert.deepEqual(r.keys.map((k) => k.name), REQUIRED_KEYS);
+  });
+
+  it("is not ok when a cli or key is missing", () => {
+    const which = () => null;
+    const r = preflightAll({ env: {}, which });
+    assert.equal(r.ok, false);
   });
 });
