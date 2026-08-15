@@ -465,3 +465,31 @@
 - 修复后：16 命令 + 4 agent + opencode.json + AGENTS.md 全 100，SKILL 97（R07 scope note 未动，历史稳定值）。
 - `pnpm test:unit`：404 全绿 + guard 绿。
 - 趋势快照已更新（overall 81→95→100→99→**100**，本次首次覆盖全 23 工件）。
+
+---
+
+# 技术栈感知补全：裁决接线 + dir 模式
+
+**背景**：NLPM 审核后发现技术栈感知「找 bug 环节已生效，裁决环节函数支持但 CLI 漏接线」的 gap。
+
+## 修复
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| SC-11: 裁决环节 `resolveStackContext` 接线 | `evaluate-models.mjs` cli() 加 `resolveStackContext`（白名单校验 + `collectStackContext(dirname(file))`），传给 `evaluateModels`；+2 回归测试 | 🟢 | 2026-08-15 |
+| SC-12: dir 模式技术栈采集 | `review-runner.mjs` dir 分支加 `stackContext = collectStackContext(resolvedDir)`；+2 用例 | 🟢 | 2026-08-15 |
+| SC-13: 测试夹具脆弱性修复 | `review-runner.test.mjs` 的 FIXTURES 从硬编码 `/var/folders/...` 改为 `before` 钩子 mkdtemp 自建（原来目录清理后 8 个测试红） | 🟢 | 2026-08-15 |
+
+## 实测
+
+- `resolveStackContext` 核心逻辑：`collectStackContext(dirname(file))` 对 learnunk → `Node.js (node >=22.5.0)`、对 cc-suite-pe → `Node.js | deps: ...` ✅
+- `pnpm test:unit`：408 全绿 + guard 绿。
+
+## 技术栈感知现状（补全后）
+
+| 环节 | 状态 |
+|------|------|
+| 找 bug（file 模式） | ✅ 已生效 |
+| 找 bug（dir 模式） | ✅ 本次补上 |
+| 找 bug（diff 模式） | ⏸️ 跳过（价值低，已评估） |
+| 裁决（hy3） | ✅ 本次补上（原 gap） |

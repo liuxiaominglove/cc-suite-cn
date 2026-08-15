@@ -444,6 +444,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     const { readFile } = await import("node:fs/promises");
     const resolvedDir = validateFilePath(dir, process.cwd(), { allowExternal });
     ruleCwd = resolvedDir;
+    stackContext = await collectStackContext(resolvedDir);
     const resolvedExts = exts ?? DEFAULT_EXTS;
     const srcFiles = await collectSourceFiles(resolvedDir, resolvedExts);
 

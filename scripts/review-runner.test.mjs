@@ -1,4 +1,4 @@
-import { describe, it, afterEach } from "node:test";
+import { describe, it, afterEach, before } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
@@ -678,7 +678,19 @@ describe("review-runner", () => {
   });
 });
 
-const FIXTURES = "/var/folders/77/4qgc39t17kn1jhl7wrw62dkr0000gn/T/opencode/test-fixtures";
+let FIXTURES;
+before(async () => {
+  FIXTURES = await mkdtemp(join(tmpdir(), "cc-fixtures-"));
+  await mkdir(join(FIXTURES, "swift-project", "subdir"), { recursive: true });
+  await writeFile(join(FIXTURES, "swift-project", "main.swift"), "func hello() {}\n");
+  await writeFile(join(FIXTURES, "swift-project", "subdir", "utils.swift"), "let x = 1\n");
+  await mkdir(join(FIXTURES, "empty"), { recursive: true });
+  await mkdir(join(FIXTURES, "mixed", "src"), { recursive: true });
+  await writeFile(join(FIXTURES, "mixed", "src", "app.swift"), "// app\n");
+  await mkdir(join(FIXTURES, "mixed", ".git"), { recursive: true });
+  await mkdir(join(FIXTURES, "mixed", "node_modules"), { recursive: true });
+  await writeFile(join(FIXTURES, "mixed", "readme.md"), "# readme\n");
+});
 
 describe("collectSourceFiles", () => {
   it("should find Swift files in a directory tree", async () => {
@@ -1649,6 +1661,52 @@ describe("review 注入技术栈", () => {
       });
 
       await review({ model: "m", backend: "codebuddy", file: target, allowExternal: true });
+
+      assert.ok(!stdinWritten.includes("[技术栈]"), "无技术栈文件不应注入");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("review dir 模式注入技术栈", () => {
+  afterEach(() => setSpawn(null));
+
+  it("dir 模式采集技术栈", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-stk-"));
+    try {
+      await writeFile(join(tmp, "package.json"), JSON.stringify({ engines: { node: ">=22" }, dependencies: { react: "^18" } }));
+      await writeFile(join(tmp, "a.js"), "export const x = 1;");
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", dir: tmp, allowExternal: true });
+
+      assert.ok(stdinWritten.includes("[技术栈]"), "dir 模式应含技术栈段");
+      assert.ok(stdinWritten.includes("react"), "应含依赖 react");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("dir 模式无技术栈文件不注入", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-stk-"));
+    try {
+      await writeFile(join(tmp, "a.js"), "export const x = 1;");
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", dir: tmp, allowExternal: true });
 
       assert.ok(!stdinWritten.includes("[技术栈]"), "无技术栈文件不应注入");
     } finally {

@@ -368,6 +368,38 @@ describe("evaluateModels", () => {
     assert.equal(seenRelated, "module db.js source", "应把 import 上下文传给裁决员");
   });
 
+  it("collects stack context and passes it to the adjudicator", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
+    ]}];
+    let seenStack = null;
+    const adjudicateFn = async ({ stackContext }) => {
+      seenStack = stackContext;
+      return { verdict: "false" };
+    };
+    await evaluateModels({
+      audits,
+      arbitrate: true,
+      adjudicateFn,
+      resolveCode: () => "code",
+      resolveStackContext: async (file) => "Node.js (node >=22)",
+    });
+    assert.equal(seenStack, "Node.js (node >=22)", "应把技术栈上下文传给裁决员");
+  });
+
+  it("omits stack context when resolveStackContext not provided", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
+    ]}];
+    let seenStack = "UNSET";
+    const adjudicateFn = async ({ stackContext }) => {
+      seenStack = stackContext;
+      return { verdict: "false" };
+    };
+    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
+    assert.equal(seenStack, "", "不传 resolveStackContext 时 stackContext 应为空串");
+  });
+
   it("returns empty verdicts without arbitration", async () => {
     const audits = [{ workers: [{ model: "glm-5.2", success: true, issues: [] }] }];
     const r = await evaluateModels({ audits });

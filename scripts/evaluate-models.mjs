@@ -1,7 +1,8 @@
 import { runProcess, RunnerError, TimeoutError } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
-import { frameCode, extractJson, withRetry, collectProjectRules, collectImportContext } from "./review-runner.mjs";
+import { frameCode, extractJson, withRetry, collectProjectRules, collectImportContext, collectStackContext } from "./review-runner.mjs";
 import { hashContent } from "./verdict-log.mjs";
+import { dirname } from "node:path";
 
 export function normalizeFinding(text) {
   if (typeof text !== "string" || text.trim() === "") {
@@ -349,9 +350,18 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
       }
     };
 
+    const resolveStackContext = async (file) => {
+      if (!file || !allowedFiles.includes(file)) return "";
+      try {
+        return await collectStackContext(dirname(file));
+      } catch {
+        return "";
+      }
+    };
+
     const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
 
-    const { perModel, minSamples, arbitrated, verdicts } = await evaluateModels({ audits, arbitrate, resolveCode, resolveImportContext, resolveRules, retries: 2 });
+    const { perModel, minSamples, arbitrated, verdicts } = await evaluateModels({ audits, arbitrate, resolveCode, resolveImportContext, resolveStackContext, resolveRules, retries: 2 });
 
     if (arbitrated && verdicts.length) {
       const { persistVerdicts } = await import("./verdict-log.mjs");
