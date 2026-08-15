@@ -4,6 +4,29 @@
 
 **English TL;DR** — A mainland-China rework of [Li Xiaolai's cc-suite](https://github.com/xiaolai/cc-suite): multi-model code review orchestration running on opencode. DeepSeek orchestrates and fixes; GLM + Kimi find bugs, Qwen critiques, Hy3 verifies — all domestic Chinese models, no VPN needed. Five models, four independent roles, and **nobody reviews their own work**.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
+[![Models](https://img.shields.io/badge/Models-5%20国产%20大模型-orange.svg)](#三五个国产大模型)
+
+---
+
+## 目录
+
+- [一、这是什么](#一这是什么)
+- [二、与原版 cc-suite 的关系](#二与原版-cc-suite-的关系)
+- [三、五个国产大模型](#三五个国产大模型)
+- [四、机制（一张图看懂）](#四机制一张图看懂)
+- [五、前提条件与安装（新手友好）](#五前提条件与安装新手友好)
+- [六、快速上手（命令）](#六快速上手命令)
+- [七、实际运行示例](#七实际运行示例)
+- [八、常见问题（FAQ）](#八常见问题faq)
+- [九、各阶段做了什么（演进史）](#九各阶段做了什么演进史)
+- [十、验证纪律](#十验证纪律)
+- [十一、安全底线](#十一安全底线)
+- [十二、工程健壮性](#十二工程健壮性)
+- [十三、环境依赖速查](#十三环境依赖速查)
+- [十四、常用路径速查](#十四常用路径速查)
+
 ---
 
 ## 一、这是什么
@@ -19,7 +42,7 @@
 
 ---
 
-## 二、与原版 cc-suite 的关系（改版说明）
+## 二、与原版 cc-suite 的关系
 
 原版 [`xiaolai/cc-suite`](https://github.com/xiaolai/cc-suite) 是一个以 **Claude Code 为中心**的插件，把 Claude Code / Codex CLI / Antigravity CLI / Grok / Qwen / Kimi 等多个 AI 编程 CLI 桥接起来、互相委派任务，模型以海外为主（Claude、Grok）。
 
@@ -33,7 +56,7 @@
 
 ---
 
-## 三、五个国产大模型（阵容）
+## 三、五个国产大模型
 
 | 模型 | 公司 | 角色 | 干什么 | 为什么是它 |
 |------|------|------|--------|-----------|
@@ -78,37 +101,82 @@
 
 ---
 
-## 五、前提条件与安装
+## 五、前提条件与安装（新手友好）
 
-### 前提条件
+> 全程照做即可，每一步都有「怎么确认装好了」的方法。整套东西只需要 4 样：**Node.js、opencode、3 个 worker CLI、3 个 API key**。
 
-| 依赖 | 说明 |
-|------|------|
-| [opencode](https://opencode.ai) | 宿主 / 总指挥（DeepSeek 跑在它上面） |
-| Node.js ≥ 18 | 运行时 |
-| 3 个 worker CLI | `@tencent-ai/codebuddy-code`（GLM + Hy3 网关）、`@moonshot-ai/kimi-code`、`@qwen-code/qwen-code` |
-| 3 个 API key | `DASHSCOPE_API_KEY`（Qwen）、`MOONSHOT_API_KEY`（Kimi）、`TOKENHUB_API_KEY`（Hy3） |
+### 第 1 样：Node.js（≥ 18）
 
-### 安装
+- **是什么**：跑这套脚本的"底座"运行环境。
+- **怎么装**：打开 https://nodejs.org 下载「LTS」版本，双击 `.pkg` 一路下一步（新手推荐）。装 Node 会自动带上 `npm`，后面要用。
+- **怎么确认装好了**：打开终端，输入 `node -v`，看到 `v18.x.x` 或更高即可。
+
+### 第 2 样：opencode（总指挥宿主）
+
+- **是什么**：这套系统的"大脑壳"，DeepSeek 在里面当总指挥。
+- **怎么装**：终端里跑这一条（装完**关掉终端重开一次**）：
 
 ```bash
+curl -fsSL https://opencode.ai/install | bash
+```
+
+- **怎么确认装好了**：重开终端后输入 `opencode --version`，能看到版本号即可。
+
+### 第 3 样：3 个 worker CLI（施工队工具）
+
+- **是什么**：3 个命令行工具，分别驱动 GLM/Hy3、Kimi、Qwen 干活。
+- **怎么装**：终端里跑这一条（需要第 1 样的 npm）：
+
+```bash
+npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
+```
+
+- **怎么确认装好了**：分别输入 `codebuddy --version`、`kimi --version`、`qwen --version`，都能看到版本号即可。
+
+### 第 4 样：3 个 API key（模型的"钥匙"）
+
+| Key 名 | 对应模型 | 去哪申请 |
+|--------|---------|---------|
+| `DASHSCOPE_API_KEY` | Qwen（阿里通义） | https://dashscope.aliyun.com （阿里云百炼控制台 → API-KEY 管理） |
+| `MOONSHOT_API_KEY` | Kimi（月之暗面） | https://platform.moonshot.cn （开放平台 → API Keys） |
+| `TOKENHUB_API_KEY` | Hy3（腾讯混元） | https://console.cloud.tencent.com/tokenhub/models （右上角有「新用户福利」，可领 Hy3 100 万 tokens 免费体验） |
+
+拿到 3 把钥匙后，写进 `~/.zshrc` 里（这样每次开终端都自动生效）：
+
+```bash
+echo 'export DASHSCOPE_API_KEY=你的阿里百炼key' >> ~/.zshrc
+echo 'export MOONSHOT_API_KEY=你的月之暗面key' >> ~/.zshrc
+echo 'export TOKENHUB_API_KEY=你的腾讯TokenHub key' >> ~/.zshrc
+source ~/.zshrc
+```
+
+> `codebuddy` CLI 走的是**平台账号登录态**（GLM-5.2 + Hy3 网关），第一次跑 `codebuddy` 时按提示登录即可，不需要单独给它 key。
+
+### 安装本仓库
+
+```bash
+# ① 下载代码（macOS 一般自带 git，可先 `git --version` 确认）
 git clone https://github.com/liuxiaominglove/cc-suite-cn.git
 cd cc-suite-cn
 
-# 1. 装 3 个 worker CLI
-npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
+# ② 装项目依赖（⚠️ 必做，漏了这步 /audit 会报"找不到模块"）
+npm install
 
-# 2. 设 API key（建议写进 ~/.zshrc 持久化）
-export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼）
-export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
-export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
-
-# 3. codebuddy CLI 走平台账号登录态（GLM-5.2 + Hy3 网关），无需单独 key。
-#    运行一次 codebuddy，按提示登录即可。
-
-# 4. 自检是否就绪
-pnpm preflight
+# ③ 自检：期望看到 3 个 ✅ CLI + 3 个 ✅ key
+npm run preflight
 ```
+
+### 开始用
+
+在项目目录里打开 opencode：
+
+```bash
+opencode
+```
+
+然后对想审的文件敲 `/audit` 即可（命令见下一节）。开箱之后，建议先跑一遍 `/audit src/` 感受一下流程。
+
+> 注：本项目用 npm 即可跑通；如你习惯 pnpm，也完全兼容（仓库自带 `pnpm-lock.yaml`）。
 
 ---
 
@@ -134,33 +202,73 @@ pnpm preflight
 
 | 命令 | 干什么 |
 |------|--------|
-| `pnpm test` | 跑全部测试 + 漂移守卫 |
-| `pnpm test:unit` | 只跑单元测试（不需联网） |
-| `pnpm test:e2e` | 跑端到端测试 |
-| `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
-| `pnpm self-audit` | 自审 8 个核心脚本（glm+kimi 找 bug，release 前跑） |
-| `pnpm preflight` | 检查 codebuddy 是否就绪 |
+| `npm test` | 跑全部测试 + 漂移守卫（会读 `~/.zshrc` 里的 key） |
+| `npm run test:unit` | 只跑单元测试（不需联网、不需 key） |
+| `npm run test:e2e` | 跑端到端测试 |
+| `npm run verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `npm run self-audit` | 自审 8 个核心脚本（glm+kimi 找 bug，release 前跑） |
+| `npm run preflight` | 检查 CLI 与 key 是否就绪 |
 | `node scripts/jobs.mjs --run-audit --file x.js` | glm+kimi 找 bug + 记 1 条账 |
 | `node scripts/evaluate-models.mjs [--arbitrate]` | 评估谁找得多、谁找得准 |
 
 ---
 
-## 七、典型工作流（完整闭环）
+## 七、实际运行示例
+
+下面是一次 `/audit` 的**示意输出**（简化过，真实格式以实际运行为准），帮你建立"跑起来长啥样"的预期：
 
 ```
-1. 找 bug：  /audit 文件       → glm+kimi 审，出共识 + 各模型报告
-2. 批判员：  /review-qwen       → qwen 独立第二意见（沙箱只读）
-3. 判真假：  /evaluate --arbitrate → hy3 逐条判 finding 真假，出 precision
-4. 修 bug：  /fix               → opencode 用 TDD 修（RED→GREEN→REFACTOR）
-5. 验证：    /verify            → 只发改动区域复查
-6. 查账：    /jobs → /result <id>
+$ /audit src/utils.ts
+
+🤖 两个监理开始巡楼：GLM-5.2 + Kimi K2.7 Code
+
+[GLM-5.2] 发现 3 处
+  - src/utils.ts:42   潜在空指针：getUser().name 未判空
+  - src/utils.ts:87   竞态条件：两个协程同时修改 mutableList
+  - src/utils.ts:120  拼写错误：recieve → receive
+
+[Kimi K2.7 Code] 发现 2 处
+  - src/utils.ts:42   空指针（与 GLM 共识）
+  - src/utils.ts:155  资源未关闭：文件流未在 finally 中关闭
+
+📋 共识：1 处（两个模型都报了）
+📋 各自独有：GLM 2 处、Kimi 1 处
+
+已记账：job #47 → 输入 /result 47 看详情
 ```
 
-> 一步到位：`/audit-full` = 找 bug + 批判员 + 裁决三合一；`/fix` = 找→裁→修→验闭环。
+接着你可以：
+- `/audit-full src/utils.ts` → 加上 qwen 批判员 + hy3 裁决，出「真 bug / 假阳」结论；
+- `/fix <bug 描述>` → opencode 用 TDD 亲自修。
 
 ---
 
-## 八、各阶段做了什么（演进史）
+## 八、常见问题（FAQ）
+
+**Q1：明明装了 CLI，`npm run preflight` 还是报 ❌？**
+A：装完 CLI 后 PATH 没刷新，**关掉终端重开一次**再试。
+
+**Q2：API key 设了，但系统读不到？**
+A：确认是写进了 `~/.zshrc`（不是只在当前终端 `export`），然后 `source ~/.zshrc` 或重开终端。
+
+**Q3：`/audit` 报「找不到模块 jsonrepair」？**
+A：漏了 `npm install`，回到安装第 ② 步补上。
+
+**Q4：GitHub 打不开 / clone 很慢？**
+A：大陆网络访问 GitHub 不稳定，建议走镜像或代理。
+
+**Q5：`codebuddy` 提示未登录？**
+A：GLM/Hy3 走平台账号登录态，第一次跑 `codebuddy` 时按提示完成登录即可。
+
+**Q6：Hy3 没额度了怎么办？**
+A：去 https://console.cloud.tencent.com/tokenhub/models 领取新用户免费 tokens（右上角「新用户福利」）。
+
+**Q7：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
+A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`moonshotai-cn/kimi-k2.7-code`）。
+
+---
+
+## 九、各阶段做了什么（演进史）
 
 | 阶段 | 干了什么 |
 |------|---------|
@@ -178,7 +286,7 @@ pnpm preflight
 
 ---
 
-## 九、验证纪律（项目的"质量铁律"）
+## 十、验证纪律
 
 1. **结论 ≤ 证据**：报告的措辞强度，不能超过实际验证到的层次。
 2. **能力动词逐个测**：声称"能做 A/B/C"，就分别测 A、B、C。
@@ -190,7 +298,7 @@ pnpm preflight
 
 ---
 
-## 十、安全底线（重要）
+## 十一、安全底线
 
 1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy3）互相独立，判真假的人不找 bug。
 2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi 用 `--agent-file`（`disallowedTools` 锁写工具）+ 子进程 cwd 隔离双保险，误写也落 temp 而非项目。
@@ -199,7 +307,7 @@ pnpm preflight
 
 ---
 
-## 十一、工程健壮性（大文件也能扛）
+## 十二、工程健壮性
 
 1. **大文件自动分块**：超过 800 行自动切成块（每块重叠 10 行防漏），逐块审，行号自动偏移回原文件。
 2. **超时统一 900s**：找 bug / 批判员 / 验证审计员三个环节都 900 秒，慢 AI（如 kimi）不再被误杀。
@@ -208,7 +316,7 @@ pnpm preflight
 
 ---
 
-## 十二、环境依赖速查（后端 → 模型 → 通道）
+## 十三、环境依赖速查
 
 | 依赖 | 用途 |
 |------|------|
@@ -221,7 +329,7 @@ pnpm preflight
 
 ---
 
-## 十三、常用路径速查
+## 十四、常用路径速查
 
 ```
 scripts/review-runner.mjs       只读评审（参数化 backend）
