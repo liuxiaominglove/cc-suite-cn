@@ -1,5 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -295,13 +296,25 @@ describe("spawnWorker", () => {
   it("opens a log fd when logPath is provided", () => {
     let openCalls = 0;
     const openLog = () => { openCalls += 1; return 7; };
+    const closeLog = () => {};
     let captured = null;
     spawnWorker(
       { action: "worker-review", jobId: "j" },
-      { spawn: (c, a, o) => { captured = o; return { unref() {}, pid: 1 }; }, logPath: "/tmp/x.log", openLog }
+      { spawn: (c, a, o) => { captured = o; return { unref() {}, pid: 1 }; }, logPath: "/tmp/x.log", openLog, closeLog }
     );
     assert.equal(openCalls, 2);
     assert.deepEqual(captured.stdio, ["ignore", 7, 7]);
+  });
+
+  it("spawn 后关闭父进程的日志 fd 副本（防泄漏）", () => {
+    const closed = [];
+    const openLog = () => 7;
+    const closeLog = (fd) => closed.push(fd);
+    spawnWorker(
+      { action: "worker-review", jobId: "j" },
+      { spawn: (c, a, o) => ({ unref() {}, pid: 1 }), logPath: "/tmp/x.log", openLog, closeLog }
+    );
+    assert.deepEqual(closed, [7, 7], "父进程的两个 fd 副本都应在 spawn 后关闭");
   });
 
   it("passes --ms through for worker-sleep", () => {
@@ -359,6 +372,24 @@ describe("runJobBackground", () => {
     const jobs = await store.list();
     assert.equal(jobs.length, 1);
     assert.equal(jobs[0].status, "failed", "日志打开失败不应残留 running 状态");
+  });
+
+  it("worker 退出但未写结果时 job 标记 failed（不堵 acquireSlot）", async () => {
+    const { store } = await makeStore();
+    const child = new EventEmitter();
+    child.unref = () => {};
+    child.pid = 999;
+    const spawn = () => child;
+    const id = await runJobBackground(
+      store,
+      { type: "review", model: "glm-5.2" },
+      { action: "worker-review", file: "x.js" },
+      { spawn }
+    );
+    child.emit("exit");
+    await new Promise((r) => setTimeout(r, 300));
+    const job = await store.get(id);
+    assert.equal(job.status, "failed", "worker 崩溃未写结果时应标记 failed 而非残留 running");
   });
 });
 

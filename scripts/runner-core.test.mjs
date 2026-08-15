@@ -31,14 +31,14 @@ function createMockProc({ stdout = "", stderr = "", exitCode = 0, signal = null,
       close(null, sig);
     },
     removeListener: () => proc,
-    stdin: {
+    stdin: Object.assign(new EventEmitter(), {
       write: (data) => {
         stdinWritten = data;
       },
       end: () => {
         stdinEnded = true;
       },
-    },
+    }),
     get stdinWritten() {
       return stdinWritten;
     },
@@ -136,6 +136,19 @@ describe("runProcess", () => {
     await runProcess({ command: "foo", args: [], timeout: 1000, cwd: "/tmp/xyz" });
     assert.equal(capturedOpts.cwd, "/tmp/xyz");
   });
+
+  it("attaches an error handler to stdin (no uncaught EPIPE)", async () => {
+    const stdin = new EventEmitter();
+    stdin.write = () => {};
+    stdin.end = () => {};
+    setSpawn(() => {
+      const proc = createMockProc({ stdout: "ok" });
+      proc.stdin = stdin;
+      return proc;
+    });
+    await runProcess({ command: "foo", args: [], stdin: "hello", timeout: 1000 });
+    assert.ok(stdin.listenerCount("error") > 0, "应给 stdin 挂 error 监听，防 EPIPE 未捕获异常");
+  });
 });
 
 describe("collectStream", () => {
@@ -146,6 +159,14 @@ describe("collectStream", () => {
     s.emit("data", Buffer.from("cd"));
     s.emit("end");
     assert.equal(await p, "abcd");
+  });
+
+  it("stream 被销毁（无 end）时 close 事件也能 settle", async () => {
+    const s = new EventEmitter();
+    const p = collectStream(s);
+    s.emit("data", Buffer.from("partial"));
+    s.emit("close");
+    await assert.rejects(p, /closed before end/, "close 未跟随 end 时应 reject 而非永不 settle");
   });
 });
 

@@ -34,9 +34,16 @@ const SIGKILL_DELAY = 5000;
 export function collectStream(stream) {
   return new Promise((resolve, reject) => {
     const chunks = [];
+    let settled = false;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      fn(arg);
+    };
     stream.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8")));
-    stream.on("error", reject);
+    stream.on("end", () => finish(resolve, Buffer.concat(chunks).toString("utf-8")));
+    stream.on("error", (err) => finish(reject, err));
+    stream.on("close", () => finish(reject, new Error("stream closed before end")));
   });
 }
 
@@ -54,6 +61,7 @@ export async function runProcess({ command, args, stdin = null, timeout, spawn =
   }
 
   if (stdin !== null) {
+    if (typeof proc.stdin?.on === "function") proc.stdin.on("error", () => {});
     try {
       proc.stdin.write(stdin);
       proc.stdin.end();

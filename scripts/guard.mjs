@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, dirname, basename } from "node:path";
+import { join, resolve, dirname, basename, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainModule } from "./runner-core.mjs";
 
@@ -57,9 +57,32 @@ export function findStaleReferences(files = GLOBAL_REF_FILES, read = readFileSyn
   return problems;
 }
 
-const DEAD_REF_DIRS = ["scripts", ".opencode/skills/cc-review", "."];
+export function collectRepoFiles(root, exts = [".mjs", ".json"], { readdir = readdirSync, skip = new Set(["node_modules", ".git"]) } = {}) {
+  const files = [];
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (skip.has(e.name)) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+      } else if (exts.some((x) => e.name.endsWith(x))) {
+        files.push(p);
+      }
+    }
+  };
+  walk(root);
+  return files;
+}
 
-export function findDeadReferences(skillFiles = [".opencode/skills/cc-review/SKILL.md"], { read = readFileSync, exists = existsSync, root = REPO_ROOT } = {}) {
+export function findDeadReferences(skillFiles = [".opencode/skills/cc-review/SKILL.md"], { read = readFileSync, listFiles = null, root = REPO_ROOT } = {}) {
+  const files = listFiles ? listFiles(root) : collectRepoFiles(root);
+  const basenames = new Set(files.map((p) => basename(p)));
   const problems = [];
   for (const rel of skillFiles) {
     let content;
@@ -68,10 +91,9 @@ export function findDeadReferences(skillFiles = [".opencode/skills/cc-review/SKI
     } catch {
       continue;
     }
-    const refs = content.match(/[\w.-]+\.(?:mjs|json)\b/g) ?? [];
+    const refs = content.match(/[\w./-]+\.(?:mjs|json)\b/g) ?? [];
     for (const ref of new Set(refs)) {
-      const found = DEAD_REF_DIRS.some((d) => exists(join(root, d, ref)));
-      if (!found) problems.push(`${rel} references ${ref}`);
+      if (!basenames.has(basename(ref))) problems.push(`${rel} references ${ref}`);
     }
   }
   return problems;
@@ -82,7 +104,7 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     dupes: findDuplicateCopies(copies, exists),
     missing: findMissingCanonical(canonicals, exists, root),
     staleRefs: findStaleReferences(refFiles, read),
-    deadRefs: findDeadReferences(skillFiles, { read, exists, root }),
+    deadRefs: findDeadReferences(skillFiles, { read, root }),
     orphanBaselineKeys: findOrphanBaselineKeys({ baselinePath: join(root, ".cc-suite-cn/audit-baseline.json"), read, exists }),
   };
 }
@@ -103,8 +125,11 @@ export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-sui
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
   const problems = [];
   for (const key of Object.keys(parsed)) {
-    if (basename(key).startsWith("cc-suite") && !exists(key)) {
-      problems.push(`baseline key ${key} points to a missing directory (renamed?)`);
+    if (basename(key).startsWith("cc-suite")) {
+      const abs = isAbsolute(key) ? key : resolve(dirname(baselinePath), key);
+      if (!exists(abs)) {
+        problems.push(`baseline key ${key} points to a missing directory (renamed?)`);
+      }
     }
   }
   return problems;

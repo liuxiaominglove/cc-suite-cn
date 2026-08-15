@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile, readdir, rename, unlink } from "node:fs/promises";
-import { openSync } from "node:fs";
+import { openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -104,7 +104,7 @@ export async function runJob(store, meta, fn) {
   return job.id;
 }
 
-export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog = openSync } = {}) {
+export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog = openSync, closeLog = closeSync } = {}) {
   const args = [JOBS_SCRIPT, `--${spec.action}`, "--job-id", spec.jobId];
   for (const [flag, val] of [
     ["--model", spec.model],
@@ -119,8 +119,19 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
   }
   if (spec.diff) args.push("--diff");
   if (spec.allowExternal) args.push("--allow-external");
-  const stdio = logPath ? ["ignore", openLog(logPath, "a"), openLog(logPath, "a")] : "ignore";
-  const child = spawn(process.execPath, args, { detached: true, stdio });
+  if (logPath) {
+    const fd1 = openLog(logPath, "a");
+    const fd2 = openLog(logPath, "a");
+    try {
+      const child = spawn(process.execPath, args, { detached: true, stdio: ["ignore", fd1, fd2] });
+      child.unref();
+      return child;
+    } finally {
+      try { closeLog(fd1); } catch {}
+      try { closeLog(fd2); } catch {}
+    }
+  }
+  const child = spawn(process.execPath, args, { detached: true, stdio: "ignore" });
   child.unref();
   return child;
 }
@@ -154,6 +165,22 @@ export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSp
     throw err;
   }
   await store.update(job.id, { pid: child.pid });
+  if (typeof child.on === "function") {
+    child.on("exit", () => {
+      setTimeout(() => {
+        (async () => {
+          try {
+            const current = await store.get(job.id);
+            if (current && current.status === "running") {
+              await store.update(job.id, { status: "failed", finishedAt: new Date().toISOString(), error: "worker exited without writing result" });
+            }
+          } catch {
+            // 目录可能已被清理，忽略
+          }
+        })();
+      }, 200);
+    });
+  }
   return job.id;
 }
 
@@ -382,11 +409,23 @@ if (isMainModule(import.meta.url)) {
       console.log(`${id}  [${job.status}]${summary}`);
     }
   } else if (parsed.action === "worker-review") {
+    if (!parsed.jobId) {
+      console.error("--job-id is required for worker-review");
+      process.exit(1);
+    }
     const { review } = await import("./review-runner.mjs");
     await updateJobWithResult(store, parsed.jobId, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy", allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
   } else if (parsed.action === "worker-audit") {
+    if (!parsed.jobId) {
+      console.error("--job-id is required for worker-audit");
+      process.exit(1);
+    }
     await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
   } else if (parsed.action === "worker-sleep") {
+    if (!parsed.jobId) {
+      console.error("--job-id is required for worker-sleep");
+      process.exit(1);
+    }
     await updateJobWithResult(store, parsed.jobId, () => new Promise((resolve) => setTimeout(resolve, parsed.ms ?? 1000)));
   } else {
     console.log("Usage: node jobs.mjs --list | --get <id> | --cancel <id> | --run-review --model <m> --file <f> [--background] | --run-audit --file <f>|--dir <d> [--background]");

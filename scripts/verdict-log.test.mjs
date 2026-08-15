@@ -85,12 +85,15 @@ describe("persistVerdicts / loadVerdicts", () => {
 });
 
 describe("loadVerdicts", () => {
-  it("returns empty array when file missing or corrupt", async () => {
+  it("文件缺失返回空数组", async () => {
     assert.deepEqual(await loadVerdicts("/nonexistent/verdict-log.json"), []);
+  });
+
+  it("文件损坏时抛错（而非静默返回空导致数据被覆盖）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "verdict-"));
     const p = join(dir, "bad.json");
     await writeFile(p, "{ not json", "utf8");
-    assert.deepEqual(await loadVerdicts(p), []);
+    await assert.rejects(loadVerdicts(p), /corrupt|损坏|JSON/i);
   });
 });
 
@@ -100,6 +103,16 @@ describe("getActionableFindings", () => {
       { file: "a.js", finding: "real", verdict: "true" },
       { file: "b.js", finding: "false positive", verdict: "false" },
       { file: "c.js", finding: "maybe", verdict: "uncertain" },
+    ];
+    const out = getActionableFindings(log);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].finding, "real");
+  });
+
+  it("排除已 fixed 的条目", () => {
+    const log = [
+      { file: "a.js", finding: "real", verdict: "true" },
+      { file: "b.js", finding: "done", verdict: "true", fixed: { commit: "c1" } },
     ];
     const out = getActionableFindings(log);
     assert.equal(out.length, 1);

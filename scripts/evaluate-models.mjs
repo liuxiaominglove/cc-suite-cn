@@ -24,6 +24,7 @@ export function extractContext(code, line, { contextLines = 40 } = {}) {
   if (!Number.isInteger(line) || line < 1) return code;
   const lines = code.split("\n");
   const start = Math.max(1, line - contextLines);
+  if (start > lines.length) return code;
   const end = Math.min(lines.length, line + contextLines);
   return lines.slice(start - 1, end).join("\n");
 }

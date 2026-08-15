@@ -130,15 +130,15 @@ describe("runGuard", () => {
 describe("findDeadReferences", () => {
   it("returns [] when SKILL.md only references existing files", () => {
     const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses review-runner.mjs and evaluate-models.mjs" });
-    const exists = fakeExists(new Set(["/repo/scripts/review-runner.mjs", "/repo/scripts/evaluate-models.mjs"]));
-    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    const listFiles = () => ["/repo/scripts/review-runner.mjs", "/repo/scripts/evaluate-models.mjs"];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
     assert.deepEqual(problems, []);
   });
 
   it("reports references to nonexistent files", () => {
     const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses weight-analyzer.mjs and weights.json" });
-    const exists = fakeExists(new Set());
-    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    const listFiles = () => [];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
     assert.equal(problems.length, 2);
     assert.ok(problems.some((p) => p.includes("weight-analyzer.mjs")));
     assert.ok(problems.some((p) => p.includes("weights.json")));
@@ -146,23 +146,30 @@ describe("findDeadReferences", () => {
 
   it("SKILL.md 缺失时不崩溃", () => {
     const read = (f) => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
-    const exists = fakeExists(new Set());
-    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    const listFiles = () => [];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
     assert.deepEqual(problems, [], "SKILL.md 缺失应跳过而非崩溃");
   });
 
   it("根目录合法引用不误报（package.json）", () => {
     const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "see package.json for deps" });
-    const exists = fakeExists(new Set(["/repo/package.json"]));
-    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    const listFiles = () => ["/repo/package.json"];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
     assert.deepEqual(problems, [], "根目录存在的文件不得误报为死引用");
   });
 
   it("匹配含点号的文件名", () => {
     const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses self-audit.test.mjs" });
-    const exists = fakeExists(new Set(["/repo/scripts/self-audit.test.mjs"]));
-    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    const listFiles = () => ["/repo/scripts/self-audit.test.mjs"];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
     assert.deepEqual(problems, [], "含点号的文件名应完整匹配");
+  });
+
+  it("子目录引用不误报（scripts/verify/foo.mjs）", () => {
+    const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses scripts/verify/foo.mjs" });
+    const listFiles = () => ["/repo/scripts/verify/foo.mjs"];
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, listFiles, root: "/repo" });
+    assert.deepEqual(problems, [], "子目录文件不得误报为死引用");
   });
 });
 
@@ -194,5 +201,12 @@ describe("findOrphanBaselineKeys", () => {
     assert.deepEqual(findOrphanBaselineKeys({ baselinePath: "/nonexistent.json", read: throwing, exists: () => false }), []);
     const read = fakeRead({ "/repo/bad.json": "{ bad json" });
     assert.deepEqual(findOrphanBaselineKeys({ baselinePath: "/repo/bad.json", read, exists: () => false }), []);
+  });
+
+  it("相对基线键按基线文件目录解析（不依赖 process.cwd()）", () => {
+    const read = fakeRead({ "/repo/.cc-suite-cn/audit-baseline.json": JSON.stringify({ "cc-suite-cn": { commit: "c1" } }) });
+    const exists = fakeExists(new Set(["/repo/.cc-suite-cn/cc-suite-cn"]));
+    const problems = findOrphanBaselineKeys({ baselinePath: "/repo/.cc-suite-cn/audit-baseline.json", read, exists });
+    assert.deepEqual(problems, [], "相对键应按基线文件目录解析，而非 process.cwd()");
   });
 });

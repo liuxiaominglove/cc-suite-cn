@@ -27,13 +27,20 @@ export function dedupeVerdicts(verdicts) {
 }
 
 export async function loadVerdicts(filePath = VERDICT_LOG_PATH) {
+  let raw;
   try {
-    const raw = await readFile(filePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+    raw = await readFile(filePath, "utf-8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") return [];
+    throw err;
   }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`corrupted verdict log: ${filePath}`);
+  }
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 let _writeQueue = Promise.resolve();
@@ -67,7 +74,7 @@ export async function persistVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
 }
 
 export function getActionableFindings(log) {
-  return (log ?? []).filter((v) => v.verdict === "true");
+  return (log ?? []).filter((v) => v.verdict === "true" && !v.fixed);
 }
 
 export function isVerdictStale(verdict, currentContent) {

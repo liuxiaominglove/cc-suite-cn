@@ -62,6 +62,15 @@ describe("gitChangedFiles", () => {
     });
     assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js", "b.js"]);
   });
+
+  it("去重 diff 与 untracked 的重叠路径", () => {
+    const exec = fakeExec((cmd) => {
+      if (cmd.includes("diff --name-only")) return "a.js\n";
+      if (cmd.includes("ls-files")) return "a.js\n";
+      return "";
+    });
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js"], "重叠路径应去重");
+  });
 });
 
 describe("loadBaseline / saveBaseline", () => {
@@ -96,6 +105,17 @@ describe("loadBaseline / saveBaseline", () => {
     const b = await loadBaseline(p);
     assert.equal(b["/a"].commit, "c1");
     assert.equal(b["/b"].commit, "c2");
+  });
+
+  it("原子写不残留 .tmp 文件", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "baseline-"));
+    const p = join(dir, "audit-baseline.json");
+    await saveBaseline("/a", { commit: "c1" }, p);
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(dir);
+    assert.ok(!files.some((f) => f.endsWith(".tmp")), "不应残留 .tmp 临时文件");
+    const b = await loadBaseline(p);
+    assert.equal(b["/a"].commit, "c1");
   });
 });
 

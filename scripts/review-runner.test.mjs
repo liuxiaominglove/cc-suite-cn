@@ -442,6 +442,11 @@ describe("review-runner", () => {
     );
   });
 
+  it("baseDir 为文件系统根时放行子路径（不因 // 前缀误判）", () => {
+    assert.doesNotThrow(() => validateFilePath("/etc/passwd", "/"));
+    assert.equal(validateFilePath("/etc/passwd", "/"), "/etc/passwd");
+  });
+
   it("should fence code containing triple backticks without base64", async () => {
     let stdinWritten = null;
     setSpawn((cmd, args) => {
@@ -1068,6 +1073,18 @@ describe("reviewFile", () => {
     assert.equal(captured.allowExternal, true, "单块路径必须透传 allowExternal");
   });
 
+  it("多块评审每块都传 file（保留 import 上下文）", async () => {
+    const captured = [];
+    const reviewFn = async (opts) => {
+      captured.push(opts);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => Array(1600).fill("x").join("\n");
+    await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 0 });
+    assert.equal(captured.length, 2);
+    assert.ok(captured.every((c) => c.file === "big.js"), "每个 chunk 都应收到 file（否则丢 [项目上下文]）");
+  });
+
   it("passes fileName to reviewFn on single-chunk review", async () => {
     let captured = null;
     const reviewFn = async (opts) => {
@@ -1628,6 +1645,16 @@ describe("criticize", () => {
     assert.ok(p.includes("bug one"), "应含 finding");
     assert.ok(p.includes("a.js:3"), "应含位置");
     assert.ok(p.includes("const x = 1;"), "应含 code");
+  });
+
+  it("criticize 转发 spawn 参数（不回落全局 spawn）", async () => {
+    let globalCalled = false;
+    setSpawn(() => { globalCalled = true; return createMockProcess({ stdout: MOCK_OUTPUT_VALID }); });
+    let localCalled = false;
+    const localSpawn = () => { localCalled = true; return createMockProcess({ stdout: MOCK_OUTPUT_VALID }); };
+    await criticize({ findings: [], code: "x", spawn: localSpawn });
+    assert.equal(localCalled, true, "应使用传入的 spawn");
+    assert.equal(globalCalled, false, "不应回落全局 spawn");
   });
 
   it("criticize 解析 verdicts 和 missed", async () => {

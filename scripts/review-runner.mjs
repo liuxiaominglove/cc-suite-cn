@@ -58,7 +58,7 @@ export async function criticize({ findings, code, model = CRITIC_MODEL, backend 
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
 
   const { stdout } = await withRetry(async () => {
-    const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, cwd: resolveReviewCwd(backend) });
+    const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn, cwd: resolveReviewCwd(backend) });
     if (timedOut) throw new TimeoutError();
     const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
     if (failed && isAuthError(stderr)) throw new AuthError();
@@ -303,7 +303,8 @@ export function validateFilePath(filePath, baseDir = process.cwd(), opts = {}) {
 
   const resolved = resolve(baseDir, filePath);
   const resolvedBase = resolve(baseDir);
-  if (resolved !== resolvedBase && !resolved.startsWith(resolvedBase + sep)) {
+  const basePrefix = resolvedBase.endsWith(sep) ? resolvedBase : resolvedBase + sep;
+  if (resolved !== resolvedBase && !resolved.startsWith(basePrefix)) {
     throw new RunnerError("File path is outside project directory", { exitCode: -1, stderr: "Invalid file path" });
   }
   return resolved;
@@ -626,7 +627,7 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, timeout, customPrompt, retries, fileName: file });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };
@@ -708,6 +709,10 @@ if (isMainModule(import.meta.url)) {
   const rawTimeout = timeoutIdx !== -1 ? parseInt(args[timeoutIdx + 1], 10) : DEFAULT_TIMEOUT;
   const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? rawTimeout : DEFAULT_TIMEOUT;
   const backend = backendIdx !== -1 ? args[backendIdx + 1] : "codebuddy";
+  if (!backend || backend.startsWith("--")) {
+    console.error("--backend requires a value (codebuddy/kimi/qwen)");
+    process.exit(1);
+  }
 
   if (file && dir) {
     console.error("--file and --dir are mutually exclusive");

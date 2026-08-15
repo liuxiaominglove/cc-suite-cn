@@ -522,6 +522,10 @@ describe("extractContext", () => {
   it("returns empty for empty code", () => {
     assert.equal(extractContext("", 5), "");
   });
+
+  it("行号远超文件末尾时返回完整代码而非空串", () => {
+    assert.equal(extractContext(code, 99999), code, "line 超出范围应回退为完整代码");
+  });
 });
 
 describe("adjudicate context extraction", () => {

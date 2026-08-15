@@ -1,5 +1,5 @@
 import { execSync } from "node:child_process";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -48,7 +48,7 @@ export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync
   } catch {
     // untracked 检测失败：忽略
   }
-  return files;
+  return [...new Set(files)];
 }
 
 export async function loadBaseline(path = BASELINE_PATH) {
@@ -68,7 +68,14 @@ export async function saveBaseline(project, record, path = BASELINE_PATH) {
     const baseline = await loadBaseline(path);
     baseline[project] = record;
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify(baseline, null, 2) + "\n", "utf-8");
+    const tmp = `${path}.${Date.now()}.tmp`;
+    await writeFile(tmp, JSON.stringify(baseline, null, 2) + "\n", "utf-8");
+    try {
+      await rename(tmp, path);
+    } catch (err) {
+      await unlink(tmp).catch(() => {});
+      throw err;
+    }
     return baseline;
   };
   const result = _writeQueue.then(run, run);
