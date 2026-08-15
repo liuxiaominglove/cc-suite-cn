@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, AUDIT_WORKERS } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, AUDIT_WORKERS, isValidJobId } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -64,6 +64,19 @@ describe("createJobStore", () => {
     assert.equal(updated, null);
   });
 
+  it("update 原子写不残留临时文件", async () => {
+    const { store, dir } = await makeStore();
+    const job = await store.create({ type: "review" });
+    for (let i = 0; i < 5; i++) {
+      await store.update(job.id, { status: "completed", n: i });
+    }
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(dir);
+    assert.ok(!files.some((f) => f.endsWith(".tmp")), "目录不得残留 .tmp 临时文件");
+    const got = await store.get(job.id);
+    assert.equal(got.n, 4, "最终写入应完整");
+  });
+
   it("list returns jobs newest-first", async () => {
     const { store } = await makeStore();
     const first = await store.create({ type: "review" });
@@ -100,6 +113,31 @@ describe("createJobStore", () => {
     assert.equal(await store.cancel("../pwned"), null);
     const { existsSync } = await import("node:fs");
     assert.equal(existsSync(outside), false, "must not create a file outside the jobs dir");
+  });
+
+  it("路径穿越 id 不得读取/改写已存在的外部文件", async () => {
+    const { store, dir } = await makeStore();
+    const name = `pwned-${Date.now()}.json`;
+    const outside = join(dir, "..", name);
+    const { writeFile, readFile, rm } = await import("node:fs/promises");
+    try {
+      await writeFile(outside, JSON.stringify({ marker: "untouched" }));
+      const got = await store.get(`../../${name}`);
+      assert.equal(got, null, "不得读取 jobs 目录外的文件");
+      assert.equal(await store.update(`../../${name}`, { status: "completed" }), null);
+      const after = JSON.parse(await readFile(outside, "utf8"));
+      assert.equal(after.marker, "untouched", "外部文件不得被改写");
+    } finally {
+      await rm(outside, { force: true });
+    }
+  });
+
+  it("isValidJobId 拒绝路径遍历向量", () => {
+    assert.equal(isValidJobId("../../pwned"), false);
+    assert.equal(isValidJobId("../pwned"), false);
+    assert.equal(isValidJobId("job-1234-abcd/../evil"), false);
+    assert.equal(isValidJobId("job-1234-abcd/evil"), false);
+    assert.equal(isValidJobId("job-1234-abcd"), true);
   });
 });
 
@@ -305,6 +343,23 @@ describe("runJobBackground", () => {
     assert.equal(job.pid, 999);
     assert.equal(spawned, true);
   });
+
+  it("日志打开失败时 job 标记 failed 而非残留 running", async () => {
+    const { store } = await makeStore();
+    const openLog = () => { throw new Error("cannot open log"); };
+    await assert.rejects(
+      () => runJobBackground(
+        store,
+        { type: "review", model: "glm-5.2" },
+        { action: "worker-review", file: "x.js" },
+        { spawn: () => ({ unref() {}, pid: 1 }), logDir: "/nonexistent", openLog }
+      ),
+      /cannot open log/
+    );
+    const jobs = await store.list();
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].status, "failed", "日志打开失败不应残留 running 状态");
+  });
 });
 
 describe("parseArgs background and worker", () => {
@@ -323,6 +378,16 @@ describe("parseArgs background and worker", () => {
   it("parses --max-concurrent on run-audit", () => {
     const r = parseArgs(["--run-audit", "--file", "x.js", "--background", "--max-concurrent", "3"]);
     assert.equal(r.maxConcurrent, 3);
+  });
+
+  it("--max-concurrent 非数字不产生 NaN", () => {
+    const r = parseArgs(["--run-audit", "--file", "x.js", "--background", "--max-concurrent", "abc"]);
+    assert.equal(r.maxConcurrent, undefined, "非数字应回退默认而非 NaN");
+  });
+
+  it("--ms 非数字不产生 NaN", () => {
+    const r = parseArgs(["--worker-sleep", "--job-id", "j1", "--ms", "abc"]);
+    assert.equal(r.ms, undefined, "非数字应回退默认而非 NaN");
   });
 });
 
@@ -351,6 +416,17 @@ describe("runAudit", () => {
     const kimi = result.workers.find((w) => w.model === "kimi-k2.7-code");
     assert.equal(kimi.success, false);
     assert.ok(kimi.error.includes("kimi down"));
+    assert.equal(result.workers.filter((w) => w.success).length, 1);
+  });
+
+  it("worker reject null/undefined 时标记失败而非整体崩溃", async () => {
+    const review = async ({ model }) => {
+      if (model === "kimi-k2.7-code") return Promise.reject(null);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const result = await runAudit({ file: "x.js", review, persistAuditLog: false });
+    const kimi = result.workers.find((w) => w.model === "kimi-k2.7-code");
+    assert.equal(kimi.success, false, "null 拒绝不得让整个审计崩溃");
     assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
 
@@ -386,7 +462,7 @@ describe("cancelJob", () => {
     await store.update(job.id, { pid: 555 });
     let killed = null;
     const result = await cancelJob(store, job.id, (pid) => { killed = pid; });
-    assert.equal(killed, 555);
+    assert.equal(killed, -555, "应杀进程组（-pid）而非仅 worker 进程");
     assert.equal(result.status, "cancelled");
   });
 
@@ -397,6 +473,15 @@ describe("cancelJob", () => {
     const result = await cancelJob(store, job.id, (pid) => { killed = pid; });
     assert.equal(killed, null);
     assert.equal(result.status, "cancelled");
+  });
+
+  it("不取消已完成的 job", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    await store.update(job.id, { status: "completed", finishedAt: "2020-01-01T00:00:00.000Z" });
+    const result = await cancelJob(store, job.id, () => {});
+    assert.equal(result.status, "completed", "已完成 job 不得被误改为 cancelled");
+    assert.equal(result.finishedAt, "2020-01-01T00:00:00.000Z");
   });
 });
 

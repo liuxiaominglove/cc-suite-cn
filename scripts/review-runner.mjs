@@ -1,10 +1,10 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { resolve, sep, join, relative, dirname } from "node:path";
+import { resolve, sep, join, relative, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { jsonrepair } from "jsonrepair";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
-import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
+import { runProcess, setSpawn, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { CRITIC_MODEL } from "./models.mjs";
 
 export { setSpawn, RunnerError, TimeoutError };
@@ -13,6 +13,8 @@ export const DEFAULT_EXTS = [".swift", ".js", ".ts", ".tsx", ".jsx", ".py", ".go
 export const DEFAULT_TIMEOUT = 900000;
 const MAX_FILES_WARN = 50;
 const SKIP_DIRS = new Set(["node_modules", ".git", ".build", "DerivedData", "Pods", "__pycache__", "dist", "build", ".next", ".turbo"]);
+
+export const SOURCE_IMPORT_EXTS = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx"];
 
 const DEFAULT_RETRY_BACKOFF_MS = [10000, 30000];
 let _retryBackoffMs = DEFAULT_RETRY_BACKOFF_MS;
@@ -87,14 +89,15 @@ export function isNLArtifact(file) {
   if (typeof file !== "string" || !file) return false;
   const f = file.toLowerCase();
   if (!f.endsWith(".md")) return false;
+  const bn = basename(f);
   return (
     f.includes("/commands/") ||
     f.includes("/skills/") ||
     f.includes("/agents/") ||
     f.includes("/rules/") ||
-    f.endsWith("skill.md") ||
-    f.endsWith("agents.md") ||
-    f.endsWith("claude.md")
+    bn === "skill.md" ||
+    bn === "agents.md" ||
+    bn === "claude.md"
   );
 }
 
@@ -177,7 +180,10 @@ export async function collectImportContext(filePath, { readFile = null } = {}) {
   const parts = [];
   for (const imp of [...new Set(localImports)]) {
     const abs = resolve(baseDir, imp);
-    const candidates = [abs, `${abs}.js`, `${abs}.mjs`, `${abs}.ts`, `${abs}/index.js`, `${abs}/index.mjs`];
+    const hasSourceExt = SOURCE_IMPORT_EXTS.some((e) => abs.endsWith(e));
+    const indexCandidates = [`${abs}/index.js`, `${abs}/index.mjs`, `${abs}/index.ts`];
+    const extCandidates = SOURCE_IMPORT_EXTS.map((e) => `${abs}${e}`);
+    const candidates = hasSourceExt ? [abs, ...indexCandidates] : [...extCandidates, ...indexCandidates];
     let modContent = null;
     for (const c of candidates) {
       const r = await read(c).catch(() => null);
@@ -361,9 +367,10 @@ export function resolveReviewCwd(backend) {
   return backend === "kimi" || backend === "qwen" ? tmpdir() : undefined;
 }
 
-function isAuthError(stderr) {
-  const lower = stderr.toLowerCase();
-  return lower.includes("401") || lower.includes("unauthorized") || lower.includes("invalid api key");
+export function isAuthError(stderr) {
+  const lower = String(stderr ?? "").toLowerCase();
+  if (lower.includes("unauthorized") || lower.includes("invalid api key")) return true;
+  return /(?:^|[\s=(])(?:HTTP[\s/]*)?401\b(?![:\d])/.test(lower);
 }
 
 export function getDiff({ cwd = process.cwd(), spawn } = {}) {
@@ -421,7 +428,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     if (code || file || dir) {
       throw new RunnerError("diff is mutually exclusive with code, file, and dir", { exitCode: -1, stderr: "Cannot combine diff with code/file/dir" });
     }
-    const diffText = await getDiff();
+    const diffText = await getDiff({ cwd });
     if (!diffText.trim()) {
       return { model, success: false, summary: "no changes to verify (git diff HEAD is empty)", issues: [] };
     }
@@ -442,7 +449,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     }
 
     const { readFile } = await import("node:fs/promises");
-    const resolvedDir = validateFilePath(dir, process.cwd(), { allowExternal });
+    const resolvedDir = validateFilePath(dir, cwd, { allowExternal });
     ruleCwd = resolvedDir;
     stackContext = await collectStackContext(resolvedDir);
     const resolvedExts = exts ?? DEFAULT_EXTS;
@@ -489,13 +496,15 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   }
 
   if (file) {
-    const { readFile } = await import("node:fs/promises");
-    const resolved = validateFilePath(file, process.cwd(), { allowExternal });
-    code = await readFile(resolved, "utf-8");
+    const resolved = validateFilePath(file, cwd, { allowExternal });
     ruleCwd = dirname(resolved);
     if (!isNLArtifact(fileName ?? file)) {
       importContext = await collectImportContext(resolved);
       stackContext = await collectStackContext(ruleCwd);
+    }
+    if (typeof code !== "string" || code === "") {
+      const { readFile } = await import("node:fs/promises");
+      code = await readFile(resolved, "utf-8");
     }
   }
 
@@ -611,7 +620,7 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, retries, fileName: file });
+    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, allowExternal, retries, fileName: file });
   }
 
   const chunkResults = await Promise.all(
@@ -633,17 +642,22 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
     return (SEVERITY_ORDER[s] ?? 0) > (SEVERITY_ORDER[worst] ?? 0) ? s : worst;
   }, "unknown");
 
+  const chunkErrors = chunkResults
+    .filter((c) => !c.result?.success)
+    .map((c) => ({ startLine: c.startLine, error: c.result?.error ?? "unknown error" }));
+
   return {
     model,
-    success: chunkResults.some((c) => c.result?.success),
+    success: chunkResults.every((c) => c.result?.success),
     severity,
     issues,
+    chunkErrors,
     summary: `分 ${chunks.length} 块评审`,
     chunkCount: chunks.length,
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const criticIdx = args.indexOf("--critic");
   if (criticIdx !== -1) {

@@ -10,6 +10,8 @@ const CORE_SCRIPTS = [
   "guard",
   "models",
   "preflight",
+  "audit-baseline",
+  "verdict-log",
 ];
 
 export function coreScriptPaths() {

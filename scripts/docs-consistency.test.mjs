@@ -156,4 +156,43 @@ describe("打分 finding（WI-6）", () => {
     if (c === null) return;
     assert.match(c, /\*\*[^*]*(先|必须|应当|不要|禁止|输出)[^*]*\*\*/, "no-silent 缺加粗祈使句");
   });
+
+  it("verification-discipline.md 含「修 bug 前实测触发条件」铁律", (t) => {
+    const c = readGlobalOrSkip(t, ".config", "opencode", "rules", "verification-discipline.md");
+    if (c === null) return;
+    assert.match(c, /触发条件/, "全局验证纪律缺「实测触发条件」铁律");
+  });
+
+  it("verification-discipline.md 含「修复建议验证所有调用点」铁律", (t) => {
+    const c = readGlobalOrSkip(t, ".config", "opencode", "rules", "verification-discipline.md");
+    if (c === null) return;
+    assert.match(c, /调用点|所有调用方/, "全局验证纪律缺「验证所有调用点」铁律");
+  });
+
+  it("AGENTS.md 含触发条件实测 + 调用点验证铁律", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /触发条件实测/, "AGENTS.md 缺「触发条件实测」铁律");
+    assert.match(c, /调用点/, "AGENTS.md 缺「验证所有调用点」铁律");
+  });
+
+  it("AGENTS.md 含施工队串行纪律（单文件内并行保留）", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /默认串行/, "AGENTS.md 缺串行纪律");
+    assert.match(c, /单文件内.*并行.*保留/, "应保留「单文件内并行」的措辞");
+  });
+
+  it("fix.md 含修前分级 + SKILL.md 含假阳终审", () => {
+    const fix = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
+    assert.match(fix, /分级|优先级/, "fix.md 缺修前分级步骤");
+    const skill = readFileSync(join(ROOT, ".opencode/skills/cc-review/SKILL.md"), "utf8");
+    assert.match(skill, /假阳/, "SKILL.md 缺假阳终审");
+    assert.match(skill, /假阴/, "SKILL.md 缺假阴终审");
+  });
+
+  it("cli-concurrency.md 含串行纪律 + 真实进程核查", (t) => {
+    const c = readGlobalOrSkip(t, ".config", "opencode", "rules", "cli-concurrency.md");
+    if (c === null) return;
+    assert.match(c, /串行/, "cli-concurrency 缺串行纪律");
+    assert.match(c, /真实进程|running/, "cli-concurrency 缺僵尸进程核查");
+  });
 });

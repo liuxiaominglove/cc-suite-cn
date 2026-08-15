@@ -5,6 +5,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const BASELINE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/audit-baseline.json");
 
+export const COMMIT_HASH_RE = /^[a-f0-9]{7,40}$/;
+
 export function gitHead(cwd = process.cwd(), exec = execSync) {
   try {
     return exec("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
@@ -23,14 +25,14 @@ export function gitDirty(cwd = process.cwd(), exec = execSync) {
 }
 
 export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync) {
-  if (typeof baseCommit !== "string" || !/^[a-f0-9]{7,40}$/.test(baseCommit)) {
+  if (typeof baseCommit !== "string" || !COMMIT_HASH_RE.test(baseCommit)) {
     return [];
   }
   let diff;
   try {
     diff = exec(`git diff --name-only ${baseCommit}..HEAD`, { cwd, encoding: "utf8" });
   } catch {
-    return [];
+    return null;
   }
   const files = [];
   for (const line of diff.split("\n")) {
@@ -97,7 +99,7 @@ export function parseSaveArgs(args) {
   const commitIdx = args.indexOf("--commit");
   const hasCommitFlag = commitIdx !== -1;
   const raw = hasCommitFlag ? args[commitIdx + 1] : null;
-  const commit = raw && !raw.startsWith("--") ? raw : null;
+  const commit = raw && !raw.startsWith("--") && COMMIT_HASH_RE.test(raw) ? raw : null;
   return { project, commit, hasCommitFlag };
 }
 

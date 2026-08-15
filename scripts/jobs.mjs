@@ -1,10 +1,11 @@
-import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, rename, unlink } from "node:fs/promises";
 import { openSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { FIND_BUG_WORKERS } from "./models.mjs";
+import { isMainModule } from "./runner-core.mjs";
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -55,7 +56,15 @@ export function createJobStore({ dir }) {
     const job = await get(id);
     if (!job) return null;
     const updated = { ...job, ...patch };
-    await writeFile(jobFile(id), JSON.stringify(updated, null, 2));
+    const file = jobFile(id);
+    const tmp = `${file}.${Date.now()}-${randomBytes(3).toString("hex")}.tmp`;
+    await writeFile(tmp, JSON.stringify(updated, null, 2));
+    try {
+      await rename(tmp, file);
+    } catch (err) {
+      await unlink(tmp).catch(() => {});
+      throw err;
+    }
     return updated;
   }
 
@@ -137,7 +146,13 @@ export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSp
   }
   const job = await store.create(meta);
   const logPath = logDir ? join(logDir, `${job.id}.log`) : null;
-  const child = spawnWorker({ ...workerSpec, jobId: job.id }, { spawn, logPath, openLog });
+  let child;
+  try {
+    child = spawnWorker({ ...workerSpec, jobId: job.id }, { spawn, logPath, openLog });
+  } catch (err) {
+    await store.update(job.id, { status: "failed", finishedAt: new Date().toISOString(), error: err?.message ?? String(err) });
+    throw err;
+  }
   await store.update(job.id, { pid: child.pid });
   return job.id;
 }
@@ -145,9 +160,10 @@ export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSp
 export async function cancelJob(store, id, kill = (pid) => process.kill(pid, "SIGTERM")) {
   const job = await store.get(id);
   if (!job) return null;
-  if (job.status === "running" && job.pid != null) {
+  if (job.status !== "running") return job;
+  if (job.pid != null) {
     try {
-      kill(job.pid);
+      kill(-job.pid);
     } catch {}
   }
   return store.cancel(id);
@@ -185,7 +201,10 @@ export function parseArgs(args) {
       if (model) r.model = model;
       if (file) r.file = file;
       if (backend) r.backend = backend;
-      if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
+      if (maxConcurrent) {
+        const n = parseInt(maxConcurrent, 10);
+        if (Number.isFinite(n) && n > 0) r.maxConcurrent = n;
+      }
       if (prompt) r.prompt = prompt;
       if (rest.includes("--allow-external")) r.allowExternal = true;
       if (hasBackground) r.background = true;
@@ -201,7 +220,10 @@ export function parseArgs(args) {
       if (file) r.file = file;
       if (dir) r.dir = dir;
       if (exts) r.exts = exts.split(",").map((e) => e.trim());
-      if (maxConcurrent) r.maxConcurrent = parseInt(maxConcurrent, 10);
+      if (maxConcurrent) {
+        const n = parseInt(maxConcurrent, 10);
+        if (Number.isFinite(n) && n > 0) r.maxConcurrent = n;
+      }
       if (prompt) r.prompt = prompt;
       if (rest.includes("--diff")) r.diff = true;
       if (rest.includes("--allow-external")) r.allowExternal = true;
@@ -244,7 +266,10 @@ export function parseArgs(args) {
       const jobId = flag("job-id");
       const ms = flag("ms");
       if (jobId) r.jobId = jobId;
-      if (ms) r.ms = parseInt(ms, 10);
+      if (ms) {
+        const n = parseInt(ms, 10);
+        if (Number.isFinite(n) && n >= 0) r.ms = n;
+      }
       return r;
     }
     default:
@@ -278,7 +303,7 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
           : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
-        return { backend, model, success: false, error: err.message };
+        return { backend, model, success: false, error: err?.message ?? String(err) };
       }
     })
   );
@@ -315,7 +340,7 @@ async function defaultAppendAudit(workers, target) {
   await persistAuditEntries(entries, AUDIT_LOG_PATH);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const parsed = parseArgs(process.argv.slice(2));
   const store = defaultStore();
 

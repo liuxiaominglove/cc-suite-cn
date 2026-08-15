@@ -71,6 +71,17 @@ describe("persistVerdicts / loadVerdicts", () => {
     assert.equal(log.length, 1, "同一条 finding 应只留最新 verdict");
     assert.equal(log[0].verdict, "false");
   });
+
+  it("重新持久化保留已 fixed 的标记", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "verdict-log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", fixed: { commit: "c1", testEvidence: "t" } }], p);
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", codeHash: "h2" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 1);
+    assert.ok(log[0].fixed, "重新裁决不得抹掉 fixed 标记");
+    assert.equal(log[0].fixed.commit, "c1");
+  });
 });
 
 describe("loadVerdicts", () => {

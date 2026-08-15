@@ -105,6 +105,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 4. **边界必测**：空值、null、undefined、极值、错误路径。
 5. **无测试框架的项目**：先用 Node 内置 `node:test` 搭考场（`.mjs` 扩展名天然 ESM，**零 npm**），把纯逻辑抽成模块再测。DOM 类改动无法无 jsdom 单测时，用"语法检查 + 浏览器手动验证"兜底，并在验证台账标 🟡。
 6. **能力动词逐个测**：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 测试证据。
+7. **触发条件实测 + 修复建议验证所有调用点**：finding 可能"bug 是真的，触发条件写错了"（如把"argv 是相对路径"当触发，实测 argv 恒为绝对路径），修前先实测触发条件；finding 给的 fix 建议照抄可能引入回归（如"限定项目根目录"会顺带砍掉外部项目审计），落地前把建议放到每个调用方验证。
 
 ### 外部依赖改动铁律（配置 / 渠道 / CLI）
 
@@ -113,6 +114,12 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 1. **模型归属交叉验证**：看到 `provider/model` 配置，先问"这个 provider 真的提供这个 model 吗？"——模型是哪家公司的，用背景知识对照；配置与常识矛盾时，**查官方 API 文档/模型目录（DashScope API 参考、models.dev）交叉验证，不要只信单一来源**。教训：kimi 是月之暗面（Moonshot）的模型，但阿里百炼的 DashScope API 其实也"直供" Kimi（阿里云直供 + 月之暗面直供两种）——而模型广场界面/客服答复可能与 API 文档不一致；"某 provider 有没有某模型"必须以官方 API 文档为准，而不是凭界面、答复或既有配置下结论。`alibaba-cn/` 前缀只代表"走阿里 API 通道"，不代表"模型是阿里的"。
 2. **CLI 参数组合先实测**：给外部 CLI 加参数前，先跑一次最小验证（如 `kimi --plan -p "hi"`），确认参数能组合、不冲突，再写进代码。教训：`kimi --plan` 与 `-p` 冲突（`Cannot combine --prompt with --plan`）。
 3. **改模型必实测加载**：改完 model/渠道，必须派活实测一次（确认 agent 真的能加载、能响应），不能只改文件就收工。
+
+### 施工队调用纪律（外部 CLI 并发）
+
+- **默认串行**：多文件/多任务批量审（`/audit` 一次审多个文件）时，`--run-audit` 逐个跑；不要一口气并行拉起十几个 codebuddy/kimi 进程（会撞 CLI 限流/超时）。
+- **单文件内并行保留**：一个文件内 glm+kimi 双施工队并行是设计内行为，保留。
+- **超时后核对真实进程**：超时或账本显示「running」后，用 `ps` 核对真实进程是否还在；「running」可能是超时残留的僵尸记录，不要轻信。
 
 ## Verification Discipline
 

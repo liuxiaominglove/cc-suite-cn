@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -917,6 +917,17 @@ describe("review diff mode", () => {
       RunnerError
     );
   });
+
+  it("diff 模式把 cwd 转发给 getDiff", async () => {
+    let capturedCwd = null;
+    setGitSpawn((cmd, args, opts) => {
+      capturedCwd = opts.cwd;
+      return createMockProcess({ stdout: "diff --git a/x b/x\n" });
+    });
+    setSpawn(() => createMockProcess({ stdout: MOCK_OUTPUT_VALID }));
+    await review({ model: "m", backend: "codebuddy", diff: true, cwd: "/custom/dir" });
+    assert.equal(capturedCwd, "/custom/dir", "getDiff 应收到 review 的 cwd");
+  });
 });
 
 describe("VERIFY_PROMPT", () => {
@@ -1041,7 +1052,20 @@ describe("reviewFile", () => {
     const r = await reviewFile({ model: "glm-5.2", backend: "codebuddy", file: "big.js", readFn, reviewFn, chunkSize: 800 });
     // 801 lines → 2 chunks (800 + 1, with overlap 10 it's 2 chunks)
     assert.equal(r.chunkCount, 2);
-    assert.equal(r.success, true);
+    assert.equal(r.success, false, "有分块失败时 success 应为 false");
+    assert.equal(r.chunkErrors.length, 1, "应暴露失败的分块");
+    assert.equal(r.issues.length, 1, "仍保留成功分块的 issues");
+  });
+
+  it("单块路径把 allowExternal 传给 reviewFn", async () => {
+    let captured = null;
+    const reviewFn = async (opts) => {
+      captured = opts;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const readFn = async () => "const x = 1;";
+    await reviewFile({ model: "m", backend: "b", file: "f.js", readFn, reviewFn, allowExternal: true });
+    assert.equal(captured.allowExternal, true, "单块路径必须透传 allowExternal");
   });
 
   it("passes fileName to reviewFn on single-chunk review", async () => {
@@ -1470,6 +1494,25 @@ describe("collectImportContext", () => {
     const ctx = await collectImportContext(join(dir, "main.js"));
     assert.equal(ctx, "");
   });
+
+  it("无扩展名的 import 不读裸路径（防密钥外泄）", async () => {
+    const dir = await makeProject({
+      "main.js": 'import cfg from "./secret";\n',
+      "secret": "PRIVATE_KEY=supersecretvalue",
+    });
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.ok(!ctx.includes("PRIVATE_KEY"), "不得内联无扩展名文件内容");
+  });
+
+  it("逃逸到项目外的无扩展名 import 不读取", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "cc-escape-"));
+    const dir = join(parent, "proj");
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "main.js"), 'import cfg from "../topsecret";\n');
+    await writeFile(join(parent, "topsecret"), "API_TOKEN=leaked");
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.ok(!ctx.includes("API_TOKEN"), "不得读取项目外的无扩展名文件");
+  });
 });
 
 describe("review parses chain_analysis", () => {
@@ -1488,6 +1531,82 @@ describe("review parses chain_analysis", () => {
     assert.equal(r.severity, "low");
     assert.equal(r.issues.length, 1);
     assert.equal(r.issues[0].finding, "real bug");
+  });
+});
+
+describe("review cwd 参数", () => {
+  afterEach(() => setSpawn(null));
+
+  it("file 模式用 cwd 解析相对路径", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-cwd-"));
+    try {
+      await writeFile(join(tmp, "a.js"), "export const x = 1;");
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+      const r = await review({ model: "m", backend: "codebuddy", file: "a.js", cwd: tmp });
+      assert.equal(r.success, true, "相对 file 应以 cwd 为基目录解析");
+      assert.ok(stdinWritten.includes("export const x = 1;"), "应读到 cwd 下的文件内容");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("isAuthError", () => {
+  it("识别真实 401 Unauthorized", () => {
+    assert.equal(isAuthError("error: 401 Unauthorized"), true);
+    assert.equal(isAuthError("HTTP 401 Unauthorized"), true);
+  });
+
+  it("识别 invalid api key", () => {
+    assert.equal(isAuthError("Error: invalid api key"), true);
+  });
+
+  it("不误判栈帧行号 at file.ts:401:5", () => {
+    assert.equal(isAuthError("TypeError at foo.js:401:5"), false);
+  });
+
+  it("不误判端口号 40123", () => {
+    assert.equal(isAuthError("EADDRINUSE port 40123"), false);
+  });
+
+  it("不误判字节数 14012", () => {
+    assert.equal(isAuthError("wrote 14012 bytes"), false);
+  });
+});
+
+describe("isNLArtifact 精确匹配", () => {
+  it("fooskill.md 不是 NL 工件", () => {
+    assert.equal(isNLArtifact("fooskill.md"), false);
+  });
+
+  it("myagents.md 不是 NL 工件", () => {
+    assert.equal(isNLArtifact("myagents.md"), false);
+  });
+
+  it("真正的 SKILL.md 是 NL 工件", () => {
+    assert.equal(isNLArtifact(".opencode/skills/cc-review/SKILL.md"), true);
+  });
+});
+
+describe("review 不重复读盘", () => {
+  afterEach(() => setSpawn(null));
+
+  it("code 已提供时不再读 file（不覆盖 code）", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    const missingFile = join(tmpdir(), "definitely-not-exist-xyz.js");
+    const r = await review({ model: "m", backend: "codebuddy", code: "const provided = 1;", file: missingFile, allowExternal: true });
+    assert.equal(r.success, true, "code 已提供时不应因 file 不存在而失败");
+    assert.ok(stdinWritten.includes("const provided = 1;"), "prompt 应使用传入的 code");
   });
 });
 

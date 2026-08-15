@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { runProcess, collectStream, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
+import { runProcess, collectStream, setSpawn, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 
 function createMockProc({ stdout = "", stderr = "", exitCode = 0, signal = null, autoClose = true } = {}) {
   const stdoutStream = new EventEmitter();
@@ -146,5 +146,28 @@ describe("collectStream", () => {
     s.emit("data", Buffer.from("cd"));
     s.emit("end");
     assert.equal(await p, "abcd");
+  });
+});
+
+describe("isMainModule", () => {
+  it("匹配含空格/URL 特殊字符的绝对路径", () => {
+    assert.equal(isMainModule("file:///Users/me/My%20Project/scripts/guard.mjs", "/Users/me/My Project/scripts/guard.mjs"), true);
+  });
+
+  it("匹配普通绝对路径", () => {
+    assert.equal(isMainModule("file:///Users/me/proj/guard.mjs", "/Users/me/proj/guard.mjs"), true);
+  });
+
+  it("匹配含 # 号的路径（URL 编码）", () => {
+    assert.equal(isMainModule("file:///a/b%23c/x.mjs", "/a/b#c/x.mjs"), true);
+  });
+
+  it("不同路径返回 false", () => {
+    assert.equal(isMainModule("file:///a/b.mjs", "/a/c.mjs"), false);
+  });
+
+  it("argv 为空/非字符串返回 false", () => {
+    assert.equal(isMainModule("file:///a/b.mjs", undefined), false);
+    assert.equal(isMainModule("file:///a/b.mjs", null), false);
   });
 });

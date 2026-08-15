@@ -1,10 +1,16 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
+import { pathToFileURL } from "node:url";
 
 let _spawn = null;
 
 export function setSpawn(fn) {
   _spawn = fn;
+}
+
+export function isMainModule(importMetaUrl, argv1 = process.argv[1]) {
+  if (typeof argv1 !== "string" || !argv1) return false;
+  return importMetaUrl === pathToFileURL(argv1).href;
 }
 
 export class RunnerError extends Error {

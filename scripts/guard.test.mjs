@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { homedir } from "node:os";
 
 function fakeExists(present) {
   return (p) => present.has(p);
@@ -82,6 +83,12 @@ describe("findStaleReferences", () => {
     const problems = findStaleReferences(["audit.md", "opencode.jsonc"], read);
     assert.deepEqual(problems, []);
   });
+
+  it("检测绝对路径形式的 stale 引用", () => {
+    const read = fakeRead({ "opencode.jsonc": `${homedir()}/.config/opencode/skills/cc-review` });
+    const problems = findStaleReferences(["opencode.jsonc"], read);
+    assert.equal(problems.length, 1, "绝对路径形式的 stale 引用也应被检测");
+  });
 });
 
 describe("runGuard", () => {
@@ -135,5 +142,57 @@ describe("findDeadReferences", () => {
     assert.equal(problems.length, 2);
     assert.ok(problems.some((p) => p.includes("weight-analyzer.mjs")));
     assert.ok(problems.some((p) => p.includes("weights.json")));
+  });
+
+  it("SKILL.md 缺失时不崩溃", () => {
+    const read = (f) => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    const exists = fakeExists(new Set());
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    assert.deepEqual(problems, [], "SKILL.md 缺失应跳过而非崩溃");
+  });
+
+  it("根目录合法引用不误报（package.json）", () => {
+    const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "see package.json for deps" });
+    const exists = fakeExists(new Set(["/repo/package.json"]));
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    assert.deepEqual(problems, [], "根目录存在的文件不得误报为死引用");
+  });
+
+  it("匹配含点号的文件名", () => {
+    const read = fakeRead({ "/repo/.opencode/skills/cc-review/SKILL.md": "uses self-audit.test.mjs" });
+    const exists = fakeExists(new Set(["/repo/scripts/self-audit.test.mjs"]));
+    const problems = findDeadReferences([".opencode/skills/cc-review/SKILL.md"], { read, exists, root: "/repo" });
+    assert.deepEqual(problems, [], "含点号的文件名应完整匹配");
+  });
+});
+
+describe("findOrphanBaselineKeys", () => {
+  it("基线键目录都存在时返回 []", () => {
+    const read = fakeRead({ "/repo/.cc-suite-cn/audit-baseline.json": JSON.stringify({ "/Users/x/project/cc-suite-cn": { commit: "c1" } }) });
+    const exists = fakeExists(new Set(["/Users/x/project/cc-suite-cn"]));
+    const problems = findOrphanBaselineKeys({ baselinePath: "/repo/.cc-suite-cn/audit-baseline.json", read, exists });
+    assert.deepEqual(problems, []);
+  });
+
+  it("重命名漂移（cc-suite 键目录消失）被检出", () => {
+    const read = fakeRead({ "/repo/.cc-suite-cn/audit-baseline.json": JSON.stringify({ "/Users/x/project/cc-suite-pe": { commit: "c1" } }) });
+    const exists = fakeExists(new Set());
+    const problems = findOrphanBaselineKeys({ baselinePath: "/repo/.cc-suite-cn/audit-baseline.json", read, exists });
+    assert.equal(problems.length, 1);
+    assert.ok(problems[0].includes("cc-suite-pe"));
+  });
+
+  it("无关项目目录消失不误报", () => {
+    const read = fakeRead({ "/repo/.cc-suite-cn/audit-baseline.json": JSON.stringify({ "/Users/x/project/learnunk": { commit: "c1" } }) });
+    const exists = fakeExists(new Set());
+    const problems = findOrphanBaselineKeys({ baselinePath: "/repo/.cc-suite-cn/audit-baseline.json", read, exists });
+    assert.deepEqual(problems, [], "只 scoped 到 cc-suite 家族，不误报无关项目");
+  });
+
+  it("基线文件缺失/损坏返回 [] 不抛", () => {
+    const throwing = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    assert.deepEqual(findOrphanBaselineKeys({ baselinePath: "/nonexistent.json", read: throwing, exists: () => false }), []);
+    const read = fakeRead({ "/repo/bad.json": "{ bad json" });
+    assert.deepEqual(findOrphanBaselineKeys({ baselinePath: "/repo/bad.json", read, exists: () => false }), []);
   });
 });

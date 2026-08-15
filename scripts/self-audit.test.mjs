@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import { coreScriptPaths, selfAudit } from "./self-audit.mjs";
 
 describe("coreScriptPaths", () => {
-  it("lists the 8 core non-test scripts", () => {
+  it("lists the 10 core non-test scripts", () => {
     const paths = coreScriptPaths();
-    assert.equal(paths.length, 8);
+    assert.equal(paths.length, 10);
     for (const p of paths) {
       assert.match(p, /^scripts\/.+\.mjs$/);
       assert.ok(!p.includes(".test.mjs"), "must not include test files");
     }
+    assert.ok(paths.includes("scripts/audit-baseline.mjs"), "自审清单应含 audit-baseline.mjs");
+    assert.ok(paths.includes("scripts/verdict-log.mjs"), "自审清单应含 verdict-log.mjs");
   });
 });
 

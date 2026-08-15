@@ -58,7 +58,7 @@ Load this skill when the user:
 ## Critical Rules
 
 - **谁都不批自己**: 找 bug / 批判 / 裁决 / 修 bug 是四个独立角色，修 bug 只由 opencode（最了解项目 + TDD）亲自做。
-- **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
+- **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。**终审既补假阴、也滤假阳**：hy3 判 false 的真 bug（假阴）和 hy3 判 true 实为 by-design 或触发条件错的 finding（假阳）都要靠 opencode 代码级核实兜住，不默认 hy3 结论或 finding 措辞准确。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
 - 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
 - 找 bug 的 finding 用英文（`REVIEW_PROMPT` 要求），跨语言共识才能对齐。
 - If one worker fails, still show the others' results + a failure note.

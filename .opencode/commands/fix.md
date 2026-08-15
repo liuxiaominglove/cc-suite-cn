@@ -37,8 +37,9 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 待修清单 = `verdict === "true"` 的 finding。
 
 - **清单为空** → 报告"未发现真 bug"并**停止**，不进入 Step 4。
-- 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy3 是 LLM 判断、会看走眼。
+- 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy3 是 LLM 判断、会看走眼——既可能**假阴**（漏真 bug），也可能**假阳**（判 true 实为 by-design 或触发条件写错）。终审要同时兜住这两种。
 - **codeHash 校验**：修前确认该文件自裁决后没被改过；若 `isVerdictStale` 为 true（代码已变），须重新 `/evaluate --arbitrate` 再修。
+- **修前分级**：对待修清单按影响**分级**——high（安全/崩溃/数据损坏）先修，low（边界/措辞类）可后置并在 `docs/verification.md` 标注"后置"；不必对每条平均用力。
 
 ## Step 4: 修 bug（opencode 亲自，严格 TDD）
 

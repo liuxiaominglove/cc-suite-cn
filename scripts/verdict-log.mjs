@@ -15,8 +15,13 @@ export function verdictKey(v) {
 
 export function dedupeVerdicts(verdicts) {
   const map = new Map();
-  for (const v of verdicts ?? []) {
-    map.set(verdictKey(v), v);
+  for (let v of verdicts ?? []) {
+    const key = verdictKey(v);
+    const prev = map.get(key);
+    if (prev && prev.fixed && !v.fixed) {
+      v = { ...v, fixed: prev.fixed };
+    }
+    map.set(key, v);
   }
   return [...map.values()];
 }

@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-runner.mjs";
 
@@ -159,6 +159,24 @@ describe("classifyConsensus", () => {
     const r = classifyConsensus(results);
     assert.equal(r.groups.length, 1);
     assert.equal(r.groups[0].type, "unique");
+  });
+
+  it("同一模型报 2 条同位置 finding 不算共识", () => {
+    const results = [
+      {
+        model: "glm-5.2",
+        success: true,
+        issues: [
+          { file: "a.js", line: 10, finding: "tilde not expanded" },
+          { file: "a.js", line: 10, finding: "路径未做波浪号展开" },
+        ],
+      },
+    ];
+    const r = classifyConsensus(results);
+    assert.equal(r.groups.length, 1);
+    assert.equal(r.groups[0].type, "unique", "同一模型的重复 finding 不应算共识");
+    assert.equal(r.perModel["glm-5.2"].uniqueCount, 2);
+    assert.equal(r.perModel["glm-5.2"].consensusCount, 0);
   });
 });
 
@@ -695,5 +713,73 @@ describe("adjudicate 技术栈", () => {
     await adjudicate({ finding: "x", code: "y", stackContext: "Node.js (node >=22)" });
     assert.ok(captured.stdinWritten.includes("[技术栈]"), "prompt 应含技术栈段");
     assert.ok(captured.stdinWritten.includes("Node.js"), "prompt 应含技术栈内容");
+  });
+});
+
+describe("matchesFileFilter", () => {
+  it("精确相等命中", () => {
+    assert.equal(matchesFileFilter("scripts/jobs.mjs", "scripts/jobs.mjs"), true);
+  });
+
+  it("basename 后缀命中", () => {
+    assert.equal(matchesFileFilter("scripts/jobs.mjs", "jobs.mjs"), true);
+    assert.equal(matchesFileFilter("/Users/x/project/learnunk/src/ui.js", "ui.js"), true);
+  });
+
+  it("不匹配返回 false", () => {
+    assert.equal(matchesFileFilter("scripts/jobs.mjs", "other.js"), false);
+    assert.equal(matchesFileFilter(null, "jobs.mjs"), false);
+    assert.equal(matchesFileFilter("scripts/jobs.mjs", null), false);
+  });
+});
+
+describe("filterAuditsByFiles", () => {
+  const audits = [
+    { file: "scripts/jobs.mjs", workers: [] },
+    { file: "scripts/guard.mjs", workers: [] },
+  ];
+
+  it("按文件过滤只返回匹配任务", () => {
+    const out = filterAuditsByFiles(audits, ["jobs.mjs"]);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].file, "scripts/jobs.mjs");
+  });
+
+  it("多值过滤", () => {
+    assert.equal(filterAuditsByFiles(audits, ["jobs.mjs", "guard.mjs"]).length, 2);
+  });
+
+  it("无匹配返回空", () => {
+    assert.deepEqual(filterAuditsByFiles(audits, ["nonexistent.js"]), []);
+  });
+
+  it("无过滤返回全部（向后兼容）", () => {
+    assert.equal(filterAuditsByFiles(audits, null).length, 2);
+    assert.equal(filterAuditsByFiles(audits, []).length, 2);
+    assert.equal(filterAuditsByFiles(audits, undefined).length, 2);
+  });
+});
+
+describe("cli --file 过滤", () => {
+  it("把 --file 传给 load", async () => {
+    let captured = null;
+    const load = async (opts) => { captured = opts; return []; };
+    let out = "";
+    await cli(["--arbitrate", "--file", "jobs.mjs"], { load, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.deepEqual(captured.files, ["jobs.mjs"]);
+  });
+
+  it("把 --files 逗号多值传给 load", async () => {
+    let captured = null;
+    const load = async (opts) => { captured = opts; return []; };
+    await cli(["--arbitrate", "--files", "jobs.mjs,guard.mjs"], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.deepEqual(captured.files, ["jobs.mjs", "guard.mjs"]);
+  });
+
+  it("无 --file 时传 null（向后兼容）", async () => {
+    let captured = null;
+    const load = async (opts) => { captured = opts; return []; };
+    await cli(["--arbitrate"], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.deepEqual(captured.files, null);
   });
 });

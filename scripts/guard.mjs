@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = homedir();
@@ -36,6 +37,7 @@ export function findMissingCanonical(files = CANONICAL_FILES, exists = existsSyn
 
 export function findStaleReferences(files = GLOBAL_REF_FILES, read = readFileSync) {
   const problems = [];
+  const home = homedir();
   for (const f of files) {
     let content;
     try {
@@ -44,21 +46,29 @@ export function findStaleReferences(files = GLOBAL_REF_FILES, read = readFileSyn
       continue;
     }
     for (const stale of STALE_GLOBAL_PATHS) {
-      if (content.includes(stale)) {
-        problems.push(`${f} references ${stale}`);
+      const variants = [stale, stale.replace(/^~/, home)];
+      for (const v of variants) {
+        if (content.includes(v)) {
+          problems.push(`${f} references ${v}`);
+        }
       }
     }
   }
   return problems;
 }
 
-const DEAD_REF_DIRS = ["scripts", ".opencode/skills/cc-review"];
+const DEAD_REF_DIRS = ["scripts", ".opencode/skills/cc-review", "."];
 
 export function findDeadReferences(skillFiles = [".opencode/skills/cc-review/SKILL.md"], { read = readFileSync, exists = existsSync, root = REPO_ROOT } = {}) {
   const problems = [];
   for (const rel of skillFiles) {
-    const content = read(join(root, rel), "utf-8");
-    const refs = content.match(/[\w-]+\.(?:mjs|json)\b/g) ?? [];
+    let content;
+    try {
+      content = read(join(root, rel), "utf-8");
+    } catch {
+      continue;
+    }
+    const refs = content.match(/[\w.-]+\.(?:mjs|json)\b/g) ?? [];
     for (const ref of new Set(refs)) {
       const found = DEAD_REF_DIRS.some((d) => exists(join(root, d, ref)));
       if (!found) problems.push(`${rel} references ${ref}`);
@@ -73,16 +83,41 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     missing: findMissingCanonical(canonicals, exists, root),
     staleRefs: findStaleReferences(refFiles, read),
     deadRefs: findDeadReferences(skillFiles, { read, exists, root }),
+    orphanBaselineKeys: findOrphanBaselineKeys({ baselinePath: join(root, ".cc-suite-cn/audit-baseline.json"), read, exists }),
   };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const { dupes, missing, staleRefs, deadRefs } = runGuard();
+export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-suite-cn/audit-baseline.json"), read = readFileSync, exists = existsSync } = {}) {
+  let raw;
+  try {
+    raw = read(baselinePath, "utf-8");
+  } catch {
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+  const problems = [];
+  for (const key of Object.keys(parsed)) {
+    if (basename(key).startsWith("cc-suite") && !exists(key)) {
+      problems.push(`baseline key ${key} points to a missing directory (renamed?)`);
+    }
+  }
+  return problems;
+}
+
+if (isMainModule(import.meta.url)) {
+  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys } = runGuard();
   const problems = [
     ...dupes.map((p) => `duplicate copy: ${p}`),
     ...missing.map((rel) => `missing canonical: ${rel}`),
     ...staleRefs,
     ...deadRefs,
+    ...orphanBaselineKeys,
   ];
   if (problems.length) {
     console.error(`Drift guard FAILED:\n  ${problems.join("\n  ")}`);

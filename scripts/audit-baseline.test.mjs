@@ -48,11 +48,11 @@ describe("gitChangedFiles", () => {
     assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
   });
 
-  it("git 命令失败返回空数组", () => {
+  it("git 命令失败返回 null（区别于无变更）", () => {
     const exec = () => {
       throw new Error("git failed");
     };
-    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
+    assert.equal(gitChangedFiles("abc123def456", "/repo", exec), null);
   });
 
   it("过滤空行和空白行", () => {
@@ -159,9 +159,15 @@ describe("parseSaveArgs", () => {
   });
 
   it("解析 --save <project> --commit <hash>", () => {
-    const r = parseSaveArgs(["--save", "/p", "--commit", "abc123"]);
+    const r = parseSaveArgs(["--save", "/p", "--commit", "abc1234"]);
     assert.equal(r.project, "/p");
-    assert.equal(r.commit, "abc123");
+    assert.equal(r.commit, "abc1234");
+  });
+
+  it("--commit 非 hex 值被拒绝", () => {
+    assert.equal(parseSaveArgs(["--save", "/p", "--commit", "main"]).commit, null);
+    assert.equal(parseSaveArgs(["--save", "/p", "--commit", "HEAD"]).commit, null);
+    assert.equal(parseSaveArgs(["--save", "/p", "--commit", "refs/heads/x"]).commit, null);
   });
 });
 
@@ -184,13 +190,13 @@ describe("gitChangedFiles 命令注入防护", () => {
 });
 
 describe("gitChangedFiles 吞错误", () => {
-  it("git diff 失败时返回空（不返回部分 untracked）", () => {
+  it("git diff 失败时返回 null（不返回部分 untracked）", () => {
     const exec = (cmd) => {
       if (cmd.includes("diff")) throw new Error("diff failed");
       if (cmd.includes("ls-files")) return "untracked.js\n";
       return "";
     };
-    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
+    assert.equal(gitChangedFiles("abc123def456", "/repo", exec), null);
   });
 });
 

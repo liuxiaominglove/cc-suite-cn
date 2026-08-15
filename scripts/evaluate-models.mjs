@@ -1,4 +1,4 @@
-import { runProcess, RunnerError, TimeoutError } from "./runner-core.mjs";
+import { runProcess, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry, collectProjectRules, collectImportContext, collectStackContext } from "./review-runner.mjs";
 import { hashContent } from "./verdict-log.mjs";
@@ -88,7 +88,8 @@ export function classifyConsensus(results) {
   }
 
   for (const g of groups) {
-    g.type = g.items.length >= 2 ? "consensus" : "unique";
+    const models = new Set(g.items.map((i) => i.model));
+    g.type = models.size >= 2 ? "consensus" : "unique";
     g.size = g.items.length;
     for (const item of g.items) {
       const m = perModel[item.model];
@@ -273,12 +274,35 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   return { perModel, minSamples: MIN_SAMPLES, arbitrated: arbitrate, verdicts };
 }
 
-export async function loadAudits() {
+export async function loadAudits({ files = null } = {}) {
   const { defaultStore } = await import("./jobs.mjs");
   const store = defaultStore();
   const jobs = await store.list();
   const completed = jobs.filter((j) => j.type === "audit" && j.status === "completed" && j.result && Array.isArray(j.result.workers));
-  return dedupJobsByTask(completed).map((j) => ({ workers: j.result.workers, file: j.task }));
+  const audits = dedupJobsByTask(completed).map((j) => ({ workers: j.result.workers, file: j.task }));
+  return filterAuditsByFiles(audits, files);
+}
+
+export function matchesFileFilter(file, filter) {
+  if (!file || !filter) return false;
+  return file === filter || file.endsWith(`/${filter}`);
+}
+
+export function filterAuditsByFiles(audits, files) {
+  if (!files || files.length === 0) return audits ?? [];
+  return (audits ?? []).filter((a) => files.some((f) => matchesFileFilter(a.file, f)));
+}
+
+export function parseFileFilterArgs(args) {
+  const filesIdx = args.indexOf("--files");
+  if (filesIdx !== -1 && args[filesIdx + 1] && !args[filesIdx + 1].startsWith("--")) {
+    return args[filesIdx + 1].split(",").map((s) => s.trim()).filter(Boolean);
+  }
+  const fileIdx = args.indexOf("--file");
+  if (fileIdx !== -1 && args[fileIdx + 1] && !args[fileIdx + 1].startsWith("--")) {
+    return [args[fileIdx + 1]];
+  }
+  return null;
 }
 
 export function dedupJobsByTask(jobs) {
@@ -331,7 +355,8 @@ export function makeResolveCode(allowedFiles, readFileFn = null) {
 export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr } = {}) {
   try {
     const arbitrate = args.includes("--arbitrate");
-    const audits = await load();
+    const files = parseFileFilterArgs(args);
+    const audits = await load({ files });
 
     if (audits.length === 0) {
       stdout.write("(暂无审计数据，先跑 /audit 积累)\n");
@@ -395,6 +420,6 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   cli().then((code) => { process.exitCode = code; });
 }
