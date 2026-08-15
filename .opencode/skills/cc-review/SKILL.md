@@ -51,7 +51,7 @@ Load this skill when the user:
    - The被审项目's `AGENTS.md` / `CLAUDE.md` rules are injected into the review prompt (project-specific rules avoid false positives).
    - Transient failures auto-retry; worker OK/FAIL is shown in the summary.
 3. Optionally get a second opinion: `/review-qwen` (critic, read-only + sandbox).
-4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-pe/` 裁决账本).
+4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-cn/` 裁决账本).
 5. Fix real bugs: `/fix` — opencode fixes with TDD (RED → GREEN → REFACTOR), never commits automatically.
 6. Verify: `/verify` — review `git diff HEAD`.
 
@@ -67,7 +67,7 @@ Load this skill when the user:
 
 ## Report Template (每次工作完总结必带两节)
 
-每条 cc-suite-pe 命令的总结，末尾固定附两节（详见 `AGENTS.md`「汇报惯例」）：
+每条 cc-suite-cn 命令的总结，末尾固定附两节（详见 `AGENTS.md`「汇报惯例」）：
 
 ```
 ## 本次各 AI 表现

@@ -3,7 +3,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 
-export const VERDICT_LOG_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-pe/verdict-log.json");
+export const VERDICT_LOG_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/verdict-log.json");
 
 export function hashContent(content) {
   return createHash("sha256").update(String(content ?? "")).digest("hex");

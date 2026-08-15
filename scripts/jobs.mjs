@@ -153,7 +153,7 @@ export async function cancelJob(store, id, kill = (pid) => process.kill(pid, "SI
   return store.cancel(id);
 }
 
-export const DEFAULT_JOBS_DIR = ".cc-suite-pe/jobs";
+export const DEFAULT_JOBS_DIR = ".cc-suite-cn/jobs";
 
 export function defaultStore() {
   return createJobStore({ dir: DEFAULT_JOBS_DIR });

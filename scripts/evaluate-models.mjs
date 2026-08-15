@@ -366,7 +366,7 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
     if (arbitrated && verdicts.length) {
       const { persistVerdicts } = await import("./verdict-log.mjs");
       await persistVerdicts(verdicts);
-      stdout.write(`已落库 ${verdicts.length} 条裁决到 .cc-suite-pe/verdict-log.json\n`);
+      stdout.write(`已落库 ${verdicts.length} 条裁决到 .cc-suite-cn/verdict-log.json\n`);
     }
 
     stdout.write("模型性能评估\n");

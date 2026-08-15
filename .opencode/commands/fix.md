@@ -24,7 +24,7 @@ node scripts/jobs.mjs --run-audit --file "<path>"
 node scripts/evaluate-models.mjs --arbitrate
 ```
 
-hy3 逐条判 finding 真假，并把每条 verdict 落库到 `.cc-suite-pe/verdict-log.json`（含 codeHash 代码快照）。**裁决的是当前账本里所有已完成的 audit**（累积裁决，按 file+line+finding 去重）。
+hy3 逐条判 finding 真假，并把每条 verdict 落库到 `.cc-suite-cn/verdict-log.json`（含 codeHash 代码快照）。**裁决的是当前账本里所有已完成的 audit**（累积裁决，按 file+line+finding 去重）。
 
 > **这是硬门槛**：没裁决过的 finding 不在待修清单里，opencode 不能修。跳过本步直接修，就是"先修后验"，会导致 hy3 看到的是修好的代码、误判成假阳。
 

@@ -186,7 +186,7 @@ describe("parseArgs", () => {
 
 describe("defaultStore", () => {
   it("points at the default jobs dir", () => {
-    assert.equal(DEFAULT_JOBS_DIR, ".cc-suite-pe/jobs");
+    assert.equal(DEFAULT_JOBS_DIR, ".cc-suite-cn/jobs");
   });
 
   it("returns a working store", async () => {

@@ -12,7 +12,7 @@ agent: build
 
 ## Step 1: 在裁决账本里找条目
 
-用 Bash 读 `.cc-suite-pe/verdict-log.json`，按 `$ARGUMENTS` 匹配 file / finding：
+用 Bash 读 `.cc-suite-cn/verdict-log.json`，按 `$ARGUMENTS` 匹配 file / finding：
 
 ```
 node --input-type=module -e "

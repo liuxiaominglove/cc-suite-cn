@@ -1,5 +1,5 @@
 {
-  "name": "cc-suite-pe",
+  "name": "cc-suite-cn",
   "version": "1.0.0",
   "description": "Multi-model code orchestration — opencode (DeepSeek) orchestrates and fixes; glm+kimi find bugs, qwen critiques, hy3 verifies.",
   "keywords": [
@@ -13,12 +13,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/liuxiaominglove/cc-suite-pe.git"
+    "url": "git+https://github.com/liuxiaominglove/cc-suite-cn.git"
   },
   "bugs": {
-    "url": "https://github.com/liuxiaominglove/cc-suite-pe/issues"
+    "url": "https://github.com/liuxiaominglove/cc-suite-cn/issues"
   },
-  "homepage": "https://github.com/liuxiaominglove/cc-suite-pe#readme",
+  "homepage": "https://github.com/liuxiaominglove/cc-suite-cn#readme",
   "type": "module",
   "scripts": {
     "test": "zsh -c 'source ~/.zshrc && node --test scripts/runner-core.test.mjs scripts/models.test.mjs scripts/evaluate-models.test.mjs scripts/review-runner.test.mjs scripts/backends.test.mjs scripts/jobs.test.mjs scripts/guard.test.mjs scripts/preflight.test.mjs scripts/docs-consistency.test.mjs scripts/self-audit.test.mjs scripts/verdict-log.test.mjs scripts/audit-baseline.test.mjs .opencode/skills/cc-review/audit-logger.test.mjs && node scripts/guard.mjs'",

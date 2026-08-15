@@ -1,4 +1,4 @@
-# CC-Suite PE
+# cc-suite-cn
 
 Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥) and the fixer (修 bug). Four worker models each play a distinct role: glm+kimi **找 bug**（audit）, qwen **批判员**（critic）, hy3 **验证审计员**（verifier）. Different models have different training data, so they catch different classes of bugs.
 
@@ -124,9 +124,9 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。P3 之后固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
 
-## 汇报惯例（每次 cc-suite-pe 工作完的总结必带两节）
+## 汇报惯例（每次 cc-suite-cn 工作完的总结必带两节）
 
-所有 cc-suite-pe 命令（`/audit` `/review-*` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节：
+所有 cc-suite-cn 命令（`/audit` `/review-*` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节：
 
 ### 第一节：本次各 AI 表现
 

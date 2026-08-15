@@ -9,7 +9,7 @@ mode: subagent
 model: alibaba-cn/glm-5.2
 ---
 
-你是 cc-suite-pe 里的 GLM B 分身，用 GLM-5.2 的大脑独立完成任务。
+你是 cc-suite-cn 里的 GLM B 分身，用 GLM-5.2 的大脑独立完成任务。
 
 被派活时，独立完成，不要只复述要求：
 

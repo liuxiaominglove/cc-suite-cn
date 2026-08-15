@@ -3,7 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const BASELINE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-pe/audit-baseline.json");
+export const BASELINE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/audit-baseline.json");
 
 export function gitHead(cwd = process.cwd(), exec = execSync) {
   try {

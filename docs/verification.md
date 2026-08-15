@@ -29,7 +29,7 @@
 | 桥单测（InMemoryTransport + checkGate） | `createServer` 用 InMemoryTransport 连 client，闸门正负向 + 缺参校验全过 | 🟢 | 2026-08-13 |
 | #3 真后台（detached worker） | `run-review --background` 1 秒返回，任务在独立进程继续跑，30 秒后 running→completed | 🟢 | 2026-08-13 |
 | cancel 真 kill worker | cancel 后 35 秒任务仍 `cancelled`（未被 worker 覆盖成 completed），证明 worker 进程被真杀 | 🟢 | 2026-08-13 |
-| worker 日志（决策 B） | 后台任务产出 `.cc-suite-pe/jobs/<id>.log`（stdout/stderr 重定向） | 🟢 | 2026-08-13 |
+| worker 日志（决策 B） | 后台任务产出 `.cc-suite-cn/jobs/<id>.log`（stdout/stderr 重定向） | 🟢 | 2026-08-13 |
 | P6-0: acceptEdits 拦 MCP 工具（命门） | `acceptEdits --mcp-config` 下调 `delegate_to_opencode` 被拒（DeferExecuteTool 需授权） | 🟢 | 2026-08-13 |
 | P6-0: 解决方案 = bypassPermissions + 禁 Bash | `bypassPermissions --disallowedTools Bash` 下：能写文件 ✅、能调桥 ✅、拦 Bash ✅（codebuddy 明说 "Bash tool isn't available"） | 🟢 | 2026-08-13 |
 | P6-0 gotcha: --disallowedTools 贪婪参数 | 放 prompt 前会吞掉 prompt 导致空输出，须放 prompt 后 | 🟡 | 2026-08-13 |
@@ -186,7 +186,7 @@
 | 结论 | 证据 | 置信度 | 日期 |
 |------|------|--------|------|
 | VD-1: 新增 `scripts/verdict-log.mjs`（裁决账本） | `hashContent`(sha256) / `persistVerdicts`(原子写+按 file:line:finding 去重) / `loadVerdicts`(容错) / `getActionableFindings`(筛 true) / `isVerdictStale`(codeHash 校验)；`verdict-log.test.mjs` 12 用例 | 🟢 | 2026-08-15 |
-| VD-2: `evaluate-models.mjs` 裁决落库 + codeHash | `evaluateModels` 裁决时算文件 sha256 存 codeHash、返回 `verdicts` 数组；`cli --arbitrate` 落库到 `.cc-suite-pe/verdict-log.json`；`evaluate-models.test.mjs` 新增 2 用例（verdicts+codeHash / 无裁决返回空） | 🟢 | 2026-08-15 |
+| VD-2: `evaluate-models.mjs` 裁决落库 + codeHash | `evaluateModels` 裁决时算文件 sha256 存 codeHash、返回 `verdicts` 数组；`cli --arbitrate` 落库到 `.cc-suite-cn/verdict-log.json`；`evaluate-models.test.mjs` 新增 2 用例（verdicts+codeHash / 无裁决返回空） | 🟢 | 2026-08-15 |
 | VD-3: `/fix` 命令裁决前置 + override 出口 | `.opencode/commands/fix.md` 重写：找 bug → **裁决(强制)** → 读待修清单(verdict=true) → 终审+codeHash 校验 → TDD 修 → verify；override 出口须台账标"未经裁决" | 🟢 | 2026-08-15 |
 | VD-4: SKILL.md 三层分工 + 裁决前置规则 | How I Work 加三层分工图（找 bug→批判→裁决→终审修）+ Critical Rules 加"裁决前置硬门槛" | 🟢 | 2026-08-15 |
 | VD-5: docs-consistency 测试指向 repo 命令 | 产品化删全局命令后，`review.md`/`verify.md` 测试改指 repo `.opencode/commands/`（原指向已删除的 `~/.config/opencode/commands/`，导致 pnpm test 红） | 🟢 | 2026-08-15 |
@@ -195,8 +195,8 @@
 ## 结果
 
 - `pnpm test:unit`：325 全绿（新增 verdict-log 12 + evaluate-models 2）+ guard 绿。
-- 数据流：`audit-log` → `/evaluate --arbitrate`(hy3 裁决+codeHash) → `.cc-suite-pe/verdict-log.json` → `/fix` 读 `getActionableFindings`（verdict=true 且 codeHash 未失效）→ opencode 终审 + TDD 修。
-- verdict-log.json 在 `.cc-suite-pe/`（已 gitignore，运行时数据不进仓库）。
+- 数据流：`audit-log` → `/evaluate --arbitrate`(hy3 裁决+codeHash) → `.cc-suite-cn/verdict-log.json` → `/fix` 读 `getActionableFindings`（verdict=true 且 codeHash 未失效）→ opencode 终审 + TDD 修。
+- verdict-log.json 在 `.cc-suite-cn/`（已 gitignore，运行时数据不进仓库）。
 
 ---
 
@@ -295,7 +295,7 @@
 |------|------|--------|------|
 | learnunk `loadConfig` 容错：config.json 为 `null`/数组（合法 JSON 非对象）时崩溃 | kimi 在两段式 prompt 后报的真 bug；`src/index.js` 加「解析后验证非 null 非数组对象」；`test/index.test.js` +2 用例；learnunk `npm test` 108 全绿 | 🟢 | 2026-08-15 |
 
-## cc-suite-pe（短板 3：qwen 批判员重定位）
+## cc-suite-cn（短板 3：qwen 批判员重定位）
 
 | 结论 | 证据 | 置信度 | 日期 |
 |------|------|--------|------|
@@ -303,7 +303,7 @@
 | SC-2: `review-runner.mjs` CLI 加 `--critic` 模式 | `--critic --file <path> --findings-file <json>` 入口 | 🟢 | 2026-08-15 |
 | SC-3: `review-qwen.md` 重写为批判流程 | 必须先 audit 读 finding 清单 → criticize → 展示同意/反对/漏报；不回退独立评审 | 🟢 | 2026-08-15 |
 
-## cc-suite-pe（短板 4：结构化 finding + 去重优化）
+## cc-suite-cn（短板 4：结构化 finding + 去重优化）
 
 | 结论 | 证据 | 置信度 | 日期 |
 |------|------|--------|------|
@@ -311,7 +311,7 @@
 
 ## 结果
 
-- cc-suite-pe `pnpm test:unit`：352 全绿 + guard 绿。
+- cc-suite-cn `pnpm test:unit`：352 全绿 + guard 绿。
 - learnunk `npm test`：108 全绿。
 - 四角色流程补齐：找 bug → **批判（qwen 复核清单）** → 裁决（hy3）→ 终审（opencode）。
 
@@ -380,9 +380,9 @@
 
 ---
 
-# cc-suite-pe 自审（增量 + 检测审计生命周期三件套）
+# cc-suite-cn 自审（增量 + 检测审计生命周期三件套）
 
-**目标**：用刚建的三件套增量审 cc-suite-pe 自己（基线 = 上次完整闭环 dogfooding `b1e6657`），并检测三件套是否工作。
+**目标**：用刚建的三件套增量审 cc-suite-cn 自己（基线 = 上次完整闭环 dogfooding `b1e6657`），并检测三件套是否工作。
 
 ## 三件套检测结果（全通过）
 
@@ -426,7 +426,7 @@
 
 ## 实测
 
-- `collectStackContext` 对 learnunk → `Node.js (node >=22.5.0) | test: node --test`；对 cc-suite-pe → `Node.js | deps: jsonrepair, ... | test: ...`（test 脚本超 60 字符截断）✅
+- `collectStackContext` 对 learnunk → `Node.js (node >=22.5.0) | test: node --test`；对 cc-suite-cn → `Node.js | deps: jsonrepair, ... | test: ...`（test 脚本超 60 字符截断）✅
 - `pnpm test:unit`：404 全绿 + guard 绿。
 
 ## 依据（为什么做技术栈感知）
@@ -482,7 +482,7 @@
 
 ## 实测
 
-- `resolveStackContext` 核心逻辑：`collectStackContext(dirname(file))` 对 learnunk → `Node.js (node >=22.5.0)`、对 cc-suite-pe → `Node.js | deps: ...` ✅
+- `resolveStackContext` 核心逻辑：`collectStackContext(dirname(file))` 对 learnunk → `Node.js (node >=22.5.0)`、对 cc-suite-cn → `Node.js | deps: ...` ✅
 - `pnpm test:unit`：408 全绿 + guard 绿。
 
 ## 技术栈感知现状（补全后）

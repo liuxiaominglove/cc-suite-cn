@@ -1,4 +1,4 @@
-# cc-suite-pe — AI 施工队协作系统
+# cc-suite-cn — AI 施工队协作系统
 
 **Multi-model code review orchestration for opencode.** glm + kimi find bugs, qwen critiques, hy3 verifies — opencode (DeepSeek) orchestrates and fixes with TDD. Different vendors, different training data, different blind spots.
 
@@ -14,7 +14,7 @@
 
 ### What it does
 
-One model misses bugs another catches. cc-suite-pe splits review into four independent roles — and **nobody reviews their own work**:
+One model misses bugs another catches. cc-suite-cn splits review into four independent roles — and **nobody reviews their own work**:
 
 | Role | Model | Job |
 |------|-------|-----|
@@ -33,8 +33,8 @@ One model misses bugs another catches. cc-suite-pe splits review into four indep
 ### Install
 
 ```bash
-git clone https://github.com/liuxiaominglove/cc-suite-pe.git
-cd cc-suite-pe
+git clone https://github.com/liuxiaominglove/cc-suite-cn.git
+cd cc-suite-cn
 
 # 1. Install the 3 worker CLIs
 npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
