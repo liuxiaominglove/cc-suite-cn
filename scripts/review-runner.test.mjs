@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -1085,13 +1085,26 @@ describe("review NL prompt selection", () => {
       return p;
     });
     await review({ model: "m", backend: "codebuddy", code: "const x = 1;", fileName: "src/foo.js" });
-    assert.ok(stdinWritten.includes("Review the following code for bugs"), "should use code review prompt for .js");
+    assert.ok(stdinWritten.includes("Review the following code and report"), "should use code review prompt for .js");
   });
 });
 
 describe("prompt language requirement", () => {
   it("REVIEW_PROMPT requires English finding/fix", () => {
     assert.ok(REVIEW_PROMPT.toLowerCase().includes("english"), "REVIEW_PROMPT should require English output");
+  });
+
+  it("REVIEW_PROMPT 只报具体 bug 并要求触发条件+影响", () => {
+    assert.match(REVIEW_PROMPT, /trigger condition/i, "应要求触发条件");
+    assert.match(REVIEW_PROMPT, /impact/i, "应要求实际影响");
+    assert.match(REVIEW_PROMPT, /Do NOT report/i, "应明确不报风格/性能/防御性建议");
+    assert.ok(!REVIEW_PROMPT.includes("code quality problems"), "不应再要宽泛的 code quality problems");
+  });
+
+  it("REVIEW_PROMPT 强制调用链核查（两段式）", () => {
+    assert.match(REVIEW_PROMPT, /trace its call chain/i, "应要求先追踪调用链");
+    assert.match(REVIEW_PROMPT, /chain_analysis/i, "应要求输出 chain_analysis 字段");
+    assert.match(REVIEW_PROMPT, /tilde expansion/i, "应点名 ~ 展开这类已处理的 case");
   });
 
   it("VERIFY_PROMPT requires English finding/fix", () => {
@@ -1317,6 +1330,29 @@ describe("review project rules injection", () => {
       await rm(tmp, { recursive: true, force: true });
     }
   });
+
+  it("injects import context (被依赖模块导出) into the prompt", async () => {
+    const tmp = await mkdtemp(join(tmpdir(), "cc-ctx-"));
+    try {
+      await writeFile(join(tmp, "db.js"), "export function resolveDbPath(p) { return p; }");
+      const target = join(tmp, "main.js");
+      await writeFile(target, 'import { resolveDbPath } from "./db.js";\nresolveDbPath("~/.local");');
+
+      let stdinWritten = null;
+      setSpawn((cmd, args) => {
+        const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+        p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+        return p;
+      });
+
+      await review({ model: "m", backend: "codebuddy", file: target, allowExternal: true });
+
+      assert.ok(stdinWritten.includes("[项目上下文]"), "应含项目上下文段");
+      assert.ok(stdinWritten.includes("resolveDbPath"), "应含被依赖模块的导出");
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("NL artifact review prompt", () => {
@@ -1371,5 +1407,114 @@ describe("NL artifact review prompt", () => {
     } finally {
       await rm(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe("collectImportContext", () => {
+  async function makeProject(files) {
+    const dir = await mkdtemp(join(tmpdir(), "cc-import-"));
+    for (const [rel, content] of Object.entries(files)) {
+      const p = join(dir, rel);
+      await mkdir(join(p, ".."), { recursive: true });
+      await writeFile(p, content);
+    }
+    return dir;
+  }
+
+  it("提取本地 import 并生成导出摘要", async () => {
+    const dir = await makeProject({
+      "db.js": "export function resolveDbPath(p) { return p; }\nexport function openDb(p) { return p; }",
+      "main.js": 'import { resolveDbPath, openDb } from "./db.js";\nresolveDbPath("~/.local");',
+    });
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.match(ctx, /db\.js/, "应列出 db.js");
+    assert.match(ctx, /resolveDbPath/, "应含 resolveDbPath 导出");
+    assert.match(ctx, /openDb/, "应含 openDb 导出");
+  });
+
+  it("过滤非本地 import（node 内置/包名）", async () => {
+    const dir = await makeProject({
+      "main.js": 'import os from "node:os";\nimport { x } from "some-package";\nimport "./db.js";',
+      "db.js": "export const helper = 1;",
+    });
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.ok(!ctx.includes("node:os"), "不应含 node 内置模块");
+    assert.ok(!ctx.includes("some-package"), "不应含包名");
+    assert.match(ctx, /db\.js/, "应含本地模块");
+  });
+
+  it("本地模块读失败时跳过不报错", async () => {
+    const dir = await makeProject({
+      "main.js": 'import { missing } from "./does-not-exist.js";\nimport "./db.js";',
+      "db.js": "export const ok = 1;",
+    });
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.match(ctx, /db\.js/, "存在的模块应列出");
+    assert.ok(!ctx.includes("does-not-exist"), "不存在的模块应跳过");
+  });
+
+  it("无本地 import 时返回空字符串", async () => {
+    const dir = await makeProject({ "main.js": "const x = 1;\n" });
+    const ctx = await collectImportContext(join(dir, "main.js"));
+    assert.equal(ctx, "");
+  });
+});
+
+describe("review parses chain_analysis", () => {
+  afterEach(() => setSpawn(null));
+
+  it("能解析含 chain_analysis 字段的评审输出", async () => {
+    const out = JSON.stringify({
+      chain_analysis: "issue1 involves openDb; openDb internally calls resolveDbPath which expands ~",
+      severity: "low",
+      issues: [{ file: "a.js", line: 1, finding: "real bug", fix: "fix it" }],
+      summary: "1 issue",
+    });
+    setSpawn(() => createMockProcess({ stdout: out }));
+    const r = await review({ model: "m", backend: "codebuddy", code: "const x = 1;" });
+    assert.equal(r.success, true);
+    assert.equal(r.severity, "low");
+    assert.equal(r.issues.length, 1);
+    assert.equal(r.issues[0].finding, "real bug");
+  });
+});
+
+describe("criticize", () => {
+  afterEach(() => setSpawn(null));
+
+  it("CRITIC_PROMPT 是批判角色（同意/反对/补漏）", () => {
+    assert.match(CRITIC_PROMPT, /批判/, "应含批判");
+    assert.match(CRITIC_PROMPT, /同意/, "应含同意");
+    assert.match(CRITIC_PROMPT, /反对/, "应含反对");
+    assert.match(CRITIC_PROMPT, /遗漏/, "应含补漏");
+  });
+
+  it("buildCriticPrompt 含 findings 清单 + code", () => {
+    const p = buildCriticPrompt(
+      [{ file: "a.js", line: 3, finding: "bug one" }],
+      "const x = 1;"
+    );
+    assert.ok(p.includes("bug one"), "应含 finding");
+    assert.ok(p.includes("a.js:3"), "应含位置");
+    assert.ok(p.includes("const x = 1;"), "应含 code");
+  });
+
+  it("criticize 解析 verdicts 和 missed", async () => {
+    const out = JSON.stringify({
+      verdicts: [{ index: 0, agree: false, reason: "openDb 内部已展开 ~" }],
+      missed: [{ file: "a.js", line: 9, finding: "real missed bug" }],
+    });
+    setSpawn(() => createMockProcess({ stdout: out }));
+    const r = await criticize({ findings: [{ file: "a.js", line: 3, finding: "~ not expanded" }], code: "x" });
+    assert.equal(r.verdicts.length, 1);
+    assert.equal(r.verdicts[0].agree, false);
+    assert.equal(r.missed.length, 1);
+    assert.equal(r.missed[0].finding, "real missed bug");
+  });
+
+  it("criticize 容错：非 JSON 输出返回空", async () => {
+    setSpawn(() => createMockProcess({ stdout: "not json" }));
+    const r = await criticize({ findings: [], code: "x" });
+    assert.deepEqual(r, { verdicts: [], missed: [] });
   });
 });

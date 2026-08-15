@@ -1,41 +1,48 @@
 ---
-description: 用 Qwen CLI（独立壳）只读评审文件或目录
+description: 批判员 — qwen 复核 glm/kimi 的 finding 清单（同意/反对/补漏），必须先 /audit
 agent: build
 ---
 
-# Qwen 只读评审
+# 批判员（qwen 第二意见）
 
-用 **Qwen CLI**（独立壳，非 codebuddy 网关）对 `$ARGUMENTS` 指定的文件或目录做只读代码评审。
+对最近一次 `/audit` 报的 finding 清单做独立批判：逐条判「同意/反对 + 理由」，并指出漏报。
 
-## Step 1: Determine Target
+> **前置：必须先 `/audit`**。批判员吃的是 glm/kimi 报的 finding 清单，没有清单就无料可批。若还没 audit，先跑 `/audit <path>` 再回来。
 
-| Input | Behavior |
-|-------|----------|
-| (empty) | "请指定文件或目录，例如 `/review-qwen src/file.ts`" |
-| file path | Target = 该文件（相对 cwd 或绝对） |
-| directory path | 用 `--dir` 模式批量评审目录下所有源文件 |
+## Step 1: 读最近 audit 的 findings
 
-## Step 2: Run Review
-
-用 Bash 运行（单壳、只读）：
+用 Bash（在项目目录）：
 
 ```
-node scripts/review-runner.mjs --backend qwen --model qwen3-coder-plus --file "<target>"
+node scripts/jobs.mjs --list
 ```
 
-目录模式：
+找最近的 `audit` 任务，记下 `<job-id>`，然后读结果：
 
 ```
-node scripts/review-runner.mjs --backend qwen --model qwen3-coder-plus --dir "<target>" --exts ".js,.ts,.py,.swift,..."
+node scripts/jobs.mjs --get <job-id>
 ```
 
-（`--exts` 列表匹配目录里发现的文件类型；默认超时 900s，超大文件会自动分块）
+`result.workers` 是 glm+kimi 的评审结果，把每个 worker 的 `issues` 扁平成一个数组，写成 `/tmp/findings.json`（格式 `[{file, line, finding}, ...]`）。
 
-## Step 3: Present
+## Step 2: 调 criticize 批判
 
-展示评审结果：`severity`、`issues`（逐条 finding + fix）、`summary`。
+用 Bash：
+
+```
+node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3-coder-plus
+```
+
+## Step 3: 展示批判结果
+
+输出 `{ verdicts: [{index, agree, reason}], missed: [{file, line, finding}] }`：
+
+- **verdicts**：逐条 `agree`（真 bug）/ `disagree`（假阳，附理由）——disagree 的供裁决/终审直接过滤
+- **missed**：qwen 补漏的真 bug——并入待裁清单
 
 ## Critical Rules
 
-- Qwen 是**只读评审**（headless 无 `-y` 时写工具被拒），代码走 stdin；不要让它修改任何文件
-- 不伪造问题——评审员返回空就如实说
+- **必须先 audit**：没有 finding 清单不批判（不回退成独立评审）
+- 批判员只批判清单，不重新扫代码
+- 批判员只读 + sandbox，不修代码
+- 批判结果供 hy3 裁决和 opencode 终审参考，本身不是终审

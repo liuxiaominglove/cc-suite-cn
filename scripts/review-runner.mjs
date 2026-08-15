@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { jsonrepair } from "jsonrepair";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 import { runProcess, setSpawn, RunnerError, TimeoutError } from "./runner-core.mjs";
+import { CRITIC_MODEL } from "./models.mjs";
 
 export { setSpawn, RunnerError, TimeoutError };
 
@@ -37,9 +38,41 @@ export async function withRetry(fn, { maxRetries = 0, backoffMs = _retryBackoffM
   throw lastErr ?? new Error("withRetry: fn was never called");
 }
 
-export const REVIEW_PROMPT = "Review the following code for bugs, security issues, and code quality problems. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+export const REVIEW_PROMPT = "Review the following code and report ONLY concrete bugs that cause incorrect behavior, security vulnerabilities, or data corruption/loss. Each `finding` must state (a) the trigger condition and (b) the actual impact. Do NOT report: code style, naming, minor performance suggestions, defensive null-check recommendations, or \"could be improved\" observations unless they cause a crash or data loss. Severity: high = crash/security/data corruption; medium = wrong behavior on specific input; low = edge case (report sparingly). Before reporting any bug, trace its call chain: locate the function the bug involves, find that function's implementation (in the CODE or in the `[项目上下文]` section listing imported modules), and confirm the bug genuinely exists in that implementation. If the function already handles the case (e.g. tilde expansion, path normalization, null guards), it is NOT a bug — do not report it. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: chain_analysis (string: for EACH reported issue, name the function it involves and state what that function's implementation actually does), severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
 
 export const NL_REVIEW_PROMPT = "Review the following natural-language prompt artifact (an opencode command, skill, agent, or rule definition), NOT executable code. Evaluate quality across these dimensions: (1) trigger description clarity; (2) explicit output format; (3) error-path coverage (empty input, missing files, malformed input); (4) vague quantifiers; (5) prohibitions without alternatives; (6) internal consistency with companion SKILL.md or AGENTS.md. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
+
+export const CRITIC_PROMPT = "你是独立代码批判员（第二意见）。下方是其他评审员（glm/kimi）报的 finding 清单 + 完整代码。你的职责不是重新扫描代码，而是批判这份清单：1) 对每条 finding 判断「同意」(真 bug) 或「反对」(假阳)，并给一句理由（核查代码对应位置与被调用函数的真实实现，若该函数已处理了 finding 所说的问题，如 ~ 展开/路径归一化/null 守卫，则判反对）；2) 指出清单遗漏的真 bug（补漏）。输出 JSON：{\"verdicts\":[{\"index\":数字,\"agree\":true/false,\"reason\":\"一句理由\"}],\"missed\":[{\"file\":\"路径\",\"line\":数字,\"finding\":\"描述\"}]}";
+
+export function buildCriticPrompt(findings, code) {
+  const list = (findings ?? [])
+    .map((f, i) => `[${i}] ${f.file ?? ""}:${f.line ?? ""} — ${f.finding ?? ""}`)
+    .join("\n");
+  return `${CRITIC_PROMPT}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
+}
+
+export async function criticize({ findings, code, model = CRITIC_MODEL, backend = "qwen", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0 }) {
+  const prompt = buildCriticPrompt(findings, code);
+  const { command, args, stdin } = buildCommand(backend, { model, prompt });
+
+  const { stdout } = await withRetry(async () => {
+    const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, cwd: resolveReviewCwd(backend) });
+    if (timedOut) throw new TimeoutError();
+    const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
+    if (failed && isAuthError(stderr)) throw new AuthError();
+    if (failed) throw new RunnerError(`${command} exited with code ${exitCode}`, { exitCode, stderr });
+    return { stdout };
+  }, { maxRetries: retries });
+
+  const parsed = extractJson(stdout);
+  if (!parsed || typeof parsed !== "object") {
+    return { verdicts: [], missed: [] };
+  }
+  return {
+    verdicts: Array.isArray(parsed.verdicts) ? parsed.verdicts : [],
+    missed: Array.isArray(parsed.missed) ? parsed.missed : [],
+  };
+}
 
 export function isNLArtifact(file) {
   if (typeof file !== "string" || !file) return false;
@@ -93,6 +126,66 @@ export async function collectProjectRules({ cwd = process.cwd(), readFile = null
 export function buildRulesSection(rules) {
   const text = (rules ?? "").trim();
   return text ? `\n\n[项目规则]\n${text}` : "";
+}
+
+function extractExports(content) {
+  const names = [];
+  const declRe = /export\s+(?:async\s+)?(?:function|const|class|let|var)\s+([\w$]+)/g;
+  let m;
+  while ((m = declRe.exec(content)) !== null) {
+    names.push(m[1]);
+  }
+  const namedRe = /export\s*\{([^}]+)\}/g;
+  while ((m = namedRe.exec(content)) !== null) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim().split(/\s+as\s+/).pop().trim();
+      if (name) names.push(name);
+    }
+  }
+  return [...new Set(names)];
+}
+
+export async function collectImportContext(filePath, { readFile = null } = {}) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  const content = await read(filePath).catch(() => "");
+  if (!content) return "";
+
+  const baseDir = dirname(filePath);
+  const patterns = [
+    /import[^;'"]*?from\s*['"](\.[^'"]+)['"]/g,
+    /import\s*['"](\.[^'"]+)['"]/g,
+    /require\(\s*['"](\.[^'"]+)['"]/g,
+  ];
+  const localImports = [];
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      localImports.push(m[1]);
+    }
+  }
+  if (localImports.length === 0) return "";
+
+  const parts = [];
+  for (const imp of [...new Set(localImports)]) {
+    const abs = resolve(baseDir, imp);
+    const candidates = [abs, `${abs}.js`, `${abs}.mjs`, `${abs}.ts`, `${abs}/index.js`, `${abs}/index.mjs`];
+    let modContent = null;
+    for (const c of candidates) {
+      const r = await read(c).catch(() => null);
+      if (r != null) {
+        modContent = r;
+        break;
+      }
+    }
+    if (modContent == null) continue;
+    if (modContent.split("\n").length <= 80) {
+      parts.push(`${imp}:\n${modContent}`);
+    } else {
+      const exports = extractExports(modContent);
+      if (exports.length) parts.push(`${imp} 导出: ${exports.join(", ")}`);
+    }
+  }
+  return parts.length ? parts.join("\n\n") : "";
 }
 
 let _gitSpawn = null;
@@ -245,6 +338,7 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
 export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null }) {
 
   let ruleCwd = cwd;
+  let importContext = "";
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -329,6 +423,9 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     const resolved = validateFilePath(file, process.cwd(), { allowExternal });
     code = await readFile(resolved, "utf-8");
     ruleCwd = dirname(resolved);
+    if (!isNLArtifact(fileName ?? file)) {
+      importContext = await collectImportContext(resolved);
+    }
   }
 
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(fileName ?? file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
@@ -336,7 +433,8 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
   const rules = projectRules ?? (await collectProjectRules({ cwd: ruleCwd }));
   const fileLabel = fileName ? `\n\nFILE: ${fileName}` : "";
-  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
+  const importSection = importContext ? `\n\n[项目上下文] 本文件 import 的本地模块：\n${importContext}` : "";
+  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
@@ -475,6 +573,24 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
+  const criticIdx = args.indexOf("--critic");
+  if (criticIdx !== -1) {
+    const file = args[args.indexOf("--file") + 1];
+    const findingsFile = args[args.indexOf("--findings-file") + 1];
+    const backend = args.indexOf("--backend") !== -1 ? args[args.indexOf("--backend") + 1] : "qwen";
+    const model = args.indexOf("--model") !== -1 ? args[args.indexOf("--model") + 1] : CRITIC_MODEL;
+    if (!file || !findingsFile) {
+      console.error("Usage: node review-runner.mjs --critic --file <path> --findings-file <json-file> [--backend qwen] [--model ...]");
+      process.exit(1);
+    }
+    const { readFile } = await import("node:fs/promises");
+    const code = await readFile(file, "utf-8");
+    const findings = JSON.parse(await readFile(findingsFile, "utf-8"));
+    const result = await criticize({ findings, code, model, backend });
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(0);
+  }
+
   const modelIdx = args.indexOf("--model");
   const fileIdx = args.indexOf("--file");
   const dirIdx = args.indexOf("--dir");

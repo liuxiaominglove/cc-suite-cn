@@ -129,6 +129,28 @@ describe("classifyConsensus", () => {
     assert.equal(r.perModel["kimi-k2.7-code"].consensusRate, 0.5);
   });
 
+  it("同 file+line 但表述不同也归为共识（位置优先）", () => {
+    const results = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 10, finding: "tilde not expanded" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ file: "a.js", line: 10, finding: "路径未做波浪号展开导致数据库打开失败" }] },
+    ];
+    const r = classifyConsensus(results);
+    const consensus = r.groups.filter((g) => g.type === "consensus");
+    assert.equal(consensus.length, 1, "同 file+line 的应归为共识，即使表述完全不同");
+    assert.equal(r.perModel["glm-5.2"].consensusCount, 1);
+    assert.equal(r.perModel["kimi-k2.7-code"].consensusCount, 1);
+  });
+
+  it("同 file 但 line 差很多则不因位置归并", () => {
+    const results = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 10, finding: "SQL injection in query" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ file: "a.js", line: 100, finding: "memory leak in cache" }] },
+    ];
+    const r = classifyConsensus(results);
+    const consensus = r.groups.filter((g) => g.type === "consensus");
+    assert.equal(consensus.length, 0, "line 差太多且表述不同，不应归并");
+  });
+
   it("ignores failed workers", () => {
     const results = [
       { model: "glm-5.2", success: false, issues: [] },
@@ -164,6 +186,17 @@ describe("buildAdjudicatorPrompt", () => {
     const p = buildAdjudicatorPrompt("finding", "code");
     assert.ok(p.includes("不要声称搜索"), "should include anti-hallucination clause");
     assert.ok(p.includes("无权访问"), "should state the adjudicator cannot access the filesystem");
+  });
+
+  it("injects related module source when provided", () => {
+    const p = buildAdjudicatorPrompt("x", "code", "", "export function resolveDbPath(p){return p;}");
+    assert.ok(p.includes("[相关模块源码]"), p);
+    assert.ok(p.includes("resolveDbPath"), p);
+  });
+
+  it("omits related module section when not provided", () => {
+    const p = buildAdjudicatorPrompt("x", "code");
+    assert.ok(!p.includes("[相关模块源码]"), p);
   });
 });
 
@@ -238,6 +271,30 @@ describe("adjudicate", () => {
     assert.deepEqual(r, { verdict: "false", evidence: "after retry" });
     assert.equal(calls, 2, "should retry once after a transient exit failure");
   });
+
+  it("文件 ≤800 行时传整文件给裁决（不截断 ±40 行）", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"true","evidence":"e"}');
+      return captured;
+    });
+    const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+    const code = lines.join("\n");
+    await adjudicate({ finding: "x", code, line: 50 });
+    assert.ok(captured.stdinWritten.includes("line 0"), "应含第一行（±40 会截断掉）");
+    assert.ok(captured.stdinWritten.includes("line 99"), "应含最后一行（±40 会截断掉）");
+  });
+
+  it("passes relatedCode into the adjudicator prompt", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"false","evidence":"already handled"}');
+      return captured;
+    });
+    await adjudicate({ finding: "~ not expanded", code: "openDb(dbPath)", relatedCode: "export function openDb(p){ return new DatabaseSync(resolveDbPath(p)) }" });
+    assert.ok(captured.stdinWritten.includes("[相关模块源码]"), "prompt 应含相关模块段");
+    assert.ok(captured.stdinWritten.includes("resolveDbPath"), "prompt 应含相关模块源码");
+  });
 });
 
 describe("evaluateModels", () => {
@@ -290,6 +347,25 @@ describe("evaluateModels", () => {
     assert.equal(r.verdicts[0].evidence, "real");
     assert.equal(r.verdicts[0].file, "f.js");
     assert.match(r.verdicts[0].codeHash, /^[a-f0-9]{64}$/, "codeHash 应为 sha256");
+  });
+
+  it("collects import context and passes it to the adjudicator", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
+    ]}];
+    let seenRelated = null;
+    const adjudicateFn = async ({ relatedCode }) => {
+      seenRelated = relatedCode;
+      return { verdict: "false" };
+    };
+    await evaluateModels({
+      audits,
+      arbitrate: true,
+      adjudicateFn,
+      resolveCode: () => "code",
+      resolveImportContext: async (file) => "module db.js source",
+    });
+    assert.equal(seenRelated, "module db.js source", "应把 import 上下文传给裁决员");
   });
 
   it("returns empty verdicts without arbitration", async () => {
@@ -399,20 +475,20 @@ describe("extractContext", () => {
 });
 
 describe("adjudicate context extraction", () => {
-  it("passes only the surrounding context (not full code) when line is provided", async () => {
-    const code = Array(200).fill(0).map((_, i) => `line${i + 1}`).join("\n");
+  it("passes only the surrounding context when file exceeds 800 lines", async () => {
+    const code = Array(900).fill(0).map((_, i) => `line${i + 1}`).join("\n");
     let proc = null;
     setSpawn((cmd, args, opts) => {
       proc = mockProc('{"verdict":"true","evidence":"real"}');
       return proc;
     });
-    await adjudicate({ finding: "bug here", code, line: 100, contextLines: 10 });
+    await adjudicate({ finding: "bug here", code, line: 500, contextLines: 10 });
     const prompt = proc.stdinWritten || "";
-    assert.ok(prompt.includes("line100"), "should include the finding's line");
-    assert.ok(prompt.includes("line90"), "should include context before");
-    assert.ok(prompt.includes("line110"), "should include context after");
+    assert.ok(prompt.includes("line500"), "should include the finding's line");
+    assert.ok(prompt.includes("line490"), "should include context before");
+    assert.ok(prompt.includes("line510"), "should include context after");
     assert.ok(!prompt.includes("line1\n"), "should NOT include far-away line 1");
-    assert.ok(!prompt.includes("line200"), "should NOT include far-away line 200");
+    assert.ok(!prompt.includes("line900"), "should NOT include far-away line 900");
   });
 
   it("passes the full code when no line is provided", async () => {
@@ -500,6 +576,24 @@ describe("dedupFindings", () => {
     ];
     const out = dedupFindings(findings);
     assert.equal(out.length, 2);
+  });
+
+  it("同 file+line 但表述不同也归并为一条（位置优先）", () => {
+    const findings = [
+      { model: "a", auditFile: "x.js", issue: { file: "x.js", line: 10, finding: "tilde not expanded" } },
+      { model: "b", auditFile: "x.js", issue: { file: "x.js", line: 10, finding: "完全不同的表述：数据库路径没展开波浪号" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 1, "同 file+line 应归并");
+  });
+
+  it("同 file 但 line 差很多不误并", () => {
+    const findings = [
+      { model: "a", auditFile: "x.js", issue: { file: "x.js", line: 10, finding: "SQL injection in query" } },
+      { model: "b", auditFile: "x.js", issue: { file: "x.js", line: 100, finding: "memory leak in cache" } },
+    ];
+    const out = dedupFindings(findings);
+    assert.equal(out.length, 2, "line 差太多且文本不同，不应归并");
   });
 
   it("returns empty for empty input", () => {

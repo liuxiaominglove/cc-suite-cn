@@ -234,3 +234,83 @@
 - `pnpm test:unit`：331 全绿（新增 makeResolveCode 4 + persistVerdicts 并发 2）+ guard 绿。
 - 完整闭环四角色全跑通；verdict-log.json 由真 hy3 落库（非 mock）。
 - 改动 10 文件（3 新 verdict-log 相关 + 7 改），**未 commit**。
+
+---
+
+# 改进：评审上下文注入 + prompt 收紧（grill 后第一轮）
+
+**目标**：降低噪音率 + 消除「~ 不展开」类跨文件误报。
+
+## 改动
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| IM-1: `collectImportContext` 注入被审文件的本地模块上下文 | 小模块(≤80 行)注入完整源码、大模块注入导出名；`review()` 在 file 模式注入 `[项目上下文]` 段；`review-runner.test.mjs` +5 用例（提取/过滤/容错/注入） | 🟢 | 2026-08-15 |
+| IM-2: `adjudicate` 传整文件（≤800 行，>800 才截断 ±40） | `ADJUDICATE_MAX_CTX_LINES=800`；`evaluate-models.test.mjs` 新增"≤800 传整文件"用例 + 更新"context extraction"用例为 900 行截断 | 🟢 | 2026-08-15 |
+| IM-3: `REVIEW_PROMPT` 收紧（只报具体 bug + 触发条件/影响） | 去掉"code quality problems"、加"trigger condition/impact"约束 + "Do NOT report 风格/性能/防御性建议"；测试断言 | 🟢 | 2026-08-15 |
+
+## 验收结果（关键）
+
+- **降噪达成**：复跑 learnunk `index.js` 审计，finding 从 **12 条（glm 7 + kimi 5）降到 4 条（glm 2 + kimi 2）**，噪音率约降 75%。
+- **「~ 不展开」误报未消除**：即使把 `db.js` 完整源码（含 `resolveDbPath` 展开 `~` 的逻辑）注入 prompt，glm/kimi 仍报「`~` 没展开」——**这是 LLM 跨文件因果推理的固有局限**（评审员聚焦在 `index.js` 的 `~` 字面量，不跳转到 `db.js` 确认 `openDb` 内部调 `resolveDbPath`）。引导语也未消除且拖慢 kimi，已回退。
+- **结论**：跨文件误报**不能靠 prompt 工程清零**，正确应对是"裁决 + opencode 终审兜底"——这恰印证了多角色架构的必要性（单 LLM 的局限靠多角色补）。
+
+## 结果
+
+- `pnpm test:unit`：338 全绿 + guard 绿。
+- 改动：`review-runner.mjs`（+collectImportContext +prompt 收紧）、`evaluate-models.mjs`（裁决传整文件）+ 两个测试文件。
+
+---
+
+# 改进：两段式调用链核查 + 裁决跨文件上下文（grill 第二轮）
+
+**目标**：消除「~ 不展开」跨文件误报（上一轮"注入源码"失败后，改用"强制推理 + 挪责任到裁决"）。
+
+## 改动
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| IM-4: `REVIEW_PROMPT` 两段式（强制 trace call chain + `chain_analysis` 字段） | prompt 加"报 bug 前先定位函数→查实现→确认 bug 存在"，JSON 加 `chain_analysis`（每条 issue 写清函数名+真实行为）；`review-runner.test.mjs` 断言 + 解析含 chain_analysis 输出的集成测试 | 🟢 | 2026-08-15 |
+| IM-5: 裁决注入跨文件上下文（`relatedCode`） | `buildAdjudicatorPrompt`/`adjudicate` 加 `relatedCode` 段（被 import 模块完整源码）；`evaluateModels` 加 `resolveImportContext`（复用 `collectImportContext`，白名单校验）；`evaluate-models.test.mjs` +3 用例 | 🟢 | 2026-08-15 |
+
+## 验收结果（关键突破）
+
+复跑 learnunk `index.js` 审计：
+- **glm-5.2：0 issues**，summary 明确说 "No confirmed high/medium bugs found"——**「~ 不展开」误报彻底消除**。
+- **kimi：2 issues，均非「~ 不展开」**，且报了**新的真 bug**：`config.json` 内容为合法 JSON 原语 `null`（或非对象）时，`loadConfig` 的 `...(cfg.ai \|\| {})` 抛 TypeError（触发条件+影响写清楚）。
+- **结论**：两段式 + chain_analysis + 上下文注入的组合**有效**——不仅消除误报，还让"只报具体 bug"的收紧 prompt 逼出了之前被噪音淹没的真问题。
+
+## 结果
+
+- `pnpm test:unit`：344 全绿 + guard 绿。
+- 改动：`review-runner.mjs`（两段式 prompt）、`evaluate-models.mjs`（relatedCode + resolveImportContext）+ 两个测试文件。
+
+---
+
+# 短板 3 + 4 落地 + learnunk 真 bug 修复
+
+## learnunk（外部项目）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| learnunk `loadConfig` 容错：config.json 为 `null`/数组（合法 JSON 非对象）时崩溃 | kimi 在两段式 prompt 后报的真 bug；`src/index.js` 加「解析后验证非 null 非数组对象」；`test/index.test.js` +2 用例；learnunk `npm test` 108 全绿 | 🟢 | 2026-08-15 |
+
+## cc-suite-pe（短板 3：qwen 批判员重定位）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| SC-1: `CRITIC_PROMPT` + `buildCriticPrompt` + `criticize()` | 批判员人设（逐条判同意/反对+理由 + 补漏，不重扫代码）；走 qwen backend；`review-runner.test.mjs` +4 用例（prompt 断言/解析 verdicts+missed/容错） | 🟢 | 2026-08-15 |
+| SC-2: `review-runner.mjs` CLI 加 `--critic` 模式 | `--critic --file <path> --findings-file <json>` 入口 | 🟢 | 2026-08-15 |
+| SC-3: `review-qwen.md` 重写为批判流程 | 必须先 audit 读 finding 清单 → criticize → 展示同意/反对/漏报；不回退独立评审 | 🟢 | 2026-08-15 |
+
+## cc-suite-pe（短板 4：结构化 finding + 去重优化）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| SC-4: `sameLocation`（同 file+line 完全相等）位置优先归并 | `classifyConsensus`/`dedupFindings` 先按位置归并、文本相似度兜底；line 差 ≠0 不误并；`evaluate-models.test.mjs` +4 用例（同位置归并/差很多不误并） | 🟢 | 2026-08-15 |
+
+## 结果
+
+- cc-suite-pe `pnpm test:unit`：352 全绿 + guard 绿。
+- learnunk `npm test`：108 全绿。
+- 四角色流程补齐：找 bug → **批判（qwen 复核清单）** → 裁决（hy3）→ 终审（opencode）。
