@@ -200,3 +200,30 @@ describe("markFixed 并发安全", () => {
     assert.equal(a.fixed.commit, "c1", "markFixed 的 fixed 字段应存在");
   });
 });
+
+describe("markFixed rootCause", () => {
+  it("markFixed 传 rootCause 写入 fixed 对象", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true" }], p);
+    const r = await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t", rootCause: "边界条件" }, p);
+    assert.equal(r.fixed.rootCause, "边界条件");
+  });
+
+  it("markFixed 不传 rootCause 不报错（可选字段）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true" }], p);
+    const r = await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t" }, p);
+    assert.equal(r.fixed.rootCause, undefined);
+  });
+
+  it("getTrace 透传 rootCause", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true" }], p);
+    await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t", rootCause: "信任边界" }, p);
+    const trace = await getTrace("a.js", 1, "f", p);
+    assert.equal(trace.fixed.rootCause, "信任边界");
+  });
+});

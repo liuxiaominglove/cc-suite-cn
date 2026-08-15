@@ -113,6 +113,16 @@ describe("命令/规格（WI-5）", () => {
     const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
     assert.match(c, /审计前置两道闸门/, "fix.md 缺审计前置闸门声明");
     assert.match(c, /可选.*修复计划|修复计划.*可选/, "fix.md 缺可选修复计划提示");
+    assert.match(c, /根因/, "fix.md 缺顺手写根因提示");
+  });
+
+  it("docs/trust-boundary.md 存在且含已落地 + 搁置 + 重新评估条件", () => {
+    const p = join(ROOT, "docs", "trust-boundary.md");
+    assert.ok(existsSync(p), "trust-boundary.md 应存在");
+    const c = readFileSync(p, "utf8");
+    assert.match(c, /resolveCli/, "应含已落地项 resolveCli");
+    assert.match(c, /prompt injection/, "应含搁置项 prompt injection");
+    assert.match(c, /重新评估/, "应含重新评估条件");
   });
 
   it("SKILL.md 含审计前置两道闸门", () => {

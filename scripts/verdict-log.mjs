@@ -70,13 +70,13 @@ export function isVerdictStale(verdict, currentContent) {
   return hashContent(currentContent) !== verdict.codeHash;
 }
 
-export async function markFixed(file, line, finding, { commit, testEvidence, fixedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
+export async function markFixed(file, line, finding, { commit, testEvidence, rootCause, fixedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
   return enqueue(async () => {
     const log = await loadVerdicts(filePath);
     const key = verdictKey({ file, line, finding });
     const target = log.find((v) => verdictKey(v) === key);
     if (!target) return null;
-    target.fixed = { commit, testEvidence, fixedAt };
+    target.fixed = { commit, testEvidence, rootCause, fixedAt };
     await writeVerdictFile(log, filePath);
     return target;
   });

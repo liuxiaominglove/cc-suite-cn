@@ -64,6 +64,7 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 ## Step 6: 汇报
 
 - 修了哪些 bug、每个 bug 的测试证据（🟢）
+- **顺手写一句根因**（几个字，如「边界条件 / 信任边界 / 时序 / 职责」），`markFixed` 时带上 `rootCause`——让 `/trace` 能查到「报 → 裁 → 修 → 根因」四段完整链路
 - 改动不自动 commit，`git diff` 给用户看，用户点头才提交
 - **末尾固定附两节**（见 `AGENTS.md` 汇报惯例）：本次各 AI 表现 + 本次触达功能
 
