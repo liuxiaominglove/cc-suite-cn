@@ -39,20 +39,20 @@ describe("gitChangedFiles", () => {
       if (cmd.includes("ls-files")) return "new-file.js\n";
       return undefined;
     });
-    const files = gitChangedFiles("c1", "/repo", exec);
+    const files = gitChangedFiles("abc123def456", "/repo", exec);
     assert.deepEqual(files, ["src/a.js", "src/b.js", "new-file.js"]);
   });
 
   it("无变更返回空数组", () => {
     const exec = fakeExec((cmd) => "");
-    assert.deepEqual(gitChangedFiles("c1", "/repo", exec), []);
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
   });
 
   it("git 命令失败返回空数组", () => {
     const exec = () => {
       throw new Error("git failed");
     };
-    assert.deepEqual(gitChangedFiles("c1", "/repo", exec), []);
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
   });
 
   it("过滤空行和空白行", () => {
@@ -60,7 +60,7 @@ describe("gitChangedFiles", () => {
       if (cmd.includes("diff --name-only")) return "a.js\n\n  \nb.js\n";
       return "";
     });
-    assert.deepEqual(gitChangedFiles("c1", "/repo", exec), ["a.js", "b.js"]);
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js", "b.js"]);
   });
 });
 
@@ -127,9 +127,9 @@ describe("detectAuditScope", () => {
 
   it("基线 != HEAD 返回变更文件", async () => {
     const p = await tmpPath();
-    await saveBaseline("/proj", { commit: "c1" }, p);
+    await saveBaseline("/proj", { commit: "abc123def456" }, p);
     const exec = fakeExec((cmd) => {
-      if (cmd.includes("rev-parse")) return "c2\n";
+      if (cmd.includes("rev-parse")) return "def456abc789\n";
       if (cmd.includes("diff --name-only")) return "src/a.js\n";
       return "";
     });
@@ -137,7 +137,7 @@ describe("detectAuditScope", () => {
     assert.equal(r.changed, true);
     assert.equal(r.firstAudit, false);
     assert.deepEqual(r.files, ["src/a.js"]);
-    assert.equal(r.baseCommit, "c1");
+    assert.equal(r.baseCommit, "abc123def456");
   });
 
   it("非 git 仓库返回 isGit=false", async () => {
@@ -162,5 +162,61 @@ describe("parseSaveArgs", () => {
     const r = parseSaveArgs(["--save", "/p", "--commit", "abc123"]);
     assert.equal(r.project, "/p");
     assert.equal(r.commit, "abc123");
+  });
+});
+
+describe("gitChangedFiles 命令注入防护", () => {
+  it("拒绝非法 baseCommit 格式（防命令注入）", () => {
+    const executed = [];
+    const exec = (cmd) => {
+      executed.push(cmd);
+      return "";
+    };
+    const files = gitChangedFiles("bad; rm -rf /", "/repo", exec);
+    assert.deepEqual(files, []);
+    assert.ok(executed.every((c) => !c.includes("rm -rf")), "不应执行含注入片段的命令");
+  });
+
+  it("接受合法 commit hash", () => {
+    const exec = (cmd) => (cmd.includes("diff") ? "a.js\n" : "");
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js"]);
+  });
+});
+
+describe("gitChangedFiles 吞错误", () => {
+  it("git diff 失败时返回空（不返回部分 untracked）", () => {
+    const exec = (cmd) => {
+      if (cmd.includes("diff")) throw new Error("diff failed");
+      if (cmd.includes("ls-files")) return "untracked.js\n";
+      return "";
+    };
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), []);
+  });
+});
+
+describe("parseSaveArgs --commit 无值", () => {
+  it("--commit 后无值返回 hasCommitFlag=true + commit=null", () => {
+    const r = parseSaveArgs(["--save", "/p", "--commit"]);
+    assert.equal(r.hasCommitFlag, true);
+    assert.equal(r.commit, null);
+  });
+
+  it("--commit 后是另一个 flag 也视为无值", () => {
+    const r = parseSaveArgs(["--save", "/p", "--commit", "--detect"]);
+    assert.equal(r.commit, null);
+  });
+});
+
+describe("saveBaseline 并发安全", () => {
+  it("并发保存不同项目不丢失", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "baseline-"));
+    const p = join(dir, "b.json");
+    await Promise.all([
+      saveBaseline("/a", { commit: "c1" }, p),
+      saveBaseline("/b", { commit: "c2" }, p),
+    ]);
+    const b = await loadBaseline(p);
+    assert.equal(b["/a"].commit, "c1");
+    assert.equal(b["/b"].commit, "c2");
   });
 });

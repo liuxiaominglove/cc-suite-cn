@@ -74,6 +74,15 @@ export async function criticize({ findings, code, model = CRITIC_MODEL, backend 
   };
 }
 
+export function parseCriticArgs(args) {
+  const fileIdx = args.indexOf("--file");
+  const findingsIdx = args.indexOf("--findings-file");
+  return {
+    file: fileIdx !== -1 ? args[fileIdx + 1] : null,
+    findingsFile: findingsIdx !== -1 ? args[findingsIdx + 1] : null,
+  };
+}
+
 export function isNLArtifact(file) {
   if (typeof file !== "string" || !file) return false;
   const f = file.toLowerCase();
@@ -539,7 +548,7 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, timeout, customPrompt, retries, fileName: file });
+    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, retries, fileName: file });
   }
 
   const chunkResults = await Promise.all(
@@ -575,8 +584,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const args = process.argv.slice(2);
   const criticIdx = args.indexOf("--critic");
   if (criticIdx !== -1) {
-    const file = args[args.indexOf("--file") + 1];
-    const findingsFile = args[args.indexOf("--findings-file") + 1];
+    const { file, findingsFile } = parseCriticArgs(args);
     const backend = args.indexOf("--backend") !== -1 ? args[args.indexOf("--backend") + 1] : "qwen";
     const model = args.indexOf("--model") !== -1 ? args[args.indexOf("--model") + 1] : CRITIC_MODEL;
     if (!file || !findingsFile) {

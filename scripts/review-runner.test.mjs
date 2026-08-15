@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -1516,5 +1516,33 @@ describe("criticize", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await criticize({ findings: [], code: "x" });
     assert.deepEqual(r, { verdicts: [], missed: [] });
+  });
+});
+
+describe("parseCriticArgs", () => {
+  it("解析 --critic 的 file 和 findings-file", () => {
+    const r = parseCriticArgs(["--critic", "--file", "a.js", "--findings-file", "f.json"]);
+    assert.equal(r.file, "a.js");
+    assert.equal(r.findingsFile, "f.json");
+  });
+
+  it("缺 --file/--findings-file 返回 null（不越界到 args[0]）", () => {
+    const r = parseCriticArgs(["--critic"]);
+    assert.equal(r.file, null);
+    assert.equal(r.findingsFile, null);
+  });
+});
+
+describe("reviewFile 空文件", () => {
+  it("空文件单块路径也传 file 给 review", async () => {
+    let captured = null;
+    const reviewFn = async (opts) => {
+      captured = opts;
+      return { success: true, issues: [] };
+    };
+    const readFn = async () => "";
+    const r = await reviewFile({ model: "m", backend: "b", file: "empty.js", readFn, reviewFn });
+    assert.ok(captured.file, "空文件单块路径应传 file（否则 review 抛 'code or file required'）");
+    assert.equal(r.success, true);
   });
 });

@@ -184,3 +184,19 @@ describe("markFixed / getTrace", () => {
     assert.equal(trace, null);
   });
 });
+
+describe("markFixed 并发安全", () => {
+  it("markFixed 与 persistVerdicts 并发不丢数据", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true" }], p);
+    await Promise.all([
+      markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t" }, p),
+      persistVerdicts([{ file: "b.js", line: 1, finding: "g", verdict: "true" }], p),
+    ]);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 2, "并发后两条都应保留");
+    const a = log.find((v) => v.file === "a.js");
+    assert.equal(a.fixed.commit, "c1", "markFixed 的 fixed 字段应存在");
+  });
+});

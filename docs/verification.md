@@ -377,3 +377,34 @@
 审后：markFixed（修复 commit + 测试证据）→ /trace 追溯完整链路
       + audit-baseline.mjs --save（更新基线，供下次增量对比）
 ```
+
+---
+
+# cc-suite-pe 自审（增量 + 检测审计生命周期三件套）
+
+**目标**：用刚建的三件套增量审 cc-suite-pe 自己（基线 = 上次完整闭环 dogfooding `b1e6657`），并检测三件套是否工作。
+
+## 三件套检测结果（全通过）
+
+| 机制 | 结果 |
+|------|------|
+| 增量审查 | `--detect` 正确报出 b1e6657 后 16 个变更文件（含 4 核心脚本）✅ |
+| 审计前置 | 修 bug 前走完整闭环：找 bug(18 finding) → 批判(qwen) → 裁决(hy3 落库) → 终审(只修 verdict=true) ✅ |
+| 变更追溯 | `markFixed` 标记修复（commit+测试证据）→ `/trace` 查完整链路 ✅ |
+
+## 真 bug 修复（本次自审抓到 6 个，TDD）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| SA-13: `review-runner` --critic CLI 缺参数越界（args[indexOf+1] 返回 args[0]） | `parseCriticArgs` 抽取 + null 判断；+2 用例 | 🟢 | 2026-08-15 |
+| SA-14: `review-runner` reviewFile 单块路径不传 file（空文件抛错） | 单块路径补传 `file`；+1 用例 | 🟢 | 2026-08-15 |
+| SA-15: `audit-baseline` 命令注入（baseCommit 未校验拼进 execSync） | `gitChangedFiles` 校验 hex 格式；+2 用例 | 🟢 | 2026-08-15 |
+| SA-16: `audit-baseline` --commit 无值静默用 HEAD | `parseSaveArgs` 加 hasCommitFlag；+2 用例 | 🟢 | 2026-08-15 |
+| SA-17: `audit-baseline` saveBaseline 非原子 RMW | 写队列串行化；+1 用例 | 🟢 | 2026-08-15 |
+| SA-18: `verdict-log` markFixed 读在写队列外 | markFixed 纳入写队列（enqueue + writeVerdictFile）；+1 用例 | 🟢 | 2026-08-15 |
+
+## 结果
+
+- `pnpm test:unit`：388 全绿 + guard 绿。
+- 三件套闭环数据流全部实测通过。
+- 基线已更新至 `1a6154e`（本次审完状态，供下次增量对比）。

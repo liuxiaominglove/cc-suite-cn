@@ -14,15 +14,19 @@ export function gitHead(cwd = process.cwd(), exec = execSync) {
 }
 
 export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync) {
-  const files = [];
+  if (typeof baseCommit !== "string" || !/^[a-f0-9]{7,40}$/.test(baseCommit)) {
+    return [];
+  }
+  let diff;
   try {
-    const diff = exec(`git diff --name-only ${baseCommit}..HEAD`, { cwd, encoding: "utf8" });
-    for (const line of diff.split("\n")) {
-      const f = line.trim();
-      if (f) files.push(f);
-    }
+    diff = exec(`git diff --name-only ${baseCommit}..HEAD`, { cwd, encoding: "utf8" });
   } catch {
-    // git diff 失败：忽略（可能无 commit 或非 git 仓库）
+    return [];
+  }
+  const files = [];
+  for (const line of diff.split("\n")) {
+    const f = line.trim();
+    if (f) files.push(f);
   }
   try {
     const others = exec("git ls-files --others --exclude-standard", { cwd, encoding: "utf8" });
@@ -46,12 +50,19 @@ export async function loadBaseline(path = BASELINE_PATH) {
   }
 }
 
+let _writeQueue = Promise.resolve();
+
 export async function saveBaseline(project, record, path = BASELINE_PATH) {
-  const baseline = await loadBaseline(path);
-  baseline[project] = record;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(baseline, null, 2) + "\n", "utf-8");
-  return baseline;
+  const run = async () => {
+    const baseline = await loadBaseline(path);
+    baseline[project] = record;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(baseline, null, 2) + "\n", "utf-8");
+    return baseline;
+  };
+  const result = _writeQueue.then(run, run);
+  _writeQueue = result.then(() => {}, () => {});
+  return result;
 }
 
 export async function detectAuditScope(project, { cwd = process.cwd(), exec = execSync, path = BASELINE_PATH } = {}) {
@@ -74,8 +85,10 @@ export async function detectAuditScope(project, { cwd = process.cwd(), exec = ex
 export function parseSaveArgs(args) {
   const project = args[1];
   const commitIdx = args.indexOf("--commit");
-  const commit = commitIdx !== -1 ? args[commitIdx + 1] : null;
-  return { project, commit };
+  const hasCommitFlag = commitIdx !== -1;
+  const raw = hasCommitFlag ? args[commitIdx + 1] : null;
+  const commit = raw && !raw.startsWith("--") ? raw : null;
+  return { project, commit, hasCommitFlag };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -86,7 +99,11 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const scope = await detectAuditScope(project, { cwd: project });
     console.log(JSON.stringify(scope, null, 2));
   } else if (action === "--save" && project) {
-    const { commit } = parseSaveArgs(args);
+    const { commit, hasCommitFlag } = parseSaveArgs(args);
+    if (hasCommitFlag && !commit) {
+      console.error("--commit 需要一个 commit hash 值");
+      process.exit(1);
+    }
     const head = commit || gitHead(project);
     if (head) {
       await saveBaseline(project, { commit: head, auditedAt: new Date().toISOString() });

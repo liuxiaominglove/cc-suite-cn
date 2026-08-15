@@ -33,26 +33,32 @@ export async function loadVerdicts(filePath = VERDICT_LOG_PATH) {
 
 let _writeQueue = Promise.resolve();
 
-export async function persistVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
-  const run = async () => {
-    const existing = await loadVerdicts(filePath);
-    const updated = dedupeVerdicts([...existing, ...(verdicts ?? [])]);
-
-    await mkdir(dirname(filePath), { recursive: true });
-    const tmpPath = join(dirname(filePath), `.verdict-${Date.now()}-${randomBytes(4).toString("hex")}.tmp`);
+async function writeVerdictFile(updated, filePath) {
+  await mkdir(dirname(filePath), { recursive: true });
+  const tmpPath = join(dirname(filePath), `.verdict-${Date.now()}-${randomBytes(4).toString("hex")}.tmp`);
+  try {
+    await writeFile(tmpPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
+    await rename(tmpPath, filePath);
+  } finally {
     try {
-      await writeFile(tmpPath, JSON.stringify(updated, null, 2) + "\n", "utf-8");
-      await rename(tmpPath, filePath);
-    } finally {
-      try {
-        await unlink(tmpPath);
-      } catch {}
-    }
-    return updated;
-  };
-  const result = _writeQueue.then(run, run);
+      await unlink(tmpPath);
+    } catch {}
+  }
+}
+
+function enqueue(fn) {
+  const result = _writeQueue.then(fn, fn);
   _writeQueue = result.then(() => {}, () => {});
   return result;
+}
+
+export async function persistVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
+  return enqueue(async () => {
+    const existing = await loadVerdicts(filePath);
+    const updated = dedupeVerdicts([...existing, ...(verdicts ?? [])]);
+    await writeVerdictFile(updated, filePath);
+    return updated;
+  });
 }
 
 export function getActionableFindings(log) {
@@ -65,13 +71,15 @@ export function isVerdictStale(verdict, currentContent) {
 }
 
 export async function markFixed(file, line, finding, { commit, testEvidence, fixedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
-  const log = await loadVerdicts(filePath);
-  const key = verdictKey({ file, line, finding });
-  const target = log.find((v) => verdictKey(v) === key);
-  if (!target) return null;
-  const updated = { ...target, fixed: { commit, testEvidence, fixedAt } };
-  await persistVerdicts([updated], filePath);
-  return updated;
+  return enqueue(async () => {
+    const log = await loadVerdicts(filePath);
+    const key = verdictKey({ file, line, finding });
+    const target = log.find((v) => verdictKey(v) === key);
+    if (!target) return null;
+    target.fixed = { commit, testEvidence, fixedAt };
+    await writeVerdictFile(log, filePath);
+    return target;
+  });
 }
 
 export async function getTrace(file, line, finding, filePath = VERDICT_LOG_PATH) {
