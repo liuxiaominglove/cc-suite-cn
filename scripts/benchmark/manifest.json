@@ -1,0 +1,58 @@
+{
+  "fixtures": [
+    {
+      "file": "fixtures/buggy-null.js",
+      "expected": [
+        { "line": 2, "finding": "null dereference: user.name accessed without null guard" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-div.js",
+      "expected": [
+        { "line": 2, "finding": "division by zero: no guard against b === 0" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-offbyone.js",
+      "expected": [
+        { "line": 2, "finding": "off-by-one: arr[arr.length] is out of bounds" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-assignment.js",
+      "expected": [
+        { "line": 2, "finding": "assignment in condition: if (user.role = \"admin\") always truthy" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-undefined.js",
+      "expected": [
+        { "line": 2, "finding": "accessing .name on undefined: user.profile is undefined" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-rejection.js",
+      "expected": [
+        { "line": 7, "finding": "unhandled promise rejection: loadData(...) not awaited or caught" }
+      ]
+    },
+    {
+      "file": "fixtures/buggy-resource.js",
+      "expected": [
+        { "line": 4, "finding": "resource leak: openSync without matching closeSync" }
+      ]
+    },
+    {
+      "file": "fixtures/clean.js",
+      "expected": []
+    },
+    {
+      "file": "fixtures/clean-guards.js",
+      "expected": []
+    },
+    {
+      "file": "fixtures/clean-normalize.js",
+      "expected": []
+    }
+  ]
+}

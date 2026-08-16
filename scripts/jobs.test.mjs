@@ -505,6 +505,28 @@ describe("runAudit", () => {
       assert.equal(c.customPrompt, "评审NL工件");
     }
   });
+
+  it("passes per-model feedbackPreamble from getFeedback to review", async () => {
+    const captured = {};
+    const review = async (opts) => {
+      captured[opts.model] = opts.feedbackPreamble;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const getFeedback = async (model) => (model === "glm-5.2" ? "[你的历史误报]" : "");
+    await runAudit({ file: "x.js", review, getFeedback, persistAuditLog: false });
+    assert.equal(captured["glm-5.2"], "[你的历史误报]");
+    assert.equal(captured["kimi-k2.7-code"], "");
+  });
+
+  it("omits feedback when getFeedback is null (default)", async () => {
+    const captured = [];
+    const review = async (opts) => {
+      captured.push(opts.feedbackPreamble ?? null);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await runAudit({ file: "x.js", review, persistAuditLog: false });
+    assert.deepEqual(captured, [null, null]);
+  });
 });
 
 describe("cancelJob", () => {

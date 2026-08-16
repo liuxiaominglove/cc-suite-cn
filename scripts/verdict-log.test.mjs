@@ -12,6 +12,7 @@ import {
   getActionableFindings,
   isVerdictStale,
   markFixed,
+  confirmVerdict,
   getTrace,
 } from "./verdict-log.mjs";
 
@@ -302,5 +303,42 @@ describe("markFixed rootCause", () => {
     await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t", rootCause: "信任边界" }, p);
     const trace = await getTrace("a.js", 1, "f", p);
     assert.equal(trace.fixed.rootCause, "信任边界");
+  });
+});
+
+describe("confirmVerdict", () => {
+  it("给匹配 finding 追加 confirmed 终审标签", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    const r = await confirmVerdict("a.js", 1, "f", { final: "false", reason: "代码级核实：已有守卫" }, p);
+    assert.ok(r, "应找到匹配条目");
+    assert.equal(r.confirmed.final, "false");
+    assert.ok(r.confirmed.reason.includes("守卫"));
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].confirmed.final, "false", "持久化后 confirmed 应存在");
+  });
+
+  it("final 非 true/false 时抛错", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await assert.rejects(confirmVerdict("a.js", 1, "f", { final: "maybe" }, p), /true|false/i);
+  });
+
+  it("匹配不上返回 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const r = await confirmVerdict("x.js", 1, "不存在", { final: "false" }, p);
+    assert.equal(r, null);
+  });
+
+  it("getTrace 透传 confirmed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await confirmVerdict("a.js", 1, "f", { final: "false", reason: "r" }, p);
+    const trace = await getTrace("a.js", 1, "f", p);
+    assert.equal(trace.confirmed.final, "false");
   });
 });

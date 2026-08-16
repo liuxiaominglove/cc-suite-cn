@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -233,6 +233,33 @@ describe("review-runner", () => {
     await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1" });
 
     assert.ok(stdinWritten.includes("只读代码评审员"), "codebuddy should get the read-only declaration");
+  });
+
+  it("injects feedbackPreamble into the prompt when provided", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1", feedbackPreamble: "[你的历史误报——这次别重犯]\n- a.js:1 — null deref" });
+
+    assert.ok(stdinWritten.includes("[你的历史误报"), "feedback preamble should be injected");
+    assert.ok(stdinWritten.includes("null deref"), "feedback content should be in the prompt");
+  });
+
+  it("omits feedback section when feedbackPreamble not provided", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1" });
+
+    assert.ok(!stdinWritten.includes("[你的历史误报"), "no feedback section by default");
   });
 
   it("labels FILE in prompt when fileName is provided", async () => {
@@ -1332,6 +1359,68 @@ describe("buildRulesSection", () => {
   });
 });
 
+describe("stripMarkdownComments", () => {
+  it("去除 HTML 注释保留正文", () => {
+    assert.equal(stripMarkdownComments("<!-- 说明 -->\n正文"), "\n正文");
+  });
+
+  it("多行注释一次性去除", () => {
+    assert.equal(stripMarkdownComments("a<!-- x\ny\nz -->b"), "ab");
+  });
+
+  it("非字符串输入安全返回", () => {
+    assert.equal(stripMarkdownComments(null), "");
+  });
+});
+
+describe("collectWorkerLessons", () => {
+  it("读取教训书并去除注释", async () => {
+    const reader = async () => "<!-- 元信息 -->\n- 规则：先 trace 再报\n- 实例：x";
+    const lessons = await collectWorkerLessons({ readFile: reader, filePath: "/tmp/lessons.md" });
+    assert.ok(lessons.includes("- 规则：先 trace 再报"), lessons);
+    assert.ok(!lessons.includes("元信息"), lessons);
+  });
+
+  it("文件不存在返回空", async () => {
+    const reader = async () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    assert.equal(await collectWorkerLessons({ readFile: reader, filePath: "/nonexistent.md" }), "");
+  });
+
+  it("纯注释文件返回空（无教训不注入）", async () => {
+    const reader = async () => "<!-- 只有注释 -->";
+    assert.equal(await collectWorkerLessons({ readFile: reader, filePath: "/x.md" }), "");
+  });
+});
+
+describe("buildLessonsSection", () => {
+  it("wraps lessons with [评审教训] header", () => {
+    const s = buildLessonsSection("- 规则：先 trace");
+    assert.ok(s.includes("[评审教训]"), s);
+    assert.ok(s.includes("- 规则：先 trace"), s);
+  });
+
+  it("returns empty for blank lessons", () => {
+    assert.equal(buildLessonsSection(""), "");
+    assert.equal(buildLessonsSection(null), "");
+  });
+});
+
+describe("review lessons injection", () => {
+  it("injects workerLessons into the prompt when provided", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+
+    await review({ model: "m", backend: "codebuddy", code: "const x = 1", workerLessons: "- 规则：先 trace 再报" });
+
+    assert.ok(stdinWritten.includes("[评审教训]"), "should include lessons header");
+    assert.ok(stdinWritten.includes("先 trace 再报"), "should include lessons content");
+  });
+});
+
 describe("review project rules injection", () => {
   it("injects projectRules into the prompt", async () => {
     let stdinWritten = null;
@@ -1688,6 +1777,58 @@ describe("parseCriticArgs", () => {
     const r = parseCriticArgs(["--critic"]);
     assert.equal(r.file, null);
     assert.equal(r.findingsFile, null);
+  });
+});
+
+describe("selfCheck", () => {
+  afterEach(() => setSpawn(null));
+
+  it("SELF_CHECK_PROMPT 是自检角色", () => {
+    assert.match(SELF_CHECK_PROMPT, /自检/, "应含自检");
+    assert.match(SELF_CHECK_PROMPT, /keep/, "应含 keep 字段");
+  });
+
+  it("buildSelfCheckPrompt 含 findings 清单 + code", () => {
+    const p = buildSelfCheckPrompt([{ file: "a.js", line: 3, finding: "bug one" }], "const x = 1;");
+    assert.ok(p.includes("bug one"), "应含 finding");
+    assert.ok(p.includes("a.js:3"), "应含位置");
+    assert.ok(p.includes("const x = 1;"), "应含 code");
+  });
+
+  it("selfCheck 解析 survivors", async () => {
+    const out = JSON.stringify({ survivors: [{ index: 0, keep: false, reason: "已展开 ~" }] });
+    setSpawn(() => createMockProcess({ stdout: out }));
+    const r = await selfCheck({ findings: [{ file: "a.js", line: 3, finding: "~ not expanded" }], code: "x", model: "glm-5.2", backend: "codebuddy" });
+    assert.equal(r.survivors.length, 1);
+    assert.equal(r.survivors[0].keep, false);
+  });
+
+  it("selfCheck 容错：非 JSON 返回空 survivors", async () => {
+    setSpawn(() => createMockProcess({ stdout: "not json" }));
+    const r = await selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy" });
+    assert.deepEqual(r, { survivors: [] });
+  });
+
+  it("applySelfCheck 只保留 keep=true 的 finding", () => {
+    const findings = [{ finding: "a" }, { finding: "b" }, { finding: "c" }];
+    const survivors = [
+      { index: 0, keep: true },
+      { index: 1, keep: false },
+      { index: 2, keep: true },
+    ];
+    const out = applySelfCheck(findings, survivors);
+    assert.deepEqual(out, [{ finding: "a" }, { finding: "c" }]);
+  });
+
+  it("applySelfCheck 非法 index 忽略", () => {
+    const findings = [{ finding: "a" }];
+    const survivors = [{ index: "x", keep: true }, { index: 99, keep: true }];
+    assert.deepEqual(applySelfCheck(findings, survivors), []);
+  });
+
+  it("applySelfCheck 空 survivors 返回空", () => {
+    assert.deepEqual(applySelfCheck([{ finding: "a" }], []), []);
+    assert.deepEqual(applySelfCheck([], null), []);
   });
 });
 

@@ -330,7 +330,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -339,9 +339,10 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   const workers = await Promise.all(
     AUDIT_WORKERS.map(async ({ backend, model }) => {
       try {
+        const feedbackPreamble = getFeedback ? await getFeedback(model, file) : null;
         const r = useChunking
-          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt })
-          : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt });
+          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble })
+          : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
       } catch (err) {
         return { backend, model, success: false, error: err?.message ?? String(err) };
@@ -385,6 +386,15 @@ if (isMainModule(import.meta.url)) {
   const parsed = parseArgs(process.argv.slice(2));
   const store = defaultStore();
 
+  async function resolveFeedback() {
+    try {
+      const { createFeedbackResolver } = await import("./feedback.mjs");
+      return await createFeedbackResolver();
+    } catch {
+      return null;
+    }
+  }
+
   if (parsed.action === "list") {
     const jobs = await store.list();
     if (jobs.length === 0) {
@@ -417,7 +427,8 @@ if (isMainModule(import.meta.url)) {
       const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, prompt: parsed.prompt, allowExternal: parsed.allowExternal }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
-      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
+      const getFeedback = await resolveFeedback();
+      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback }));
       const job = await store.get(id);
       const summary = job?.result?.workers ? `  ${summarizeWorkers(job.result.workers)}` : "";
       console.log(`${id}  [${job.status}]${summary}`);
@@ -434,7 +445,8 @@ if (isMainModule(import.meta.url)) {
       console.error("--job-id is required for worker-audit");
       process.exit(1);
     }
-    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
+    const getFeedback = await resolveFeedback();
+    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback }));
   } else if (parsed.action === "worker-sleep") {
     if (!parsed.jobId) {
       console.error("--job-id is required for worker-sleep");

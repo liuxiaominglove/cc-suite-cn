@@ -96,6 +96,21 @@ export async function markFixed(file, line, finding, { commit, testEvidence, roo
   });
 }
 
+export async function confirmVerdict(file, line, finding, { final, reason, confirmedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
+  if (final !== "true" && final !== "false") {
+    throw new Error(`confirmVerdict final must be "true" or "false", got: ${final}`);
+  }
+  return enqueue(async () => {
+    const log = await loadVerdicts(filePath);
+    const key = verdictKey({ file, line, finding });
+    const target = log.find((v) => verdictKey(v) === key);
+    if (!target) return null;
+    target.confirmed = { final, reason: reason ?? "", confirmedAt };
+    await writeVerdictFile(log, filePath);
+    return target;
+  });
+}
+
 export async function getTrace(file, line, finding, filePath = VERDICT_LOG_PATH) {
   const log = await loadVerdicts(filePath);
   const key = verdictKey({ file, line, finding });
@@ -106,5 +121,6 @@ export async function getTrace(file, line, finding, filePath = VERDICT_LOG_PATH)
     evidence: target.evidence ?? "",
     codeHash: target.codeHash ?? null,
     fixed: target.fixed ?? null,
+    confirmed: target.confirmed ?? null,
   };
 }

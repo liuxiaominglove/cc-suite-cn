@@ -1,7 +1,7 @@
 import { runProcess, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry, collectProjectRules, collectImportContext, collectStackContext } from "./review-runner.mjs";
-import { hashContent } from "./verdict-log.mjs";
+import { hashContent, confirmVerdict } from "./verdict-log.mjs";
 import { dirname } from "node:path";
 
 export function normalizeFinding(text) {
@@ -256,16 +256,22 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
         }
       }
     }
-    verdicts = results.map((r) => ({
-      file: r.f.auditFile || r.f.issue?.file || "",
-      line: r.f.issue?.line ?? null,
-      finding: r.f.issue?.finding || "",
-      verdict: r.verdict,
-      evidence: r.evidence ?? "",
-      codeHash: r.codeHash,
-      timestamp: new Date().toISOString(),
-      projectDir: projectDir || process.cwd(),
-    }));
+    verdicts = results.map((r) => {
+      const cluster = r.f.cluster ?? [r.f];
+      const models = [...new Set(cluster.map((m) => m.model).filter(Boolean))];
+      return {
+        file: r.f.auditFile || r.f.issue?.file || "",
+        line: r.f.issue?.line ?? null,
+        finding: r.f.issue?.finding || "",
+        verdict: r.verdict,
+        evidence: r.evidence ?? "",
+        codeHash: r.codeHash,
+        timestamp: new Date().toISOString(),
+        projectDir: projectDir || process.cwd(),
+        model: r.f.model ?? null,
+        models,
+      };
+    });
   }
 
   for (const m of Object.values(perModel)) {
@@ -354,6 +360,50 @@ export function makeResolveCode(allowedFiles, readFileFn = null) {
   };
 }
 
+export async function confirmFindings(entries, { confirmFn = null, now = () => new Date().toISOString() } = {}) {
+  const confirm = confirmFn ?? confirmVerdict;
+  const batchAt = now();
+  const results = [];
+  for (const e of entries ?? []) {
+    const final = e?.final;
+    if (final !== "true" && final !== "false") {
+      results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: `invalid final: ${final}` });
+      continue;
+    }
+    const matched = await confirm(e.file, e.line, e.finding, { final, reason: e?.reason ?? "", confirmedAt: batchAt });
+    results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: matched != null, matched: matched != null });
+  }
+  return { batchAt, results };
+}
+
+export async function confirmCli(args = process.argv.slice(2), { readFile = null, confirmFn = null, stdout = process.stdout, stderr = process.stderr } = {}) {
+  const idx = args.indexOf("--confirm");
+  if (idx === -1) return null;
+  const path = args[idx + 1];
+  if (!path || path.startsWith("--")) {
+    stderr.write("Usage: node evaluate-models.mjs --confirm <json-file>\n");
+    return 1;
+  }
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  let entries;
+  try {
+    entries = JSON.parse(await read(path));
+  } catch (err) {
+    stderr.write(`确认文件解析失败：${err.message}\n`);
+    return 1;
+  }
+  if (!Array.isArray(entries)) {
+    stderr.write("确认文件必须是 JSON 数组 [{file,line,finding,final,reason}]\n");
+    return 1;
+  }
+  const { batchAt, results } = await confirmFindings(entries, { confirmFn });
+  const ok = results.filter((r) => r.ok).length;
+  const failed = results.length - ok;
+  stdout.write(`终审写回 ${ok} 条（未匹配/非法 ${failed} 条），批次 ${batchAt}\n`);
+  return 0;
+}
+
+
 export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr } = {}) {
   try {
     const arbitrate = args.includes("--arbitrate");
@@ -423,5 +473,11 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
 }
 
 if (isMainModule(import.meta.url)) {
-  cli().then((code) => { process.exitCode = code; });
+  confirmCli(process.argv.slice(2)).then((code) => {
+    if (code !== null) {
+      process.exitCode = code;
+      return;
+    }
+    cli().then((c) => { process.exitCode = c; });
+  });
 }

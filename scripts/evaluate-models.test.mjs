@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-runner.mjs";
 
@@ -375,6 +375,18 @@ describe("evaluateModels", () => {
     const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", projectDir: "/proj/x" });
     assert.equal(r.verdicts.length, 1);
     assert.equal(r.verdicts[0].projectDir, "/proj/x");
+  });
+
+  it("落库 verdict 含 model 与 models（归属到具体工人）", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "same bug", file: "f.js" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "same bug variant", file: "f.js" }] },
+    ]}];
+    const adjudicateFn = async () => ({ verdict: "false", evidence: "already handled" });
+    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
+    assert.equal(r.verdicts.length, 1);
+    assert.equal(r.verdicts[0].model, "glm-5.2");
+    assert.deepEqual(r.verdicts[0].models.sort(), ["glm-5.2", "kimi-k2.7-code"], "共识 finding 应归属到所有报它的模型");
   });
 
   it("collects import context and passes it to the adjudicator", async () => {
@@ -771,6 +783,93 @@ describe("filterAuditsByFiles", () => {
     assert.equal(filterAuditsByFiles(audits, null).length, 2);
     assert.equal(filterAuditsByFiles(audits, []).length, 2);
     assert.equal(filterAuditsByFiles(audits, undefined).length, 2);
+  });
+});
+
+describe("confirmFindings", () => {
+  it("批量写回，所有条目用同一个批次时间戳", async () => {
+    const seen = [];
+    const confirmFn = async (file, line, finding, opts) => {
+      seen.push({ file, line, finding, ...opts });
+      return { confirmed: opts };
+    };
+    const { batchAt, results } = await confirmFindings(
+      [
+        { file: "a.js", line: 1, finding: "f1", final: "false", reason: "r1" },
+        { file: "b.js", line: 2, finding: "f2", final: "true", reason: "r2" },
+      ],
+      { confirmFn, now: () => "BATCH" }
+    );
+    assert.equal(batchAt, "BATCH");
+    assert.equal(seen.length, 2);
+    assert.ok(seen.every((s) => s.confirmedAt === "BATCH"), "所有条目应共享批次时间戳");
+    assert.equal(seen[0].final, "false");
+    assert.equal(results.filter((r) => r.ok).length, 2);
+  });
+
+  it("final 非法值不抛错，记为失败条目", async () => {
+    const confirmFn = async () => { throw new Error("不应被调用"); };
+    const { results } = await confirmFindings(
+      [{ file: "a.js", line: 1, finding: "f", final: "maybe" }],
+      { confirmFn }
+    );
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, false);
+    assert.ok(results[0].error.includes("invalid final"));
+  });
+
+  it("空数组不报错", async () => {
+    const { results } = await confirmFindings([], { confirmFn: async () => ({}) });
+    assert.deepEqual(results, []);
+  });
+
+  it("confirmFn 返回 null（未匹配）时 ok=false", async () => {
+    const { results } = await confirmFindings(
+      [{ file: "a.js", line: 1, finding: "f", final: "false" }],
+      { confirmFn: async () => null }
+    );
+    assert.equal(results[0].ok, false);
+  });
+});
+
+describe("confirmCli", () => {
+  it("无 --confirm 参数返回 null（交回 cli）", async () => {
+    assert.equal(await confirmCli(["--arbitrate"]), null);
+  });
+
+  it("缺文件路径返回 1 并提示", async () => {
+    let err = "";
+    const code = await confirmCli(["--confirm"], { stderr: { write: (s) => { err += s; } } });
+    assert.equal(code, 1);
+    assert.ok(err.includes("--confirm"), err);
+  });
+
+  it("读 JSON 数组并写回", async () => {
+    let out = "";
+    let err = "";
+    const readFile = async () => JSON.stringify([{ file: "a.js", line: 1, finding: "f", final: "false" }]);
+    const code = await confirmCli(
+      ["--confirm", "x.json"],
+      { readFile, confirmFn: async () => ({ confirmed: {} }), stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } } }
+    );
+    assert.equal(code, 0);
+    assert.ok(out.includes("终审写回 1 条"), out);
+  });
+
+  it("非数组 JSON 返回 1", async () => {
+    let err = "";
+    const readFile = async () => JSON.stringify({ foo: 1 });
+    const code = await confirmCli(["--confirm", "x.json"], { readFile, stderr: { write: (s) => { err += s; } } });
+    assert.equal(code, 1);
+    assert.ok(err.includes("数组"), err);
+  });
+
+  it("JSON 解析失败返回 1", async () => {
+    let err = "";
+    const readFile = async () => "{ not json";
+    const code = await confirmCli(["--confirm", "x.json"], { readFile, stderr: { write: (s) => { err += s; } } });
+    assert.equal(code, 1);
+    assert.ok(err.includes("解析失败"), err);
   });
 });
 

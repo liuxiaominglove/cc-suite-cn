@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
 import { resolve, sep, join, relative, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { jsonrepair } from "jsonrepair";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 import { runProcess, setSpawn, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
@@ -85,6 +86,45 @@ export function parseCriticArgs(args) {
   };
 }
 
+export const SELF_CHECK_PROMPT = "下面是你自己刚报的 finding 清单 + 完整代码。请逐条自检：对每条 finding，找到它涉及的函数，核对该函数的真实实现（在 CODE 或 [项目上下文] 里）——若该函数已处理了所说的问题（如 ~ 展开、路径归一化、null 守卫），就把这条判 keep=false。只保留经自检仍成立的 finding。输出 JSON：{\"survivors\":[{\"index\":数字,\"keep\":true/false,\"reason\":\"一句理由\"}]}";
+
+export function buildSelfCheckPrompt(findings, code) {
+  const list = (findings ?? [])
+    .map((f, i) => `[${i}] ${f.file ?? ""}:${f.line ?? ""} — ${f.finding ?? ""}`)
+    .join("\n");
+  return `${SELF_CHECK_PROMPT}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
+}
+
+export async function selfCheck({ findings, code, model, backend = "codebuddy", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0 }) {
+  const prompt = buildSelfCheckPrompt(findings, code);
+  const { command, args, stdin } = buildCommand(backend, { model, prompt });
+
+  const { stdout } = await withRetry(async () => {
+    const { exitCode, signal: exitSignal, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn, cwd: resolveReviewCwd(backend) });
+    if (timedOut) throw new TimeoutError();
+    const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
+    if (failed && isAuthError(stderr)) throw new AuthError();
+    if (failed) throw new RunnerError(`${command} exited with code ${exitCode}`, { exitCode, stderr });
+    return { stdout };
+  }, { maxRetries: retries });
+
+  const parsed = extractJson(stdout);
+  if (!parsed || !Array.isArray(parsed.survivors)) {
+    return { survivors: [] };
+  }
+  return { survivors: parsed.survivors };
+}
+
+export function applySelfCheck(findings, survivors) {
+  const keep = new Set(
+    (survivors ?? [])
+      .filter((s) => s && s.keep === true)
+      .map((s) => Number(s.index))
+      .filter((n) => Number.isInteger(n) && n >= 0)
+  );
+  return (findings ?? []).filter((_, i) => keep.has(i));
+}
+
 export function isNLArtifact(file) {
   if (typeof file !== "string" || !file) return false;
   const f = file.toLowerCase();
@@ -138,6 +178,30 @@ export async function collectProjectRules({ cwd = process.cwd(), readFile = null
 export function buildRulesSection(rules) {
   const text = (rules ?? "").trim();
   return text ? `\n\n[项目规则]\n${text}` : "";
+}
+
+export const WORKER_LESSONS_FILE = fileURLToPath(new URL("./worker-lessons.md", import.meta.url));
+
+export function stripMarkdownComments(text) {
+  return String(text ?? "").replace(/<!--[\s\S]*?-->/g, "");
+}
+
+export async function collectWorkerLessons({ readFile = null, filePath = WORKER_LESSONS_FILE, maxLines = 200 } = {}) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  try {
+    const raw = await read(filePath);
+    if (typeof raw === "string" && raw.trim()) {
+      return truncateLines(stripMarkdownComments(raw), maxLines);
+    }
+  } catch {
+    // 教训书不存在或不可读：不注入，静默跳过
+  }
+  return "";
+}
+
+export function buildLessonsSection(lessons) {
+  const text = (lessons ?? "").trim();
+  return text ? `\n\n[评审教训]\n${text}` : "";
 }
 
 function extractExports(content) {
@@ -411,7 +475,7 @@ export function getDiff({ cwd = process.cwd(), spawn } = {}) {
   });
 }
 
-export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null, feedbackPreamble = null, workerLessons = null }) {
 
   let ruleCwd = cwd;
   let importContext = "";
@@ -512,11 +576,13 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(fileName ?? file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
 
   const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
+  const feedbackSection = feedbackPreamble ? `${feedbackPreamble}\n\n` : "";
   const rules = projectRules ?? (await collectProjectRules({ cwd: ruleCwd }));
+  const lessons = workerLessons ?? (await collectWorkerLessons());
   const fileLabel = fileName ? `\n\nFILE: ${fileName}` : "";
   const importSection = importContext ? `\n\n[项目上下文] 本文件 import 的本地模块：\n${importContext}` : "";
   const stackSection = stackContext ? `\n\n[技术栈] ${stackContext}` : "";
-  const fullPrompt = `${readOnlyPrefix}${prompt}${buildRulesSection(rules)}${stackSection}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
+  const fullPrompt = `${readOnlyPrefix}${feedbackSection}${prompt}${buildRulesSection(rules)}${buildLessonsSection(lessons)}${stackSection}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
 
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
@@ -604,7 +670,7 @@ export function offsetFindings(chunkResults) {
   return all;
 }
 
-export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0 }) {
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0, feedbackPreamble = null }) {
   const reviewFnUsed = reviewFn ?? review;
   const read = readFn ?? (async (f) => {
     const { readFile } = await import("node:fs/promises");
@@ -616,18 +682,18 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   try {
     code = await read(file);
   } catch (err) {
-    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal, retries });
+    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal, retries, feedbackPreamble });
   }
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, allowExternal, retries, fileName: file });
+    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble });
   }
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };
@@ -673,6 +739,22 @@ if (isMainModule(import.meta.url)) {
     const code = await readFile(file, "utf-8");
     const findings = JSON.parse(await readFile(findingsFile, "utf-8"));
     const result = await criticize({ findings, code, model, backend });
+    if (result.missed?.length) {
+      try {
+        const { persistMissed } = await import("./missed-log.mjs");
+        const entries = result.missed.map((m) => ({
+          file: m.file ?? file,
+          line: m.line ?? null,
+          finding: m.finding ?? "",
+          source: "qwen-critic",
+          projectDir: process.cwd(),
+          timestamp: new Date().toISOString(),
+        }));
+        await persistMissed(entries);
+      } catch {
+        // 漏报落库失败不阻断批判输出
+      }
+    }
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);
   }
