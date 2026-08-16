@@ -718,3 +718,37 @@
 
 - **模型 diff 审查（复审）**：🟢 已复审——glm+kimi 审 diff，4 真问题已修，6 假阳/有意改动已核实。
 - **真机验证**：🟢 280/280 全绿。
+
+## 三、xiaolaigithub 修复闭环（/fix 全闭环，仅 bin/ 5 文件）
+
+**对象**：`/Users/liuxiaoming/project/xiaolaigithub` 的 `bin/`（config.sh/collect.sh/track.sh/learn.sh/report.py）。**流程**：glm+kimi 找 bug → qwen 批判 → hy3 裁决（13 条 verdict 落库）→ opencode 终审 + TDD 修 → /verify 只审 diff。**排除** seeds/（第三方克隆）、data/、reports/、notes/（产物）。
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| config.sh PATH 尾冒号修复 | 实测 `env PATH= bash -c 'source config.sh'` 修复前尾字节 `3a`(:)、修复后无尾冒号；`tests/test_shell.sh` PASS1 | 🟢 | 2026-08-17 |
+| collect.sh 快照原子写（repos+events） | 临时文件+`mv` 原子改名；`tests/test_shell.sh` PASS4（mock 上游失败，最终快照保持旧内容不被污染） | 🟡（机制验证，未 mock 真 gh） | 2026-08-17 |
+| learn.sh while read 丢末行 | 实测 bash 3.2 `while read` 读无尾换行文件丢 `cc-suite`；修复 `\|\| [[ -n ]]`+末尾清空后读到 3 行；PASS2 | 🟢 | 2026-08-17 |
+| learn.sh 路径穿越校验（负向） | `read_seed_repos` 白名单 `^[A-Za-z0-9_.-]+$`；实测 `../evil` 被拒、CRLF 正确 trim、末行无换行读到；PASS3 | 🟢 | 2026-08-17 |
+| learn.sh 非原子更新→.new staging | 先 `mv src→.new` 再删旧再改名，mv 失败时旧目录仍在或 .new 可恢复（代码走查） | 🟡（逻辑走查，未 mock mv 失败） | 2026-08-17 |
+| report.py events/repos 日期错配 | 重构 `resolve_snapshot_paths` 保证同日；`tests/test_report.py` 4 用例（含"events 采失败时 None"负向）；真机复跑报告正常（250 仓库/95 事件） | 🟢 | 2026-08-17 |
+| report.py markdown 竖线/换行/反斜杠转义 | `escape_md` + 先截断后转义；`test_escape_md` 5 用例 | 🟢 | 2026-08-17 |
+| 终审假阳 3 处（不修） | learn.sh:17 硬编码 main（实测 3 仓库默认分支均 main）、track.sh:8 直执 report.py（实测有 exec bit+shebang）、collect.sh:3 symlink（plist 绝对路径调用）；均有实测依据 | 🟢 | 2026-08-17 |
+| same-day 覆盖（设计冲突，未修） | plist 实测每天 9:00/21:00 两次，collect.sh 用 `date +%F` 互相覆盖；README 又明示"同一天会覆盖当天快照"；命名方案需用户拍板 | 🟢（bug 属实，修复方案待定） | 2026-08-17 |
+| /verify 只审 diff（复审） | glm+kimi 审 `git diff HEAD`（4 bin 文件 +113/-46），无 high/medium 回归，6 条 low polish 采纳 4 条修掉 | 🟢 | 2026-08-17 |
+
+## 四、xiaolaigithub same-day 覆盖修复（选 A：加时间戳）+ 第二轮只审 diff
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| collect.sh 快照文件名加时间戳 | `date +%F` → `date +%FT%H%M%S`，一天两次互不覆盖；`bash -n` 通过 | 🟢 | 2026-08-17 |
+| report.py 兼容带时间戳快照 | `snapshot_stem()` + `resolve_snapshot_paths` 改同 stem 配对；`tests/test_report.py` 21/21（含带时间戳解析/指定日期找当天最新/events 同 stem/旧格式回归） | 🟢 | 2026-08-17 |
+| report.py date_key 归一化（复审修） | 传时间戳 date_key 也归一化为 YYYY-MM-DD；`test_timestamp_arg_normalized` + `test_missing_timestamp_date_normalized` | 🟢 | 2026-08-17 |
+| learn.sh 原子更新消除空窗（复审修） | 旧目录先 `mv → .old` 保留恢复点，新落位 `.new` 后再删 `.old`（glm 复审建议） | 🟡（逻辑走查） | 2026-08-17 |
+| report.py events 缺失 stderr 警告（复审修） | `target_events is None` 时 `print(..., file=sys.stderr)` | 🟢 | 2026-08-17 |
+| kimi 同秒碰撞（未修） | `%FT%H%M%S` 秒级精度，同秒重跑覆盖；macOS `date` 无 `%N`，launchd 9:00/21:00 绝不同秒 | 🟡（已知边界，不修） | 2026-08-17 |
+
+## 复审状态（xiaolaigithub）
+
+- **模型 diff 审查（复审）**：🟢 已复审——glm+kimi 审 diff，4 条 low polish 已修，2 条假阳未采纳。
+- **单测/真机**：🟢 `python3 tests/test_report.py` 21/21 + `bash tests/test_shell.sh` 5/5 + report.py 真机复跑正常。
+- **same-day 覆盖**：🟢 已修复（选 A 加时间戳，已 commit `c1d675d`）。
