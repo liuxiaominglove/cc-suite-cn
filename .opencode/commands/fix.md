@@ -62,6 +62,8 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 确认修对了、没引入回归。
 
+> **UI 类改动（AppKit / SwiftUI / HTML / CSS）附加「真机手动验证清单」**：AI 审计只看代码、看不到渲染结果，「代码写了对、屏幕上没显示出来」这类问题（如控件 frame 容不下文案、负 y 子视图被裁剪、提示文字被裁掉）只有真机点开才抓得到。修完 UI 后列出要人工点验的项（哪个界面 / 哪个控件 / 预期看到什么），让用户照着验一遍，结果标 🟡。
+
 ## Step 6: 汇报
 
 - 修了哪些 bug、每个 bug 的测试证据（🟢）

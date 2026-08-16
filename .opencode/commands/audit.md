@@ -29,7 +29,7 @@ node scripts/audit-baseline.mjs --detect "<项目根目录>"
 |------|------|
 | `isGit: false` | 非 git 仓库，跳过本步，直接全量审 |
 | `dirty: true` | **工作区有未提交改动**——提示用户「工作区未提交改动不在 `git diff` 对比内，增量结果可能不完整」，询问「先提交再增量审 / 继续全量审」 |
-| `firstAudit: true` | 首次审计，直接全量审 |
+| `firstAudit: true` | 首次审计（无历史基线）——**先询问用户「增量基线」**：从哪个 commit/tag 起算（如「自 vX.Y.Z 以来的改动」），据此人工切 `git diff <tag>...HEAD` 得到变更文件列表；用户答不出基线时再全量审 |
 | `changed: false` | 自上次审计无变更，提示用户并询问是否仍要审 |
 | `changed: true` + `files` 非空 | **主动询问用户：「检测到上次审计后 N 个文件变更，是否增量审查（只审变更文件）？」** |
 
@@ -59,6 +59,17 @@ node scripts/jobs.mjs --run-audit --dir "<target>" --exts ".js,.ts,.py,.swift,..
 ```
 
 输出形如 `<job-id>  [completed]`。记下 job-id。
+
+### 运行方式（重要：防 shell 超时误杀）
+
+- **中/大文件（几百行以上，或单个文件可能审 >7 分钟）一律用后台模式**，避免前台 shell 超时掐断：
+  ```
+  node scripts/jobs.mjs --run-audit --file "<target>" --background
+  ```
+  后台任务用 `node scripts/jobs.mjs --list` 轮询到 `completed` 再读结果。
+- 若用前台模式，shell 超时**必须 ≥ 960s**（review-runner 内部单 worker 超时是 900s，shell 要留余量）。
+- 内容分块阈值是 **800 行**（超过自动分块，与超时无关）；几百行的文件虽不分块，也可能审得慢，照样建议后台。
+- **超时/卡住后**：先 `ps` 核对真实进程是否还在；账本残留的「running」僵尸记录用 `node scripts/jobs.mjs --cancel <id>` 清理，不要轻信。
 
 ## Step 3: 读结果并汇总
 

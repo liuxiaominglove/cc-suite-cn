@@ -179,7 +179,7 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
 
 const MIN_SAMPLES = 5;
 
-export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, resolveImportContext = null, resolveStackContext = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY }) {
+export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, resolveImportContext = null, resolveStackContext = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY, projectDir = null }) {
   const perModel = {};
   const allFindings = [];
   let verdicts = [];
@@ -264,6 +264,7 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       evidence: r.evidence ?? "",
       codeHash: r.codeHash,
       timestamp: new Date().toISOString(),
+      projectDir: projectDir || process.cwd(),
     }));
   }
 

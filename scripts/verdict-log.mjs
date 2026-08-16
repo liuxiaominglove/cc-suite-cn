@@ -73,8 +73,10 @@ export async function persistVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
   });
 }
 
-export function getActionableFindings(log) {
-  return (log ?? []).filter((v) => v.verdict === "true" && !v.fixed);
+export function getActionableFindings(log, { projectDir = null } = {}) {
+  return (log ?? []).filter(
+    (v) => v.verdict === "true" && !v.fixed && (projectDir == null || v.projectDir === projectDir)
+  );
 }
 
 export function isVerdictStale(verdict, currentContent) {

@@ -118,6 +118,42 @@ describe("getActionableFindings", () => {
     assert.equal(out.length, 1);
     assert.equal(out[0].finding, "real");
   });
+
+  it("按 projectDir 过滤只返回该项目的可修 finding", () => {
+    const log = [
+      { file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" },
+      { file: "b.js", finding: "in B", verdict: "true", projectDir: "/proj/b" },
+      { file: "c.js", finding: "false positive", verdict: "false", projectDir: "/proj/a" },
+    ];
+    const out = getActionableFindings(log, { projectDir: "/proj/a" });
+    assert.equal(out.length, 1);
+    assert.equal(out[0].finding, "in A");
+  });
+
+  it("不传 projectDir 时返回全部可修 finding（兼容旧行为）", () => {
+    const log = [
+      { file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" },
+      { file: "b.js", finding: "in B", verdict: "true", projectDir: "/proj/b" },
+    ];
+    const out = getActionableFindings(log);
+    assert.equal(out.length, 2);
+  });
+
+  it("旧数据无 projectDir 时，传 projectDir 不返回", () => {
+    const log = [{ file: "a.js", finding: "legacy", verdict: "true" }];
+    const out = getActionableFindings(log, { projectDir: "/proj/a" });
+    assert.equal(out.length, 0);
+  });
+
+  it("空账本返回空", () => {
+    assert.deepEqual(getActionableFindings([], { projectDir: "/proj/a" }), []);
+  });
+
+  it("projectDir 无匹配时返回空", () => {
+    const log = [{ file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" }];
+    const out = getActionableFindings(log, { projectDir: "/nonexist" });
+    assert.equal(out.length, 0);
+  });
 });
 
 describe("isVerdictStale", () => {

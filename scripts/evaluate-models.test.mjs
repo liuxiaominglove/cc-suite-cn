@@ -367,6 +367,16 @@ describe("evaluateModels", () => {
     assert.match(r.verdicts[0].codeHash, /^[a-f0-9]{64}$/, "codeHash 应为 sha256");
   });
 
+  it("落库 verdict 含 projectDir（显式传入时用传入值）", async () => {
+    const audits = [{ workers: [
+      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
+    ]}];
+    const adjudicateFn = async () => ({ verdict: "true", evidence: "real" });
+    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", projectDir: "/proj/x" });
+    assert.equal(r.verdicts.length, 1);
+    assert.equal(r.verdicts[0].projectDir, "/proj/x");
+  });
+
   it("collects import context and passes it to the adjudicator", async () => {
     const audits = [{ workers: [
       { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
