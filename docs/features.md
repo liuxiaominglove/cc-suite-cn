@@ -9,7 +9,7 @@
 | 1 | 找 bug（glm+kimi 只读评审） | `/audit`、`--run-audit` | 跑一次 `/audit`，两模型各返回 findings | "四施工队并行评审" / "review-e2e 四施工队实跑" |
 | 2 | 批判员（qwen 第二意见） | `/review-qwen` | 跑一次，返回独立评审 JSON | "qwen 批判员 --sandbox 不破坏评审" |
 | 3 | 验证审计员（hy3 裁决） | `/evaluate --arbitrate` | 跑一次，输出 per-model precision | "验证审计员 hy3 裁决" / "SA-3/SA-4 端到端" |
-| 4 | 修 bug（opencode TDD） | `/fix` | 修一个 bug，RED→GREEN→REFACTOR + 测试绿 | "修 5 个真 bug（TDD）" 等 |
+| 4 | 修 bug（opencode TDD，六步闭环） | `/fix` | 找→批判→裁→修→验→复审，RED→GREEN→REFACTOR + 测试绿 | "修 5 个真 bug（TDD）" 等 |
 | 5 | diff 审查 | `/verify`、`--run-audit --diff` | 有改动时跑，只发 hunk+上下文 | "/verify diff 审查" |
 | 6 | 后台任务 + 账本 + 真取消 | `/jobs` `/result` `/cancel`、`--background` | 起后台任务→running→completed；cancel 后进程 ESRCH | "#3 真后台" / "cancel 真 kill worker" |
 | 7 | 大文件分块 + 行号偏移 | `chunkCode`+`offsetFindings`（>800 行） | 审 >800 行文件，行号偏移正确 | "大文件自动分块" / "分块后行号偏移正确" |
@@ -22,6 +22,16 @@
 | 14 | 漂移守卫 | `pnpm test` → `guard.mjs` | 有重复拷贝/缺失 canonical/死引用时 FAIL | "WI-6: guard 内容一致性检查" |
 | 15 | 只读安全（写锁） | kimi `--agent-file` / qwen `--sandbox` / cwd 隔离 | 诱导写文件被拒、文件未变 | "M-2 kimi 只读护栏" / "qwen 无 -y 天然只读" / "cwd 隔离" |
 | 16 | 自审（dogfooding） | `pnpm self-audit` | 对 8 核心脚本跑 glm+kimi，release 前 | "自审（dogfooding）第一轮" |
+| 17 | 个人误报回灌（feedback） | `/audit` 内 `createFeedbackResolver` | 该模型终审判 false 的样本注入其下次 prompt | "WT-3 个人误报回灌" |
+| 18 | 终审真值（confirmVerdict） | `/fix` 终审写 final | 区分 hy3 初筛与 opencode 终审，训练只消费终审 | "WT-2 confirmVerdict" |
+| 19 | 工人版口袋书注入 | `collectWorkerLessons` | 审文件时 `[评审教训]` 段注入 worker-lessons.md | "WT-6 工人版口袋书" |
+| 20 | 根因/漏报回灌 | `pickRootCauses` / `pickMissed` | 本项目已修 bug 根因 + qwen 漏报清单注入 | "WT-7 根因 / WT-11 漏报" |
+| 21 | 标注基准集 | `node scripts/benchmark.mjs` | 对 manifest 真值算 precision/recall/f1 | "WT-8/WT-9 基准集" |
+| 22 | 自校验回路 | `selfCheck()` | 工人自检自己的 finding 只留 keep=true | "WT-10 自校验" |
+| 23 | 终审写回（--confirm） | `evaluate-models.mjs --confirm <json>` | opencode 终审全量打标 final 写回错题本 | "WT-12 终审写回" |
+| 24 | 进步统计 | `node scripts/progress.mjs` | 每模型历史→本次误报率 + 方向 | "WT-13 进步统计" |
+| 25 | 批判员进 /fix（六步闭环） | `/fix` Step 2 | 找 bug 后 qwen 批判，再裁决 | "FX-1 六步闭环" |
+| 26 | 门控复审 | `/fix` Step 6 | Step 5 后硬暂停问用户，同意才重跑 1-5；未做标「尚未复审」 | "FX-2 门控复审" |
 
 ## 三色判定
 

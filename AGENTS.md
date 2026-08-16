@@ -67,7 +67,7 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
 | `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
-| `/fix <path>` | 修复闭环：找 → 裁 → 修 bug(TDD) → 验证 |
+| `/fix <path>` | 修复闭环六步：找 → 批判 → 裁 → 修 bug(TDD) → 验证 → 复审(门控) |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
@@ -131,9 +131,9 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
 
-## 汇报惯例（每次 cc-suite-cn 工作完的总结必带两节）
+## 汇报惯例（每次 cc-suite-cn 工作完的总结必带三节）
 
-所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace` `/b-*`）不触发评审，不强制两节：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附三节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace` `/b-*`）不触发评审，不强制三节：
 
 ### 第一节：本次各 AI 表现
 
@@ -144,11 +144,24 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 
 对照 `docs/features.md` 基线清单，逐项标三色：🟢 实测通过 / 🟡 机制或部分 / 🔴 失败；**本次没用的功能标"未触达"，不算 🟢**。
 
+### 第三节：本次各 AI 进步（误报率，基于错题本）
+
+跑 `node scripts/progress.mjs` 取数，每模型一行「历史误报率 X% → 本次 Y%」+ 方向（↑进步/↓退步/—持平/无历史/无本次）。**数据源 = opencode 终审写回的 `confirmed.final` 标签**（`/fix` 全量打标），不是编的。**没跑 `/fix` 终审写回就写"无终审数据，不算进步"**。误报率越低越好，↓=退步。
+
+### 必带：复审状态（修 bug 类任务的总结）
+
+凡**修了代码**的任务，总结里必须显式声明复审状态，两种：
+
+- 🟢 **已复审**：复审（重跑 1-5 或 /verify 只审 diff）跑过、结论如何。
+- ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**（如"真机验证需你授权/输密码/在场，你回来后跑 X"）。
+
+**只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/fix` 的 Step 5 后本就该硬暂停 + 问用户是否复审。）
+
 ### 铁律（防惯例退化成空话）
 
 1. **结论 ≤ 证据**：每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出；查不到就标 🔴 或"未触达"。
 2. **负向必测**：凡写"能拦住/能禁止"，必须实测"确实拦住了"。
-3. 两节只是追加，不替代原有的评审/修复内容汇报。
+3. 三节 + 复审状态只是追加，不替代原有的评审/修复内容汇报。
 
 ## Single Source of Truth
 
@@ -176,7 +189,12 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/audit-baseline.mjs` | 增量审计基线（`--detect`/`--save`，git diff 对比变更文件） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
-| `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash） |
+| `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash + confirmVerdict 终审真值） |
+| `scripts/feedback.mjs` | 个人误报回灌（终审标签 → counter-example/正例/根因/漏报 preamble） |
+| `scripts/missed-log.mjs` | qwen 批判员漏报账本（原子写 + 去重） |
+| `scripts/progress.mjs` | 各 AI 误报率进步（基于终审 confirmed 标签，`node scripts/progress.mjs`） |
+| `scripts/benchmark-core.mjs` + `scripts/benchmark.mjs` | 标注基准集（对真值算 precision/recall/f1，prompt A/B） |
+| `scripts/worker-lessons.md` | 工人版口袋书（只收终审确认教训，注入 `[评审教训]` 段） |
 | `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |

@@ -547,3 +547,174 @@
 - `pnpm test:unit`：495 全绿（原 486 + 新增 9）+ guard 绿。
 - 提交：`83e0f95`（docs 19 处）+ `3748551`（fix 7 条 TDD），已 push `origin/master`。
 - 基线：本次审完状态 `3748551`（供下次增量对比）。
+
+---
+
+# 员工培训（Worker Training）：给 4 个施工队装"能力提升"闭环
+
+**动机**：只有 opencode 装了 TDD + nlpm 能自我提升；glm/kimi/qwen/hy3 无权重更新、无记忆，只能靠上下文工程 + 路由 + 测量"喂养"。
+**核心**：把 verdict-log 已有的裁决数据**闭环**——终审标签喂回工人 prompt，而不是只用于 /trace。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| WT-1: 落库 verdict 补 model/models 字段（归属到具体工人） | `evaluate-models.mjs` verdicts.map 补 `model`+`models`（cluster 全成员去重）；+1 用例（共识 finding 归属两模型） | 🟢 | 2026-08-16 |
+| WT-2: `confirmVerdict` 终审真值（opencode 终审写 final，区分 hy3 初筛） | `verdict-log.mjs` 新增 confirmVerdict（final 限 true/false）+ getTrace 透传 confirmed；+4 用例 | 🟢 | 2026-08-16 |
+| WT-3: `scripts/feedback.mjs` 个人误报回灌（counter-example + 正例） | `buildFeedbackPreamble`/`pickCounterExamples`/`pickExemplars`；**只消费 confirmed（终审）标签**，未经终审的 false 不进回灌（负向用例）；17 用例 | 🟢 | 2026-08-16 |
+| WT-4: `review()` 接 `feedbackPreamble` + `reviewFile` 透传 | fullPrompt 在只读声明后注入 feedback 段；+2 集成用例（注入/默认不注入） | 🟢 | 2026-08-16 |
+| WT-5: `runAudit` 接 `getFeedback` + CLI 接线 | `createFeedbackResolver`（读 verdict-log + missed-log，返回 (model,file)=>preamble）；run-audit/worker-audit 前后台都接；+2 用例（透传/默认 null） | 🟢 | 2026-08-16 |
+| WT-6: 工人版口袋书 `scripts/worker-lessons.md` + 注入 | `collectWorkerLessons`（去 HTML 注释）+ `buildLessonsSection` 拼 `[评审教训]` 段；纯注释文件返回空（不注入噪音）；+6 用例 | 🟢 | 2026-08-16 |
+| WT-7: 根因叙事注入（`fixed.rootCause` → `[本项目曾修复过的 bug]`） | `pickRootCauses`/`buildRootCausePreamble` 按 file/projectDir 匹配 + resolver 拼接；+6 用例 | 🟢 | 2026-08-16 |
+| WT-8: 标注基准集 `benchmark-core.mjs` + fixtures | `matchFindings`（行号±容忍）→ precision/recall/f1；`aggregateByModel`；`parseManifest`；3 fixtures（2 buggy + 1 clean）+ manifest.json；18 用例 | 🟢 | 2026-08-16 |
+| WT-9: `benchmark.mjs` 跑分器（对真值算 precision/recall） | `runBenchmark`（可注入 reviewFn/readFileFn）；CLI 打印 per-model 表；2 用例 | 🟢 | 2026-08-16 |
+| WT-10: 自校验回路（chain-of-verification） | `SELF_CHECK_PROMPT` + `selfCheck()` + `applySelfCheck()`（只留 keep=true）；6 用例 | 🟢 | 2026-08-16 |
+| WT-11: 漏报回灌（qwen missed → 下次注入 glm/kimi） | `scripts/missed-log.mjs`（原子写+去重）+ critic CLI 落库 missed + `pickMissed`/`buildMissedPreamble` + resolver 拼接；8 用例 | 🟢 | 2026-08-16 |
+
+## 未做（诚实标注）
+
+- **类级路由（P3c）**：按 bug 类别记各模型命中率并路由——需 finding 类别分类器，本轮未实现，仅留设计文档（`docs/worker-training.md`）。
+- **回灌 e2e 真模型验证**：WT-3~WT-11 均为单测（mock spawn）级别 🟢；**真实 CLI 闭环（跑一次 /audit → 裁决 → 终审 → 回灌 → 再 /audit 看误报是否下降）尚未跑**，标 🟡。历史数据缺 model 字段，回灌从现在开始积累，暂无历史样本可回灌。
+
+## 结果
+
+- `pnpm test:unit`：**579 全绿**（原 495 + 新增 84）+ guard 绿。
+- 新增文件：`feedback.mjs`、`missed-log.mjs`、`benchmark-core.mjs`、`benchmark.mjs`、`worker-lessons.md`、`benchmark/fixtures/*`、`benchmark/manifest.json` + 各 `.test.mjs`。
+- 数据流闭环：`/evaluate --arbitrate`（verdict+model 落库）→ `/fix` 终审 `confirmVerdict`（final 真值）→ 下次 `/audit` 经 `createFeedbackResolver` 注入个人误报 + 根因 + 漏报 + 口袋书。
+
+---
+
+# 基准集基线（第一次真模型跑分）
+
+**对象**：4 模型（glm/hy3/kimi/qwen）× 10 fixture（7 buggy + 3 clean），`pnpm benchmark`（`--workers all`，并发 4，保留 AGENTS.md/lessons 注入测整条流水线）。**40/40 成功**。
+
+## 基线结果（对标注真值）
+
+| 模型 | precision | recall | f1 | TP/FP/FN |
+|------|-----------|--------|-----|----------|
+| glm-5.2 | 0.78 | 1.00 | 0.88 | 7/2/0 |
+| hy3 | 0.88 | 1.00 | 0.93 | 7/1/0 |
+| kimi-k2.7-code | 0.78 | 1.00 | 0.88 | 7/2/0 |
+| qwen3-coder-plus | 0.67 | 0.86 | 0.75 | 6/3/1 |
+
+## 关键观察
+
+- **hy3 假阳最低（precision 0.88）**，且是唯一没踩 `clean-normalize.js`「~ 展开」经典陷阱的（0 FP），印证其裁决角色对跨文件误报的抵抗力。
+- **qwen3-coder-plus 最弱（precision 0.67、漏 1）**：`buggy-rejection.js` 报了但行号错（fp=1+fn=1 记 0/0），且 `buggy-null` 多报 1 条假阳。qwen 本职是批判员不是找 bug，作为 finder 能力偏弱属预期。
+- **glm/kimi 并列**（0.88）：都踩了 `clean-normalize.js`「~ 展开」假阳（各 1 FP）——这正是台账历史反复出现的跨文件误报，与「IM-6 结论：跨文件误报不能靠 prompt 清零」一致。
+- **天花板效应部分显现**：7 个注入 bug 几乎全被 4 模型找到（recall 1.00，除 qwen），说明 fixture 对强模型仍偏简单；区分度主要在**假阳率**（clean 文件的 FP）。
+
+## 结论（置信度）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| 基准集可跑、跑分器对真值算 precision/recall/f1 | `pnpm benchmark` 40/40 成功，`benchmark-baseline.json` 落库 | 🟢 | 2026-08-16 |
+| 4 模型裸 find-bug 基线已建立 | 上表；hy3 0.93 > glm/kimi 0.88 > qwen 0.75 | 🟢 | 2026-08-16 |
+| 假阳率是主要区分维度（recall 接近饱和） | 7 真 bug 几乎全找到；区分在 clean 文件 FP（hy3=1, glm/kimi=2, qwen=3） | 🟢 | 2026-08-16 |
+| 非确定性噪声 | 每模型每 fixture 仅 1 跑，未重复采样 | 🟡 | 2026-08-16 |
+| fixture 偏简单（天花板） | recall 1.00（qwen 除外）；后续需加更 subtle 的 bug 才更有区分度 | 🟡 | 2026-08-16 |
+
+## 后续用途
+
+此基线 = 「训练（回灌/口袋书/自检）是否有效」的对照锚点。回灌数据积累后重跑 `pnpm benchmark`，对比 `benchmark-baseline.json` 的 precision/recall 变化。
+
+---
+
+# 员工培训闭环：终审写回 + 进步统计 + 报告第三节
+
+**动机**：让建议 1（错题本）自动跑起来——每次真实任务 `/fix` 终审后，把每条 finding 的 `final` 结论写回错题本，下次 `/audit` 自动回灌个人误报；任务总结里加「本次各 AI 进步」（误报率历史 vs 本次）。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| WT-12: `--confirm` 终审写回模式（全量打标） | `evaluate-models.mjs` 加 `confirmFindings`（单一批次时间戳 `batchAt` 统一）+ `confirmCli`（`--confirm <json>` 读数组逐条写 final）；`evaluate-models.test.mjs` +9 用例（批次时间戳一致/非法 final 不抛错/空数组/未匹配 ok=false/CLI 分支） | 🟢 | 2026-08-16 |
+| WT-13: `progress.mjs` 进步统计（只看误报率） | `splitByBatch`（按最大 confirmedAt 切历史/本次）+ `fpRate` + `computeProgress`（↑进步/↓退步/—持平/无历史/无本次）；`progress.test.mjs` 14 用例 + CLI 打印 | 🟢 | 2026-08-16 |
+| WT-14: `fix.md` Step 3 加「终审写回（全量打标）」 | 终审对每条 finding（含 hy3 判 false 的）写 final + reason，跑 `--confirm` 落错题本；漏写某条=不进错题本 | 🟢 | 2026-08-16 |
+| WT-15: 报告惯例「两节」→「三节」 | AGENTS.md 汇报惯例 + SKILL.md Report Template + fix.md Step 6 加「本次各 AI 进步」（`node scripts/progress.mjs` 取数，基于终审错题本） | 🟢 | 2026-08-16 |
+| progress.mjs 空账本安全退出 | `node scripts/progress.mjs` 实测输出「暂无终审数据」exit 0（当前错题本为空） | 🟢 | 2026-08-16 |
+
+## 结果
+
+- `pnpm test:unit`：**612 全绿**（原 586 + 新增 26）+ guard 绿。
+- 新增文件：`scripts/progress.mjs` + `scripts/progress.test.mjs`。
+- 闭环：`/fix` 终审 `--confirm`（写错题本）→ 下次 `/audit` 回灌 → `progress.mjs` 算「历史→本次」误报率 → 报告第三节。
+
+## 已知注意（如实标注）
+
+- **错题本目前为空**：`confirmVerdict` 此前无调用方，历史 verdict 也缺 `models` 字段，进步曲线从下一次真实 `/fix` 终审写回后才开始积累。
+- **不加样本门槛**：前几次任务样本少（如 0/1 → 1/2 就"翻倍"），进步方向噪声大——尊重用户选择，报告会标注样本数。
+
+---
+
+# macELTA 增量审计（v5.2.0 → v5.2.1）——新闭环首次实战
+
+**范围**：`macELTA/EnglishTranslator`（macOS Swift 翻译 App「ELTA」），增量 = `git diff v5.2.0 HEAD` 的 14 个 Swift 文件（8 Sources + 6 Tests）。**流程**：找 bug(glm+kimi) → 裁决(hy3) → 终审全量打标(--confirm，首次点亮错题本) → TDD 修 → 落基线。
+
+## 四角色表现（真跑通）
+
+| 环节 | 结果 |
+|------|------|
+| 找 bug（glm+kimi） | 14 文件 × 2 模型 = 28/28 成功，glm 15 + kimi 21 = 36 条 finding |
+| 裁决（hy3） | 34 条落库；glm precision 0.93 / kimi 0.71 |
+| 终审（opencode） | 代码级核实 34 条：**28 true / 6 false**（含纠正 hy3 两处误判，见下） |
+| 修 bug（opencode） | 修 15+ 个真 bug，`swiftc` 编译通过 + 纯逻辑测试子集 **150/150 绿** |
+
+## 终审纠正 hy3 的两处误判（验证「初筛+终审」必要性）
+
+- **HotkeyHelpers [30]**：hy3 判 false（认为 kVK_ANSI_5=0x16），实际 kVK_ANSI_5=**0x17**，代码把「⇧⌘5」写成 0x16 确是真 bug → 终审改判 true。
+- **HotkeyHelpers [27]** 的 ⌘7/⌘8 漏报、[28] ⇧⌘5、[29] ⇧⌘M——keyNames 字典自证 0x16=6/0x17=5/0x26=J/0x2E=M，三处键码全错。
+
+## 修复台账（TDD / 编译+测试证据）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| EL-1: `isPrivateOrLocalhost` 192.168 分支无数字 IP 校验，`192.168.evil.com` 绕过 HTTP 校验泄露 API Key（安全） | AIProvider.swift 加 `192.168.` 分支数字校验；EndpointValidationTests +2 用例；独立验证 12/12 绿 | 🟢 | 2026-08-17 |
+| EL-2: `checkSystemHotkeyConflict` 三处键码错（⌘1-9 误含 ⌘=漏⌘7/8、⇧⌘5 写成 0x16、⇧⌘M 写成 0x26） | HotkeyHelpers.swift 三处键码修正；独立验证 7/7 绿 | 🟢 | 2026-08-17 |
+| EL-3: ResultWebView `f == .command` 严格相等，Caps Lock 开启时 Cmd+C/V/A/X 失效 | 改 `f.intersection(realModifiers) == .command`；**验证中又发现 ⌘C 报错音（复制落空）**——浮动非激活面板下 `sendAction(to: nil)` 未命中响应链，加 `tryToPerform` 转发兜底 | 🟢（真机验证：大写锁定时复制/粘贴/全选均正常） | 2026-08-17 |
+| EL-4: ESC/toggle tap `if expectedModifiers != 0` 守卫，无修饰键时吞任意修饰组合 | 移除守卫，始终比对 actualModifiers | 🟡（AppKit/CGEvent，编译通过） | 2026-08-17 |
+| EL-5: `translate` completion 在 URLSession 后台队列回调（UI 触达非主线程） | dataTask 回调统一切主线程 | 🟡（线程，编译通过） | 2026-08-17 |
+| EL-6: 打开偏好设置后无条件 `NSApp.deactivate()` | 仅取消分支才 deactivate | 🟡（AppKit） | 2026-08-17 |
+| EL-7: `setApiKey` Keychain 写失败静默丢弃新 key | 返回 Bool + `loge` 醒目 | 🟡（Keychain 环境无法单测，编译通过） | 2026-08-17 |
+| EL-8: 旧 `apiKey` 属性 getter/setter 读写不一致（死代码） | 移除死代码 | 🟢 | 2026-08-17 |
+| EL-9: 连接测试 body 硬编码 OpenAI messages，Gemini 需 contents | 按 provider 构造 body | 🟡（网络） | 2026-08-17 |
+| EL-10: 自定义 endpoint 清空不写回/字段残留/重置不刷模板/切换清空 key 不删旧 key | SettingsWindowController 4 处修正 | 🟡（AppKit UI） | 2026-08-17 |
+| EL-11: `InstallEventHandler` OSStatus 丢弃 | 捕获并追加到失败汇总 | 🟢 | 2026-08-17 |
+| EL-12: `flatText` 只按 minY 排序无 minX 次级排序 | 加 minX 次级排序 | 🟢 | 2026-08-17 |
+| EL-13: `assertNil(Any?)` 双可选包装 + 测试弱断言 mod>=0 | assertNil 改泛型 + mod!=0 | 🟢（150/150 测试绿） | 2026-08-17 |
+
+## 结果
+
+- macELTA 修复：8 Sources + 3 Tests 共 11 文件（+109/-62），**未 commit**（`git diff` 供用户审）。
+- 落基线：macELTA → `c34cb3f`（v5.2.1）。
+- 错题本首次点亮：34 条终审 `confirmed` 标签落库（含 model 归属），下次 `/audit` 起自动回灌个人误报。
+- **环境性 blocker 已解除**：真机（正常终端）跑 `./run_tests.sh` 全量 **277/277 全绿**（`All tests passed!`），无签名测试二进制在真机 Keychain 授权正常、不再挂起。EL-1~EL-13 全部无回归，编译+链接+测试全通过。注：EL-3(capsLock)/EL-4(CGEvent)/EL-5(线程)/EL-6(deactivate)/EL-9(连接测试 body)/EL-10(UI) 仍无**直接**单元测试覆盖（AppKit 事件模拟难），「全绿」证明的是无回归 + 编译正确，具体行为仍需真机手动点验，保持 🟡。
+
+---
+
+# /fix 六步闭环升级 + macELTA 复审（只审 diff）
+
+**动机**：复盘发现两个流程缺口——① `/fix` 缺「批判(qwen)」环节 ② 修完 bug 后无「复审」硬门控，导致"已修复"盖过"未复审"。本轮补齐。
+
+## 一、工作流升级（cc-suite-cn 自身）
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| FX-1: `/fix` 升级为六步闭环 | `fix.md` 重写：找 bug → **批判(qwen)** → 裁决 → 终审修 → 验证 → **复审(门控)**；Step 5 后硬暂停 + 问用户；复审 = 拿修完代码重跑 1-5（无第 6 步） | 🟢 | 2026-08-17 |
+| FX-2: 复审门控铁律内化 | SKILL.md Critical Rules + AGENTS.md 汇报惯例加「必带复审状态」；「修完≠走完」、复审未做必须显式标「⏸️ 尚未复审」 | 🟢 | 2026-08-17 |
+| FX-3: 同步 4 文件 + 自检 | SKILL.md 命令映射/AGENTS.md Commands 表/features.md 功能基线同步；`pnpm test:unit` 612 全绿 + guard 过（docs-consistency 关键词保留） | 🟢 | 2026-08-17 |
+
+## 二、macELTA 复审（只审 diff，glm+kimi）
+
+**对象**：修复提交 `70b0301` 的 diff（`git diff c34cb3f 70b0301`，11 文件 +111/-62，407 行 diff）。**流程**：glm+kimi 用 VERIFY_PROMPT 只审 diff → opencode triage → 修真实问题 → 真机验证。
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| 复审发现真问题 4 处（修，TDD） | ① TranslationEngine 早退路径 completion 不在主线程（kimi 报）② setApiKey 删除分支丢 delete 结果（glm+kimi）③ 192.168 校验太松（glm+kimi，改严格 IPv4）④ flatText 浮点 epsilon（glm）；6 文件 +33/-17，编译 + 153 纯逻辑测试绿 | 🟢 | 2026-08-17 |
+| 复审假阳/非问题 6 处 | apiKey 删除无调用方（grep 核实+全量编译过）、anthropic case 冗余、capsLock/修饰键行为变化（有意修复，用户已确认） | 🟢 | 2026-08-17 |
+| 真机验证 | 用户真机 `./run_tests.sh` **280/280 全绿**（原 277 + 新增 3 畸形 IP 测试） | 🟢 | 2026-08-17 |
+
+## 复审状态
+
+- **模型 diff 审查（复审）**：🟢 已复审——glm+kimi 审 diff，4 真问题已修，6 假阳/有意改动已核实。
+- **真机验证**：🟢 280/280 全绿。
