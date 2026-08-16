@@ -10,7 +10,7 @@ export function hashContent(content) {
 }
 
 export function verdictKey(v) {
-  return `${v.file ?? ""}:${v.line ?? ""}:${v.finding ?? ""}`;
+  return JSON.stringify([v.file ?? "", v.line ?? "", v.finding ?? ""]);
 }
 
 export function dedupeVerdicts(verdicts) {

@@ -71,6 +71,26 @@ describe("gitChangedFiles", () => {
     });
     assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js"], "重叠路径应去重");
   });
+
+  it("纳入未提交的 tracked 改动", () => {
+    const exec = fakeExec((cmd) => {
+      if (cmd.includes("..HEAD")) return "committed.js\n";
+      if (cmd.includes("diff --name-only") && cmd.endsWith("HEAD")) return "uncommitted.js\n";
+      if (cmd.includes("ls-files")) return "";
+      return undefined;
+    });
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["committed.js", "uncommitted.js"], "应同时含已提交与未提交的 tracked 文件");
+  });
+
+  it("未提交与已提交/untracked 重叠时去重", () => {
+    const exec = fakeExec((cmd) => {
+      if (cmd.includes("..HEAD")) return "a.js\n";
+      if (cmd.includes("diff --name-only") && cmd.endsWith("HEAD")) return "a.js\nb.js\n";
+      if (cmd.includes("ls-files")) return "b.js\n";
+      return undefined;
+    });
+    assert.deepEqual(gitChangedFiles("abc123def456", "/repo", exec), ["a.js", "b.js"], "三路重叠路径应去重");
+  });
 });
 
 describe("loadBaseline / saveBaseline", () => {
@@ -143,6 +163,23 @@ describe("detectAuditScope", () => {
     const r = await detectAuditScope("/proj", { cwd: "/repo", exec, path: p });
     assert.equal(r.changed, false);
     assert.deepEqual(r.files, []);
+  });
+
+  it("基线 == HEAD 但工作区 dirty 时返回未提交文件", async () => {
+    const p = await tmpPath();
+    await saveBaseline("/proj", { commit: "c1111111" }, p);
+    const exec = fakeExec((cmd) => {
+      if (cmd.includes("rev-parse")) return "c1111111\n";
+      if (cmd.includes("status --porcelain")) return "M a.js\n";
+      if (cmd.includes("..HEAD")) return "";
+      if (cmd.includes("diff --name-only")) return "uncommitted.js\n";
+      if (cmd.includes("ls-files")) return "";
+      return undefined;
+    });
+    const r = await detectAuditScope("/proj", { cwd: "/repo", exec, path: p });
+    assert.equal(r.dirty, true);
+    assert.equal(r.changed, true, "有未提交改动应视为有变更");
+    assert.deepEqual(r.files, ["uncommitted.js"], "应返回未提交的改动文件");
   });
 
   it("基线 != HEAD 返回变更文件", async () => {

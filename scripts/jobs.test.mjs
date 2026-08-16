@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, AUDIT_WORKERS, isValidJobId } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -12,6 +12,7 @@ afterEach(async () => {
     const fn = cleanups.pop();
     await fn();
   }
+  __resetSlotsForTest();
 });
 
 async function makeStore() {
@@ -271,6 +272,26 @@ describe("updateJobWithResult", () => {
     const id = await runJob(store, { type: "review" }, async () => ({ ok: true }));
     const got = await store.get(id);
     assert.equal(got.status, "completed");
+  });
+
+  it("已取消的 job 不被完成结果覆盖", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    await store.cancel(job.id);
+    await updateJobWithResult(store, job.id, async () => ({ ok: true }));
+    const got = await store.get(job.id);
+    assert.equal(got.status, "cancelled", "cancelled 是终态，不得被 completed 覆盖");
+  });
+
+  it("已取消的 job 不被失败结果覆盖", async () => {
+    const { store } = await makeStore();
+    const job = await store.create({ type: "review" });
+    await store.cancel(job.id);
+    await updateJobWithResult(store, job.id, async () => {
+      throw new Error("boom");
+    });
+    const got = await store.get(job.id);
+    assert.equal(got.status, "cancelled", "cancelled 是终态，不得被 failed 覆盖");
   });
 });
 
@@ -566,41 +587,69 @@ describe("runAudit retries", () => {
 });
 
 describe("acquireSlot", () => {
-  it("returns immediately when running < max", async () => {
-    let sleepCalls = 0;
-    await acquireSlot({ max: 4, getRunningCount: async () => 2, sleep: async () => { sleepCalls += 1; } });
-    assert.equal(sleepCalls, 0);
+  it("max <= 0 直接放行并返回空 release", async () => {
+    const release = await acquireSlot({ max: 0, _state: { count: 0 }, sleep: async () => { throw new Error("不应 sleep"); } });
+    assert.equal(typeof release, "function");
+    release();
   });
 
-  it("polls until a slot frees", async () => {
-    let running = 4;
+  it("有空位时立即占位并返回 release", async () => {
+    const state = { count: 0 };
+    const release = await acquireSlot({ max: 2, _state: state, sleep: async () => { throw new Error("不应 sleep"); } });
+    assert.equal(state.count, 1, "放行后应立即占位（同步自增）");
+    release();
+    assert.equal(state.count, 0);
+  });
+
+  it("占满后 sleep 轮询，直到释放才放行", async () => {
+    const state = { count: 1 };
     let sleepCalls = 0;
-    await acquireSlot({ max: 4, getRunningCount: async () => running, sleep: async () => { sleepCalls += 1; running = 3; } });
+    const release = await acquireSlot({ max: 1, _state: state, pollMs: 1, sleep: async () => { sleepCalls += 1; state.count = 0; } });
     assert.equal(sleepCalls, 1);
+    assert.equal(state.count, 1, "放行后重新占位");
+    release();
   });
 
-  it("skips gating when max <= 0", async () => {
-    let getCalls = 0;
-    await acquireSlot({ max: 0, getRunningCount: async () => { getCalls += 1; return 99; }, sleep: async () => {} });
-    assert.equal(getCalls, 0);
+  it("release 幂等（重复释放计数不为负）", async () => {
+    const state = { count: 0 };
+    const release = await acquireSlot({ max: 1, _state: state });
+    release();
+    release();
+    assert.equal(state.count, 0);
   });
 });
 
 describe("runJobBackground concurrency", () => {
-  it("waits for a slot when maxConcurrent is reached", async () => {
+  it("maxConcurrent 下第一个未释放时第二个等待，exit 后放行", async () => {
     const { store } = await makeStore();
-    const blocker = await store.create({ type: "audit", task: "blocker.js" });
-    let spawned = false;
-    const spawn = () => { spawned = true; return { unref() {}, pid: 999 }; };
-    let slept = 0;
-    const sleep = async () => { slept += 1; await store.update(blocker.id, { status: "completed" }); };
-    await runJobBackground(
+    const child1 = new EventEmitter();
+    child1.unref = () => {};
+    child1.pid = 999;
+    const id1 = await runJobBackground(
       store,
       { type: "review", model: "glm-5.2" },
       { action: "worker-review", file: "x.js" },
-      { spawn, maxConcurrent: 1, sleep, pollMs: 1 }
+      { spawn: () => child1, maxConcurrent: 1 }
     );
-    assert.equal(slept, 1, "should wait once until the blocker completes");
-    assert.equal(spawned, true);
+    assert.ok(id1);
+
+    let secondSpawned = false;
+    const child2 = new EventEmitter();
+    child2.unref = () => {};
+    child2.pid = 1000;
+    const p2 = runJobBackground(
+      store,
+      { type: "review", model: "glm-5.2" },
+      { action: "worker-review", file: "y.js" },
+      { spawn: () => { secondSpawned = true; return child2; }, maxConcurrent: 1, pollMs: 1 }
+    );
+
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(secondSpawned, false, "第一个未释放 slot 时，第二个不应启动");
+
+    child1.emit("exit"); // 释放第一个 slot
+    const id2 = await p2;
+    assert.equal(secondSpawned, true, "释放后第二个应启动");
+    assert.ok(id2);
   });
 });

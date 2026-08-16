@@ -24,6 +24,15 @@ export function gitDirty(cwd = process.cwd(), exec = execSync) {
   }
 }
 
+function collectNames(output) {
+  const names = [];
+  for (const line of (output ?? "").split("\n")) {
+    const f = line.trim();
+    if (f) names.push(f);
+  }
+  return names;
+}
+
 export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync) {
   if (typeof baseCommit !== "string" || !COMMIT_HASH_RE.test(baseCommit)) {
     return [];
@@ -34,19 +43,16 @@ export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync
   } catch {
     return null;
   }
-  const files = [];
-  for (const line of diff.split("\n")) {
-    const f = line.trim();
-    if (f) files.push(f);
-  }
+  const files = collectNames(diff);
   try {
-    const others = exec("git ls-files --others --exclude-standard", { cwd, encoding: "utf8" });
-    for (const line of others.split("\n")) {
-      const f = line.trim();
-      if (f) files.push(f);
-    }
+    files.push(...collectNames(exec("git ls-files --others --exclude-standard", { cwd, encoding: "utf8" })));
   } catch {
     // untracked 检测失败：忽略
+  }
+  try {
+    files.push(...collectNames(exec("git diff --name-only HEAD", { cwd, encoding: "utf8" })));
+  } catch {
+    // 未提交改动检测失败：忽略
   }
   return [...new Set(files)];
 }
@@ -95,7 +101,8 @@ export async function detectAuditScope(project, { cwd = process.cwd(), exec = ex
     return { isGit: true, changed: true, firstAudit: true, files: null, head, dirty };
   }
   if (prev.commit === head) {
-    return { isGit: true, changed: false, files: [], head, dirty };
+    const files = dirty ? gitChangedFiles(head, cwd, exec) : [];
+    return { isGit: true, changed: dirty, files, head, dirty };
   }
   const files = gitChangedFiles(prev.commit, cwd, exec);
   return { isGit: true, changed: true, firstAudit: false, files, baseCommit: prev.commit, head, dirty };

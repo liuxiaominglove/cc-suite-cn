@@ -92,9 +92,15 @@ export function createJobStore({ dir }) {
 export async function updateJobWithResult(store, id, fn) {
   try {
     const result = await fn();
-    await store.update(id, { status: "completed", finishedAt: new Date().toISOString(), result });
+    const current = await store.get(id);
+    if (current && current.status === "running") {
+      await store.update(id, { status: "completed", finishedAt: new Date().toISOString(), result });
+    }
   } catch (err) {
-    await store.update(id, { status: "failed", finishedAt: new Date().toISOString(), error: err?.message ?? String(err) });
+    const current = await store.get(id);
+    if (current && current.status === "running") {
+      await store.update(id, { status: "failed", finishedAt: new Date().toISOString(), error: err?.message ?? String(err) });
+    }
   }
 }
 
@@ -136,37 +142,45 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
   return child;
 }
 
-export async function acquireSlot({ max, getRunningCount, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), pollMs = 500 } = {}) {
-  if (!max || max <= 0) return;
-  while ((await getRunningCount()) >= max) {
+// 进程内并发信号量：acquireSlot 的「检查 + 占位」在同一同步块内完成（单线程 JS 无 await 插入），
+// 消除旧实现「检查（读文件系统）→ 创建 job」之间的 TOCTOU 窗口。
+const slotState = { count: 0 };
+
+export function __resetSlotsForTest() {
+  slotState.count = 0;
+}
+
+export async function acquireSlot({ max, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), pollMs = 500, _state = slotState } = {}) {
+  if (!max || max <= 0) return () => {};
+  while (_state.count >= max) {
     await sleep(pollMs);
   }
+  _state.count += 1;
+  let released = false;
+  return () => {
+    if (!released) {
+      released = true;
+      _state.count -= 1;
+    }
+  };
 }
 
 export async function runJobBackground(store, meta, workerSpec, { spawn = nodeSpawn, logDir = null, openLog = openSync, maxConcurrent = 0, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), pollMs = 500 } = {}) {
-  if (maxConcurrent > 0) {
-    await acquireSlot({
-      max: maxConcurrent,
-      getRunningCount: async () => {
-        const jobs = await store.list();
-        return jobs.filter((j) => j.status === "running").length;
-      },
-      sleep,
-      pollMs,
-    });
-  }
+  const release = await acquireSlot({ max: maxConcurrent, sleep, pollMs });
   const job = await store.create(meta);
   const logPath = logDir ? join(logDir, `${job.id}.log`) : null;
   let child;
   try {
     child = spawnWorker({ ...workerSpec, jobId: job.id }, { spawn, logPath, openLog });
   } catch (err) {
+    release();
     await store.update(job.id, { status: "failed", finishedAt: new Date().toISOString(), error: err?.message ?? String(err) });
     throw err;
   }
   await store.update(job.id, { pid: child.pid });
   if (typeof child.on === "function") {
     child.on("exit", () => {
+      release();
       setTimeout(() => {
         (async () => {
           try {

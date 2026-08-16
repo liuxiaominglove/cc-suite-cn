@@ -35,7 +35,24 @@ describe("hashContent", () => {
 describe("verdictKey", () => {
   it("keys by file + line + finding", () => {
     const k = verdictKey({ file: "a.js", line: 3, finding: "x" });
-    assert.equal(k, "a.js:3:x");
+    assert.ok(typeof k === "string" && k.length > 0, "应返回非空字符串");
+  });
+
+  it("相同输入产生相同 key", () => {
+    const a = verdictKey({ file: "a.js", line: 3, finding: "x" });
+    const b = verdictKey({ file: "a.js", line: 3, finding: "x" });
+    assert.equal(a, b);
+  });
+
+  it("分量含冒号时不碰撞", () => {
+    const k1 = verdictKey({ file: "a", line: "b:c", finding: "d" });
+    const k2 = verdictKey({ file: "a", line: "b", finding: "c:d" });
+    assert.notEqual(k1, k2, "两个不同 tuple 不得产生相同 key");
+  });
+
+  it("空分量不抛错", () => {
+    const k = verdictKey({ file: "", line: null, finding: "" });
+    assert.ok(typeof k === "string", "空分量应返回字符串而非抛错");
   });
 });
 
