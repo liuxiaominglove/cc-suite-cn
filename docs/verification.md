@@ -518,3 +518,32 @@
 - ❌ 根因分类报告/趋势图（无受众，死数据）
 - ❌ 现在修 prompt injection / argv 泄漏（威胁模型里攻击者=用户自己，收益低）
 - ❌ rootCause 枚举约束（自由文本几字够用）
+
+---
+
+# cc-suite-cn 增量自审（第三轮：dc5ba3e..HEAD 全量闭环）
+
+**范围**：`dc5ba3e..HEAD` 变更 21 文件（3 commit：`ddb356e` 自审修复 + `4fa1f05` 自审第二轮 + `fb92031` verdict projectDir）。审 8 生产 `.mjs` + 4 文档 `.md`，跳过 9 个 `.test.mjs`（测试是 oracle，已 486 全绿）。
+**流程**：找 bug（glm+kimi 12 文件 95 finding）→ 批判（qwen）→ 裁决（hy3 落库 88 条）→ opencode 终审（26 条 verdict=true 全判真，无假阳）→ TDD 修。
+
+## 关键发现
+
+- **glm 归属矛盾实测坐实**（文档类 #11）：施工队 glm 走 codebuddy CLI（`env -u DASHSCOPE_API_KEY` 实测仍响应，不依赖 key）；B 分身 glm 走 alibaba-cn（子代理自报 `alibaba-cn/glm-5.2`）。文档 DASHSCOPE 归属据此修正。
+- **代码类 7 条全判真、无假阳**，但都是低严重性（竞态/边界/健壮性），无安全/崩溃/数据损坏类；结论：`ddb356e`/`4fa1f05`/`fb92031` 三批代码未引入高严重性 bug。
+
+## 修复台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| 文档类 19 条（一致性/歧义/错误路径/铁律未固化） | 4 文件：AGENTS.md 5 处 + fix.md 5 处 + audit.md 7 处 + SKILL.md 2 处；`pnpm test:unit` + guard 绿 | 🟢 | 2026-08-16 |
+| `verdictKey` 用 `:` 拼接可碰撞 | 改 `JSON.stringify`；+3 用例（冒号碰撞/空分量/稳定） | 🟢 | 2026-08-16 |
+| `gitChangedFiles` 漏「已跟踪但未提交」的改动 | 追加 `git diff --name-only HEAD`；+2 用例（未提交纳入/三路去重） | 🟢 | 2026-08-16 |
+| `detectAuditScope` 基线==HEAD 时无视 dirty | dirty 时算未提交 files、`changed: dirty`；+1 用例 | 🟢 | 2026-08-16 |
+| `updateJobWithResult` 覆盖 cancelled（状态机缺终态保护） | 写 completed/failed 前重读 status，非 running 跳过；+2 用例 | 🟢 | 2026-08-16 |
+| `acquireSlot` TOCTOU（检查与创建非原子，并发可超 maxConcurrent） | 改内存信号量（检查+占位同步原子）+ release；`runJobBackground` 在 exit/失败时 release；重写 4 + 并发 1 用例 | 🟢 | 2026-08-16 |
+
+## 结果
+
+- `pnpm test:unit`：495 全绿（原 486 + 新增 9）+ guard 绿。
+- 提交：`83e0f95`（docs 19 处）+ `3748551`（fix 7 条 TDD），已 push `origin/master`。
+- 基线：本次审完状态 `3748551`（供下次增量对比）。
