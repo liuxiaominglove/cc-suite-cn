@@ -8,21 +8,24 @@ agent: build
 
 对 `$ARGUMENTS`（文件或目录路径，同 `/audit`）跑完整"找 → 裁 → 修 → 验"闭环。
 
-> `$ARGUMENTS` 是**路径**：文件用 `--file`，目录用 `--dir`。空参数 → 提示用户给路径（同 `/audit` 的对话框模式）。
+> `$ARGUMENTS` 是**路径**：文件用 `--file`，目录用 `--dir`（用 Bash `test -d <path>` 判定是文件还是目录；路径不存在 → 提示用户）。空参数 → 提示用户给路径（同 `/audit` 的对话框模式）。
 
 ## Step 1: 找 bug（glm + kimi）
 
 ```
-node scripts/jobs.mjs --run-audit --file "<path>"
+node scripts/jobs.mjs --run-audit --file "<path>"     # 文件
+node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..."   # 目录
 ```
 
-记下输出的 `<job-id>`。
+记下输出的 `<job-id>`。**超时/卡住 → 先 `ps` 核对真实进程；账本「running」可能是超时残留僵尸，用 `node scripts/jobs.mjs --cancel <id>` 清理后重跑。**
 
 ## Step 2: 裁决（hy3，强制前置，不可跳过）
 
 ```
 node scripts/evaluate-models.mjs --arbitrate
 ```
+
+（若 hy3 不可用或 `--arbitrate` 报错 → 停下报告用户，**不许静默跳过**——裁决是硬门槛。）
 
 hy3 逐条判 finding 真假，并把每条 verdict 落库到 `.cc-suite-cn/verdict-log.json`（含 codeHash 代码快照）。**裁决的是当前账本里所有已完成的 audit**（累积裁决，按 file+line+finding 去重）。
 
@@ -45,12 +48,15 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 > **可选**：若 bug 涉及 ≥2 个文件或跨模块，先列 3 行修复计划（改哪些文件 / 核心改法 / 影响面）再动手；单文件单行修复可跳过。
 
-对终审确认的真 bug，opencode 用 TDD 修：
+对终审确认的真 bug，opencode 用 TDD 修。**动手前必做两件事（AGENTS.md 铁律 #7）**：
+1. **实测触发条件**：finding 可能「bug 是真的，触发条件写错了」（如把"argv 是相对路径"当触发，实测 argv 恒为绝对路径），修前先复现/验证触发条件，不默认 finding 措辞准确。
+2. **修复建议放所有调用点验证**：finding 给的 fix 照抄可能引入回归（如"限定项目根目录"会顺带砍掉外部项目审计），落地前把建议放到每个调用方验证，防照抄引入回归。
 
 1. **RED 先行**：先列测试清单 → 写失败测试 → 确认红
 2. **GREEN 最少代码**：只写让测试通过的代码
 3. **REFACTOR**：整理命名/去重，跑测试仍绿
 4. **边界必测**：空值、null、极值、错误路径
+5. **负向必测**：凡「能拦住/能禁止」的修复，必须实测确实拦住了（如"防止写入项目根目录之外"要实测确实写不进去）
 
 > 优先用**项目自身测试框架**。项目没测试框架时，Node 项目用 `node:test` 搭考场（零 npm）；抽纯逻辑再测，UI/网络类改动测不了就"语法+编译检查 + 手动验证"兜底，并在 `docs/verification.md` 标 🟡。
 

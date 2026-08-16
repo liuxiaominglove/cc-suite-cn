@@ -16,7 +16,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
   │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
   │
   └─ 施工队（独立第三方 · 只读）
-       ├─ 找 bug (audit):     glm + kimi（scripts/review-runner.mjs，参数化 backend）
+       ├─ 找 bug (audit):     glm(codebuddy CLI) + kimi(Moonshot 直连)（scripts/review-runner.mjs，参数化 backend）
        ├─ 批判员 (critic):    qwen（只读 + --sandbox）
        └─ 验证审计员 (verifier): hy3（scripts/evaluate-models.mjs，裁决 finding 真假）
 ```
@@ -36,7 +36,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 |-------------|-----------------|
 | Node.js | >= 18.0 |
 | CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.2 + hy3 网关，走平台账号登录态） |
-| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，Qwen 用 |
+| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，**Qwen（施工队批判员 + B 分身）+ B 分身 glm** 用（B 分身走 models.dev 内置 `alibaba-cn` 通道）；**施工队找 bug 的 glm 走 codebuddy CLI 平台账号，无需此 key** |
 | `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`moonshotai-cn/kimi-k2.7-code`，走 Moonshot 官方直连） |
 | `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 用（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
 
@@ -103,7 +103,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 2. **GREEN 最少代码**：只写让测试通过的代码，不加额外功能、不提前优化。
 3. **REFACTOR**：整理命名/去重，跑全部测试仍绿。
 4. **边界必测**：空值、null、undefined、极值、错误路径。
-5. **无测试框架的项目**：先用 Node 内置 `node:test` 搭考场（`.mjs` 扩展名天然 ESM，**零 npm**），把纯逻辑抽成模块再测。DOM 类改动无法无 jsdom 单测时，用"语法检查 + 浏览器手动验证"兜底，并在验证台账标 🟡。
+5. **无测试框架的项目**：先用 Node 内置 `node:test` 搭考场（`.mjs` 扩展名天然 ESM，**零 npm**），把纯逻辑抽成模块再测。DOM 类改动无法无 jsdom 单测时，用"语法检查 + 浏览器手动验证"兜底，并在验证台账标 🟡（即验证纪律的「🟡 机制或部分通过」，无单测仅编译/手动验证兜底属此类）。
 6. **能力动词逐个测**：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 测试证据。
 7. **触发条件实测 + 修复建议验证所有调用点**：finding 可能"bug 是真的，触发条件写错了"（如把"argv 是相对路径"当触发，实测 argv 恒为绝对路径），修前先实测触发条件；finding 给的 fix 建议照抄可能引入回归（如"限定项目根目录"会顺带砍掉外部项目审计），落地前把建议放到每个调用方验证。
 
@@ -128,12 +128,12 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **能力动词清单**: 审 / 改 / 修 —— 每个动词都要有独立的 🟢 证据，缺一个不许说满。
 - **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
 - **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
-- **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。P3 之后固化真实往返/锁写/负向三个验证。
+- **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
 
 ## 汇报惯例（每次 cc-suite-cn 工作完的总结必带两节）
 
-所有 cc-suite-cn 命令（`/audit` `/review-*` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附两节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace` `/b-*`）不触发评审，不强制两节：
 
 ### 第一节：本次各 AI 表现
 
@@ -174,6 +174,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/backends.mjs` | 3 个 backend 的 CLI 命令构建（resolveCli 绝对路径防 PATH 劫持 + 只读护栏） |
 | `scripts/preflight.mjs` | 环境自检（codebuddy CLI 可用性检查） |
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
+| `scripts/audit-baseline.mjs` | 增量审计基线（`--detect`/`--save`，git diff 对比变更文件） |
 | `scripts/guard.mjs` | Drift guard — enforces single source of truth |
 | `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash） |
 | `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |

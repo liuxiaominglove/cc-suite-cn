@@ -44,6 +44,15 @@ Load this skill when the user:
 5. 验证（/verify）          → diff 审查
 ```
 
+**命令 → 步骤映射**（不是所有命令都跑全五步）：
+- `/audit` / `/review`：步骤 1（找 bug）
+- `/audit-full`：步骤 1 + 2 + 3（找 bug + 批判 + 裁决，不修）
+- `/review-kimi` / `/review-qwen`：单壳评审（只一个模型，非双施工队）
+- `/evaluate --arbitrate`：步骤 3（裁决）
+- `/fix`：步骤 3 + 4 + 5（裁决 + 修 + 验证）
+- `/verify`：步骤 5（diff 审查）
+- `/trace`：只查「报 → 裁 → 修」链路，不评审
+
 1. Identify target file(s) from the request.
 2. Run the find-bug workers (glm + kimi, read-only, parameterized backend) via:
    `node scripts/jobs.mjs --run-audit --file <path>` (记入任务账本 + audit-log)
@@ -64,6 +73,7 @@ Load this skill when the user:
 - If one worker fails, still show the others' results + a failure note.
 - If all models return empty, state that clearly. Do not fabricate issues.
 - 汇报「已验证」必须能在 `docs/verification.md` 找到对应行（三色置信度 🟢🟡🔴）。
+- 错误路径：文件不存在/空输入 → 提示用户给路径；缺 CLI/API key → 先跑 `pnpm preflight` 自检，别硬跑。
 
 ## Report Template (每次工作完总结必带两节)
 

@@ -6,7 +6,7 @@ agent: build
 
 # 找 bug（代码审计）
 
-对 `$ARGUMENTS` 做**双施工队只读评审**，glm + kimi 并行找 bug（自动记入任务账本，可用 `/jobs` 查）：
+对 `$ARGUMENTS` 做**双施工队只读评审**，glm + kimi 并行找 bug（结果记入任务账本（`/jobs` 查）+ audit-log）：
 
 | 施工队 | backend | model |
 |--------|---------|-------|
@@ -28,12 +28,12 @@ node scripts/audit-baseline.mjs --detect "<项目根目录>"
 | 输出 | 处理 |
 |------|------|
 | `isGit: false` | 非 git 仓库，跳过本步，直接全量审 |
-| `dirty: true` | **工作区有未提交改动**——提示用户「工作区未提交改动不在 `git diff` 对比内，增量结果可能不完整」，询问「先提交再增量审 / 继续全量审」 |
-| `firstAudit: true` | 首次审计（无历史基线）——**先询问用户「增量基线」**：从哪个 commit/tag 起算（如「自 vX.Y.Z 以来的改动」），据此人工切 `git diff <tag>...HEAD` 得到变更文件列表；用户答不出基线时再全量审 |
+| `dirty: true` | **工作区有未提交改动**——提示用户「工作区未提交改动不在 `git diff` 对比内，增量结果可能不完整」，询问「先提交再增量审 / 继续全量审」；选「先提交」→ 等用户 commit 后重跑 `--detect` 再增量审 |
+| `firstAudit: true` | 首次审计（无历史基线）——**先询问用户「增量基线」**：从哪个 commit/tag 起算（如「自 vX.Y.Z 以来的改动」），据此人工切 `git diff <tag>...HEAD` 得到变更文件列表；用户答不出基线时再全量审。得到的文件列表，逐个 `--run-audit --file`（串行） |
 | `changed: false` | 自上次审计无变更，提示用户并询问是否仍要审 |
 | `changed: true` + `files` 非空 | **主动询问用户：「检测到上次审计后 N 个文件变更，是否增量审查（只审变更文件）？」** |
 
-- 用户选**增量**：只对 `files` 列表里的每个文件跑 `--run-audit --file <file>`
+- 用户选**增量**：只对 `files` 列表里的每个文件跑 `--run-audit --file <file>`（**多文件串行**，逐个跑，勿并行拉起多进程）
 - 用户选**全量**：照常审整个目录
 
 ## Step 1: Determine Target
@@ -43,6 +43,7 @@ node scripts/audit-baseline.mjs --detect "<项目根目录>"
 | (empty) | "Please specify a file or directory to audit, e.g. `/audit src/file.ts`" |
 | file path | Target = that file (relative to cwd, or absolute) |
 | directory path | 用 `--dir` 模式（`--exts` 匹配文件类型） |
+| 路径不存在/不可读 | 提示用户路径无效，不继续 |
 
 ## Step 2: Run（2 施工队并行，记入账本）
 
@@ -94,6 +95,15 @@ node scripts/jobs.mjs --get "<job-id>"
 
 ## kimi 单独发现
 - {issue}
+
+## 失败/超时（如有）
+- {model}: {失败说明}
+
+## 本次各 AI 表现
+（见 AGENTS.md「汇报惯例」第一节：各模型 success / issue 数）
+
+## 本次触达功能
+（见 AGENTS.md「汇报惯例」第二节：对照 docs/features.md 标三色）
 ```
 
 ## Critical Rules
