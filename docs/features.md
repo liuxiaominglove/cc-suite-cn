@@ -30,7 +30,7 @@
 | 22 | 自校验回路 | `selfCheck()` | 工人自检自己的 finding 只留 keep=true | "WT-10 自校验" |
 | 23 | 终审写回（--confirm） | `evaluate-models.mjs --confirm <json>` | opencode 终审全量打标 final 写回错题本 | "WT-12 终审写回" |
 | 24 | 进步统计 | `node scripts/progress.mjs` | 每模型历史→本次误报率 + 方向 | "WT-13 进步统计" |
-| 25 | 批判员进 /fix（五步闭环） | `/fix` Step 2 | 找 bug 后 qwen 批判，再裁决 | "FX-1 六步闭环" |
+| 25 | 批判员进 /fix（五步闭环） | `/fix` Step 2 | 找 bug 后 qwen 批判，再裁决 | "FX-1 批判员进 /fix" |
 
 ## 三色判定
 
