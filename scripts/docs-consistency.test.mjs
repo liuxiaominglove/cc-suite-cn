@@ -222,5 +222,11 @@ describe("打分 finding（WI-6）", () => {
       const token = r.title.split("（")[0].trim();
       assert.ok(md.includes(token), `trust-boundary.md 漏 open 风险 ${token}`);
     }
+    // 反向：trust-boundary.md 已落地表里的每个位置都必须在 JSON 里有对应 resolved 项（防手改表漂移）
+    const mdLocations = [...md.matchAll(/`(scripts\/[a-z0-9-]+\.mjs)`/g)].map((m) => m[1]);
+    const resolvedLocations = new Set(resolved.map((r) => r.location));
+    for (const loc of mdLocations) {
+      assert.ok(resolvedLocations.has(loc), `trust-boundary.md 有 JSON 里没有的已落地位置 ${loc}（手改表漂移？）`);
+    }
   });
 });

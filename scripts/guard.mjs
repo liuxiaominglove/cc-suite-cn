@@ -11,6 +11,7 @@ export const CANONICAL_FILES = [
   "scripts/review-runner.mjs",
   ".opencode/skills/cc-review/SKILL.md",
   "install.sh",
+  "scripts/known-risks.json",
 ];
 
 export const COPY_LOCATIONS = [
@@ -120,13 +121,56 @@ export function findOrphanGlobalRules({ rulesDir = join(homedir(), ".config/open
     return [];
   }
   const ruleFiles = names.filter((n) => typeof n === "string" && n.endsWith(".md"));
+  if (!ruleFiles.length) return [];
   let config;
   try {
     config = read(configPath, "utf-8");
   } catch {
     return [];
   }
-  return ruleFiles.filter((name) => !config.includes(name));
+  const mounted = new Set(instructionBasenames(config));
+  return ruleFiles.filter((name) => !mounted.has(name));
+}
+
+function instructionBasenames(configText) {
+  const stripped = stripJsoncComments(configText);
+  try {
+    const j = JSON.parse(stripped);
+    const instrs = Array.isArray(j && j.instructions) ? j.instructions : [];
+    return instrs.map((p) => (typeof p === "string" ? basename(p) : null)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function stripJsoncComments(text) {
+  let out = "";
+  let inString = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    const next = text[i + 1];
+    if (inLineComment) {
+      if (c === "\n") { inLineComment = false; out += c; }
+      continue;
+    }
+    if (inBlockComment) {
+      if (c === "*" && next === "/") { inBlockComment = false; i++; }
+      continue;
+    }
+    if (inString) {
+      out += c;
+      if (c === "\\") { out += next ?? ""; i++; continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === "/" && next === "/") { inLineComment = true; i++; continue; }
+    if (c === "/" && next === "*") { inBlockComment = true; i++; continue; }
+    out += c;
+  }
+  return out;
 }
 
 export function findKnownRiskDrift({ knownRisksPath = join(REPO_ROOT, "scripts/known-risks.json"), verificationPath = join(REPO_ROOT, "docs/verification.md"), read = readFileSync } = {}) {
@@ -134,13 +178,13 @@ export function findKnownRiskDrift({ knownRisksPath = join(REPO_ROOT, "scripts/k
   try {
     raw = read(knownRisksPath, "utf-8");
   } catch {
-    return [];
+    return [`${basename(knownRisksPath)} 缺失或不可读（canonical 文件）`];
   }
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return [];
+    return [`${basename(knownRisksPath)} 不是合法 JSON`];
   }
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.risks)) {
     return [`${basename(knownRisksPath)} 应为 { risks: [...] } 结构`];
@@ -176,7 +220,7 @@ export function findKnownRiskDrift({ knownRisksPath = join(REPO_ROOT, "scripts/k
       const anchor = typeof r.anchor === "string" ? r.anchor.trim() : "";
       if (!anchor) {
         problems.push(`${id}: resolved 缺 anchor`);
-      } else if (!readVerification().includes(anchor)) {
+      } else if (!anchorInVerification(readVerification(), anchor)) {
         problems.push(`${id}: anchor "${anchor}" 在 verification.md 找不到（死链）`);
       }
     } else if (r.status === "open") {
@@ -190,6 +234,15 @@ export function findKnownRiskDrift({ knownRisksPath = join(REPO_ROOT, "scripts/k
     }
   }
   return problems;
+}
+
+function anchorInVerification(text, anchor) {
+  const re = new RegExp(`\\b${escapeRegExp(anchor)}\\b`);
+  return re.test(text);
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-suite-cn/audit-baseline.json"), read = readFileSync, exists = existsSync } = {}) {

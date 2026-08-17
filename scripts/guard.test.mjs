@@ -250,6 +250,22 @@ describe("findOrphanGlobalRules", () => {
     const read = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
     assert.deepEqual(findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read }), []);
   });
+
+  it("JSONC 带注释也能解析出 instructions", () => {
+    const listDir = () => ["path-rename-safety.md", "verification-discipline.md"];
+    const read = fakeRead({
+      "opencode.jsonc": `{\n  "$schema": "https://opencode.ai/config.json", // URL 里的 // 不该被当注释\n  "instructions": [\n    "~/.config/opencode/rules/path-rename-safety.md",\n    /* 块注释 */ "~/.config/opencode/rules/verification-discipline.md"\n  ]\n}`,
+    });
+    const problems = findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read });
+    assert.deepEqual(problems, []);
+  });
+
+  it("子串不误报（a.md 不因 data.md 被误判挂载）", () => {
+    const listDir = () => ["a.md"];
+    const read = fakeRead({ "opencode.jsonc": JSON.stringify({ instructions: ["~/.config/opencode/rules/data.md"] }) });
+    const problems = findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read });
+    assert.deepEqual(problems, ["a.md"], "a.md 未被挂载，不应被 data.md 的子串误判为已挂载");
+  });
 });
 
 describe("findKnownRiskDrift", () => {
@@ -312,11 +328,23 @@ describe("findKnownRiskDrift", () => {
     assert.ok(problems.some((p) => p.includes("whyDeferred") || p.includes("KR-01")));
   });
 
-  it("文件缺失/损坏返回 [] 不抛", () => {
+  it("文件缺失返回问题（已知债是 canonical 文件，缺失必须报）", () => {
     const throwing = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
-    assert.deepEqual(findKnownRiskDrift({ knownRisksPath: "/nonexistent.json", verificationPath: "/nonexistent.md", read: throwing }), []);
+    const problems = findKnownRiskDrift({ knownRisksPath: "/nonexistent.json", verificationPath: "/nonexistent.md", read: throwing });
+    assert.ok(problems.length >= 1, "缺失应报问题而非静默 []");
+  });
+
+  it("文件损坏返回问题", () => {
     const read = fakeRead({ "known-risks.json": "{ bad json", "verification.md": "" });
-    assert.deepEqual(findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read }), []);
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.length >= 1, "损坏 JSON 应报问题而非静默 []");
+  });
+
+  it("anchor 词边界（M-1 不误匹配 M-10）", () => {
+    const data = { risks: [{ id: "TR-01", status: "resolved", title: "a", anchor: "M-1" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": "M-10: 另一个锚点" });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("M-1")), "M-1 不应因 verification 里有 M-10 而误判为命中");
   });
 
   it("非数组 risks 报错", () => {
