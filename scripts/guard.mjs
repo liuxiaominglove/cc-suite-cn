@@ -10,6 +10,7 @@ const HOME = homedir();
 export const CANONICAL_FILES = [
   "scripts/review-runner.mjs",
   ".opencode/skills/cc-review/SKILL.md",
+  "install.sh",
 ];
 
 export const COPY_LOCATIONS = [

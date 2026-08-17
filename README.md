@@ -103,45 +103,73 @@
 
 ## 五、前提条件与安装（新手友好）
 
-> 全程照做即可，每一步都有「怎么确认装好了」的方法。整套东西只需要 4 样：**Node.js、opencode、3 个 worker CLI、3 个 API key**。
+> 一条命令装完。脚本会**自动装** opencode、3 个 worker CLI、clone 代码、装依赖、跑自检；**只检测不硬装** Node.js / git（缺了会提示你）。3 个 API key 会在安装过程中**交互式询问**并写进 shell 配置。
+
+### 方式一：一键安装（推荐）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/liuxiaominglove/cc-suite-cn/master/install.sh | bash
+```
+
+装完按提示 `cd ~/cc-suite-cn && opencode`，进去敲 `/audit src/` 即可。
+
+> 一键安装是**交互式**的（要现场输 3 个 key）。非交互场景（CI/脚本）用 `bash install.sh --skip-keys` 跳过询问，之后手动把 key 写进 `~/.zshrc` 即可。
+
+### 方式二：先看再跑（更稳）
+
+```bash
+git clone --depth 1 https://github.com/liuxiaominglove/cc-suite-cn.git
+cd cc-suite-cn
+# 打开 install.sh 读一遍（就 200 来行，都是安装步骤），确认没问题再跑：
+bash install.sh
+```
+
+> `install.sh` 幂等，可重复运行；已装的会跳过。想先试水不落盘，用 `bash install.sh --dry-run`。
+
+### 脚本替你干了什么
+
+| 步骤 | 说明 |
+|------|------|
+| 检测 Node.js（≥18）/ git / npm | 缺了按平台提示安装命令（macOS→brew，Linux→apt），**不硬装** |
+| 安装 opencode | `curl -fsSL https://opencode.ai/install \| bash`（已装跳过） |
+| 安装 3 个 worker CLI | `npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code`（已装跳过） |
+| 填 3 个 API key | 交互式询问（**不回显**、幂等不重写），写进 `~/.zshrc` 或 `~/.bashrc` |
+| 拿代码 | `git clone --depth 1` 到 `~/cc-suite-cn`（已在仓库内则跳过） |
+| 装依赖 + 自检 | `npm install` → `npm run preflight`，绿红汇总 |
+
+<details>
+<summary>想手动一步步装？展开看原步骤（fallback）</summary>
 
 ### 第 1 样：Node.js（≥ 18）
 
-- **是什么**：跑这套脚本的"底座"运行环境。
-- **怎么装**：打开 https://nodejs.org 下载「LTS」版本，双击 `.pkg` 一路下一步（新手推荐）。装 Node 会自动带上 `npm`，后面要用。
-- **怎么确认装好了**：打开终端，输入 `node -v`，看到 `v18.x.x` 或更高即可。
+- **怎么装**：打开 https://nodejs.org 下载「LTS」，双击 `.pkg` 一路下一步（自动带上 `npm`）。
+- **确认**：`node -v` 看到 `v18.x.x` 或更高。
 
-### 第 2 样：opencode（总指挥宿主）
-
-- **是什么**：这套系统的"大脑壳"，DeepSeek 在里面当总指挥。
-- **怎么装**：终端里跑这一条（装完**关掉终端重开一次**）：
+### 第 2 样：opencode
 
 ```bash
 curl -fsSL https://opencode.ai/install | bash
 ```
 
-- **怎么确认装好了**：重开终端后输入 `opencode --version`，能看到版本号即可。
+装完**重开终端**，`opencode --version` 有版本号即可。
 
-### 第 3 样：3 个 worker CLI（施工队工具）
-
-- **是什么**：3 个命令行工具，分别驱动 GLM/Hy3、Kimi、Qwen 干活。
-- **怎么装**：终端里跑这一条（需要第 1 样的 npm）：
+### 第 3 样：3 个 worker CLI
 
 ```bash
 npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
 ```
 
-- **怎么确认装好了**：分别输入 `codebuddy --version`、`kimi --version`、`qwen --version`，都能看到版本号即可。
+分别 `codebuddy --version`、`kimi --version`、`qwen --version` 验证。
 
-### 第 4 样：3 个 API key（模型的"钥匙"）
+### 第 4 样：3 个 API key
 
 | Key 名 | 对应模型 | 去哪申请 |
 |--------|---------|---------|
 | `DASHSCOPE_API_KEY` | Qwen（阿里通义） | https://dashscope.aliyun.com （阿里云百炼控制台 → API-KEY 管理） |
 | `MOONSHOT_API_KEY` | Kimi（月之暗面） | https://platform.moonshot.cn （开放平台 → API Keys） |
-| `TOKENHUB_API_KEY` | Hy3（腾讯混元） | https://console.cloud.tencent.com/tokenhub/models （右上角有「新用户福利」，可领 Hy3 100 万 tokens 免费体验） |
+| `TOKENHUB_API_KEY` | Hy3（腾讯混元） | https://console.cloud.tencent.com/tokenhub/models （右上角「新用户福利」可领 Hy3 免费 tokens） |
 
-拿到 3 把钥匙后，写进 `~/.zshrc` 里（这样每次开终端都自动生效）：
+写进 `~/.zshrc` 后 `source ~/.zshrc`：
 
 ```bash
 echo 'export DASHSCOPE_API_KEY=你的阿里百炼key' >> ~/.zshrc
@@ -150,33 +178,29 @@ echo 'export TOKENHUB_API_KEY=你的腾讯TokenHub key' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-> `codebuddy` CLI 走的是**平台账号登录态**（GLM-5.2 + Hy3 网关），第一次跑 `codebuddy` 时按提示登录即可，不需要单独给它 key。
+> `codebuddy` CLI 走**平台账号登录态**（GLM-5.2 + Hy3 网关），第一次跑时按提示登录即可，不需要单独 key。
 
 ### 安装本仓库
 
 ```bash
-# ① 下载代码（macOS 一般自带 git，可先 `git --version` 确认）
-git clone https://github.com/liuxiaominglove/cc-suite-cn.git
+git clone --depth 1 https://github.com/liuxiaominglove/cc-suite-cn.git
 cd cc-suite-cn
-
-# ② 装项目依赖（⚠️ 必做，漏了这步 /audit 会报"找不到模块"）
-npm install
-
-# ③ 自检：期望看到 3 个 ✅ CLI + 3 个 ✅ key
-npm run preflight
+npm install        # ⚠️ 必做，漏了 /audit 报"找不到模块"
+npm run preflight  # 期望 3 个 ✅ CLI + 3 个 ✅ key
 ```
+
+</details>
 
 ### 开始用
 
-在项目目录里打开 opencode：
-
 ```bash
+cd ~/cc-suite-cn   # 一键安装默认位置；手动安装则 cd 进你 clone 的目录
 opencode
 ```
 
-然后对想审的文件敲 `/audit` 即可（命令见下一节）。开箱之后，建议先跑一遍 `/audit src/` 感受一下流程。
+然后对想审的文件敲 `/audit`（命令见下一节），建议先 `/audit src/` 感受流程。
 
-> 注：本项目用 npm 即可跑通；如你习惯 pnpm，也完全兼容（仓库自带 `pnpm-lock.yaml`）。
+> 注：npm 即可跑通；习惯 pnpm 也兼容（仓库自带 `pnpm-lock.yaml`）。大陆网络 npm 慢可先 `npm config set registry https://registry.npmmirror.com`。
 
 ---
 
