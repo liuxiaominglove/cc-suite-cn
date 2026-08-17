@@ -826,3 +826,28 @@
 
 - `pnpm test:unit`：**648 全绿**（原 645 + 新增 3）+ guard 绿。
 - 改动：`install.sh`（+哨兵块 +--uninstall +provenance）、`install.test.mjs`（+3 用例，更新幂等用例为哨兵块断言）。
+
+---
+
+# 任务 E 探查 + 砍掉（stream-json 工具面 fail-closed）
+
+**动机**：抄作业清单优先级 1 的动作 3——读 stream-json init 事件校验工具面（写工具 fail-closed）。原计划假设"三 CLI 统一做"，WI-0 探查后**推翻假设，任务整体砍掉**。
+
+## 探查结果（三 CLI 实测 `--output-format stream-json`）
+
+| CLI | init 事件 | tools 字段 | 写工具在 tools 里 | 工具面校验可行性 |
+|-----|----------|-----------|----------------|----------------|
+| qwen | `system/init` | 有（60+ 工具） | 无（`--sandbox` 已过滤 Bash/Edit/Write） | ✅ 可做 |
+| codebuddy | `system/init` | 有（40+ 工具） | 有（`--disallowedTools` 是运行时 deny，init 仍列出 Write/Edit/Bash） | ❌ denylist 会永远误杀 |
+| kimi | 无 init（仅 `system.version` 握手 + `assistant` 结果 + `resume_hint`） | 无 | N/A | ❌ 无字段 |
+
+## 砍掉理由
+
+- qwen：`--sandbox` 已在 init 层过滤写工具（实测 tools 无 Bash/Edit/Write），再加 denylist 是"第三层锦上添花"，增量收益边际。
+- codebuddy：`--disallowedTools` 运行时 deny，init tools 列全部工具，denylist 校验会永远误杀。
+- kimi：stream-json 无 tools 字段，无法做。
+
+## 决定
+
+- **任务 E 整体砍掉**（与任务 F 一致）。三 CLI 写保护现状：qwen 靠 `--sandbox`（init 过滤）、codebuddy 靠 `--disallowedTools`（运行时 deny，台账 90 行已实测）、kimi 靠 `--agent-file`（disallowedTools 锁写，台账 102 行已实测），三者均叠加 cwd 隔离 + 运行时 hash 验证（动作 1/2）。
+- 结论置信度：🟢（三 CLI 探查为实测；砍掉为决策，非验证结论）。
