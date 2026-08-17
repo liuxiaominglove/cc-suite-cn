@@ -101,6 +101,7 @@
 | M-1: resolveCli 绝对路径防 PATH 劫持 | `backends.mjs` 加 `resolveCli`（`command -v` 解析绝对路径，`which` 可注入测试），buildCommand 三后端统一走它；2 单测 | 🟢 | 2026-08-14 |
 | M-2: kimi `--agent-file` 只读护栏（disallowedTools 锁写） | 初版 `--plan` 与 `-p` 冲突（`Cannot combine --prompt with --plan`，评审会坏）已废弃；改用 `--agent-file` 加载 `scripts/kimi-readonly-agent.md`（`disallowedTools: [Bash, Write, Edit]`）；实测诱导写文件被拒（kimi 明说"只读审查者禁止创建/修改/删除文件"）、文件未创建；`verify-kimi-sandbox.mjs` 固化。**两层纵深防御**：① `--agent-file` 硬锁工具（写/执行都禁）② 第 45 行 cwd 隔离兜底（即使误写也落 temp 不污染项目） | 🟢 | 2026-08-15 |
 | kimi 渠道错误修正（alibaba-cn → moonshotai-cn） | 阿里百炼**无 Kimi**（用户从阿里官方确认）；B 分身 kimi 原本 `alibaba-cn/kimi-k2.6` 从始至终是坏的（opencode 从未连 Moonshot，分身从未真正跑过）；修正 `kimi.md` model → `moonshotai-cn/kimi-k2.7-code`（models.dev 权威）+ AGENTS.md 三处（架构图 / DASHSCOPE 去掉"通吃 Kimi" / MOONSHOT_API_KEY 从可选改必需）；重启 opencode 后实测 @kimi 分身自报 `moonshotai-cn/kimi-k2.7-code`（渠道+版本号均生效） | 🟢 | 2026-08-15 |
+| TB-1: 被审文件路径 `validateFilePath` 限项目目录内 | `review-runner.mjs` 加 `validateFilePath`（默认限 `baseDir` 内，`allowExternal` 显式放行外部）；`review-runner.test.mjs` 5 用例（含 `../../etc/passwd` 拒绝、`/` 根放行） | 🟢 | 2026-08-17 |
 
 > 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 

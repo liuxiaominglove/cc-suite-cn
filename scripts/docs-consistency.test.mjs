@@ -189,10 +189,38 @@ describe("打分 finding（WI-6）", () => {
     assert.match(skill, /假阴/, "SKILL.md 缺假阴终审");
   });
 
-  it("cli-concurrency.md 含串行纪律 + 真实进程核查", (t) => {
-    const c = readGlobalOrSkip(t, ".config", "opencode", "rules", "cli-concurrency.md");
+  it("cli-concurrency.md 已删除（串行纪律唯一源 = AGENTS.md 施工队调用纪律）", (t) => {
+    const p = globalFile(".config", "opencode", "rules", "cli-concurrency.md");
+    if (p === null) { t.skip("无 HOME"); return; }
+    assert.ok(!existsSync(p), "全局 cli-concurrency.md 应已删除，避免与 AGENTS.md 双份漂移");
+  });
+
+  it("gate-not-inner-loop.md 含门禁≠内循环 + Don't bypass", (t) => {
+    const c = readGlobalOrSkip(t, ".config", "opencode", "rules", "gate-not-inner-loop.md");
     if (c === null) return;
-    assert.match(c, /串行/, "cli-concurrency 缺串行纪律");
-    assert.match(c, /真实进程|running/, "cli-concurrency 缺僵尸进程核查");
+    assert.match(c, /内循环/, "gate-not-inner-loop 缺内循环");
+    assert.match(c, /门禁/, "gate-not-inner-loop 缺门禁");
+    assert.match(c, /Don't bypass|修 gate|别跳过/, "gate-not-inner-loop 缺 Don't bypass");
+  });
+
+  it("AGENTS.md 含「内循环 vs 门禁」表 + 慢内循环金句", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /内循环 vs 门禁/, "AGENTS.md 缺内循环 vs 门禁表");
+    assert.match(c, /慢内循环.*被禁用的门禁/, "AGENTS.md 缺慢内循环金句");
+  });
+
+  it("known-risks.json 是信任边界单一数据源，trust-boundary.md 表格与其一致", () => {
+    const json = JSON.parse(readFileSync(join(ROOT, "scripts", "known-risks.json"), "utf8"));
+    const md = readFileSync(join(ROOT, "docs", "trust-boundary.md"), "utf8");
+    assert.ok(Array.isArray(json.risks), "known-risks.json 缺 risks 数组");
+    const resolved = json.risks.filter((r) => r.status === "resolved");
+    const open = json.risks.filter((r) => r.status === "open");
+    for (const r of resolved) {
+      assert.ok(md.includes(r.location), `trust-boundary.md 漏 resolved 位置 ${r.location}`);
+    }
+    for (const r of open) {
+      const token = r.title.split("（")[0].trim();
+      assert.ok(md.includes(token), `trust-boundary.md 漏 open 风险 ${token}`);
+    }
   });
 });

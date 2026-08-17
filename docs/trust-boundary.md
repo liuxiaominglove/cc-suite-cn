@@ -2,6 +2,7 @@
 
 cc-suite-cn 的「输入信任边界」集中记录：哪些输入可信、哪些不可信，以及对应防护措施的状态。
 
+> **单一数据源 = `scripts/known-risks.json`**。本文件是给人读的视图，下面两张表由它渲染。**改动请改 JSON，别手改本表**——`guard.mjs`（`findKnownRiskDrift`）会校验 JSON 的 schema（id 唯一 / resolved 必有 anchor 且指向 verification.md / open 必有 riskLevel+reassessWhen+whyDeferred），并靠 docs-consistency 测试保证本表与 JSON 不漂移。债只许"补证据改 resolved"消失，不许物理删行。
 > 目的：不让风险项散落在归档 finding 里被遗忘，也不「为了显得安全」过度修低风险项。每条搁置项标「风险等级 + 重新评估条件」。
 
 ## 已落地（✅）

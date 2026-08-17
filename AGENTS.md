@@ -76,6 +76,16 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `/review <path>` | Same as `/audit` |
 | `/trace <keyword|file:line>` | 变更追溯（查 finding 的报 → 裁 → 修完整链路） |
 
+### 内循环 vs 门禁
+
+| 改了什么 | 跑 |
+|---|---|
+| 任一脚本 `.mjs` | `pnpm test:unit`（内循环，秒级离线） |
+| guard / 文档 / 规则 | `pnpm test:unit` + `node scripts/guard.mjs` |
+| 出 release / 推前 | `pnpm test` + `pnpm verify` + `pnpm self-audit`（门禁，只跑一次） |
+
+铁律：**慢内循环 = 被禁用的门禁**。`pnpm verify` / `pnpm self-audit` 起外部 CLI、联网、计费，只配 release 前跑一次，绝不进编辑循环；gate 挡住正当工作就**修 gate**，别跳过（`--no-verify` / 删 hook 都属于跳过，需显式授权 + 记录理由）。
+
 ## Usage
 
 ```
@@ -188,7 +198,8 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/preflight.mjs` | 环境自检（codebuddy CLI 可用性检查） |
 | `scripts/jobs.mjs` | 任务账本（run-audit/后台/取消） |
 | `scripts/audit-baseline.mjs` | 增量审计基线（`--detect`/`--save`，git diff 对比变更文件） |
-| `scripts/guard.mjs` | Drift guard — enforces single source of truth |
+| `scripts/guard.mjs` | Drift guard — enforces single source of truth（含孤儿全局规则检测 + 已知债棘轮） |
+| `scripts/known-risks.json` | 信任边界债务单一数据源（resolved/open 清单，guard 校验 schema：id 唯一/resolved 必有 anchor/open 必有风险等级+重新评估条件） |
 | `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash + confirmVerdict 终审真值） |
 | `scripts/feedback.mjs` | 个人误报回灌（终审标签 → counter-example/正例/根因/漏报 preamble） |
 | `scripts/missed-log.mjs` | qwen 批判员漏报账本（原子写 + 去重） |
@@ -201,5 +212,6 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
 | `opencode.json` | provider 定义（仅 `tencent/hy3` 在仓库自定义；glm/qwen/kimi 走 models.dev 内置 `alibaba-cn`/`moonshotai-cn` provider） |
 | `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
+| `docs/trust-boundary.md` | 信任边界风险台账（人读视图，由 `scripts/known-risks.json` 渲染） |
 | `docs/features.md` | 功能基线清单（每次总结"触达功能"对照的单一数据源） |
 | `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.2/hy3 走 codebuddy 平台账号，无需本地 endpoint） |

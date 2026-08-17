@@ -1,0 +1,60 @@
+{
+  "risks": [
+    {
+      "id": "TR-01",
+      "status": "resolved",
+      "title": "CLI 命令路径",
+      "protection": "resolveCli 绝对路径（防 PATH 劫持）",
+      "location": "scripts/backends.mjs",
+      "anchor": "M-1"
+    },
+    {
+      "id": "TR-02",
+      "status": "resolved",
+      "title": "被审文件路径",
+      "protection": "validateFilePath（限项目目录内，allowExternal 白名单开关）",
+      "location": "scripts/review-runner.mjs",
+      "anchor": "TB-1"
+    },
+    {
+      "id": "TR-03",
+      "status": "resolved",
+      "title": "裁决读取的文件路径",
+      "protection": "resolveCode 白名单（防 LLM 幻觉 file 字段）",
+      "location": "scripts/evaluate-models.mjs",
+      "anchor": "CC-1"
+    },
+    {
+      "id": "TR-04",
+      "status": "resolved",
+      "title": "job id",
+      "protection": "isValidJobId 正则校验（防路径穿越）",
+      "location": "scripts/jobs.mjs",
+      "anchor": "SA-6"
+    },
+    {
+      "id": "TR-05",
+      "status": "resolved",
+      "title": "审计基线 commit",
+      "protection": "gitChangedFiles hex 格式校验（防命令注入）",
+      "location": "scripts/audit-baseline.mjs",
+      "anchor": "SA-15"
+    },
+    {
+      "id": "KR-01",
+      "status": "open",
+      "title": "prompt injection（buildAdjudicatorPrompt 里 finding/code 直接插值）",
+      "riskLevel": "低",
+      "whyDeferred": "攻击者 = 代码作者自己，收益 = 骗过自己的裁决；本地工具无「攻击者→受害者」信任边界",
+      "reassessWhen": "当 cc-suite-cn 开始审「不受信任的第三方代码」时，升级为必修（加 delimiter/转义）"
+    },
+    {
+      "id": "KR-02",
+      "status": "open",
+      "title": "argv 泄漏（kimi/qwen 的 prompt 走 -p argv，本机 ps 可见被审代码）",
+      "riskLevel": "低",
+      "whyDeferred": "被审代码通常是用户自己的代码，非秘密",
+      "reassessWhen": "当被审代码含敏感信息（密钥/私有逻辑）时，升级为必修（改走 stdin）"
+    }
+  ]
+}

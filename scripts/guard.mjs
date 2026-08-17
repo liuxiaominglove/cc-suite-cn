@@ -107,7 +107,89 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     staleRefs: findStaleReferences(refFiles, read),
     deadRefs: findDeadReferences(skillFiles, { read, root }),
     orphanBaselineKeys: findOrphanBaselineKeys({ baselinePath: join(root, ".cc-suite-cn/audit-baseline.json"), read, exists }),
+    orphanGlobalRules: findOrphanGlobalRules({ read }),
+    knownRiskDrift: findKnownRiskDrift({ read, root }),
   };
+}
+
+export function findOrphanGlobalRules({ rulesDir = join(homedir(), ".config/opencode/rules"), configPath = join(homedir(), ".config/opencode/opencode.jsonc"), listDir = readdirSync, read = readFileSync } = {}) {
+  let names;
+  try {
+    names = listDir(rulesDir);
+  } catch {
+    return [];
+  }
+  const ruleFiles = names.filter((n) => typeof n === "string" && n.endsWith(".md"));
+  let config;
+  try {
+    config = read(configPath, "utf-8");
+  } catch {
+    return [];
+  }
+  return ruleFiles.filter((name) => !config.includes(name));
+}
+
+export function findKnownRiskDrift({ knownRisksPath = join(REPO_ROOT, "scripts/known-risks.json"), verificationPath = join(REPO_ROOT, "docs/verification.md"), read = readFileSync } = {}) {
+  let raw;
+  try {
+    raw = read(knownRisksPath, "utf-8");
+  } catch {
+    return [];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.risks)) {
+    return [`${basename(knownRisksPath)} 应为 { risks: [...] } 结构`];
+  }
+  const problems = [];
+  const seen = new Set();
+  let verification = null;
+  const readVerification = () => {
+    if (verification === null) {
+      try {
+        verification = read(verificationPath, "utf-8");
+      } catch {
+        verification = "";
+      }
+    }
+    return verification;
+  };
+  for (const r of parsed.risks) {
+    if (!r || typeof r !== "object") {
+      problems.push("risk 条目应为对象");
+      continue;
+    }
+    const id = typeof r.id === "string" ? r.id.trim() : "";
+    if (!id) {
+      problems.push("risk 条目缺 id");
+      continue;
+    }
+    if (seen.has(id)) {
+      problems.push(`重复 id: ${id}`);
+    }
+    seen.add(id);
+    if (r.status === "resolved") {
+      const anchor = typeof r.anchor === "string" ? r.anchor.trim() : "";
+      if (!anchor) {
+        problems.push(`${id}: resolved 缺 anchor`);
+      } else if (!readVerification().includes(anchor)) {
+        problems.push(`${id}: anchor "${anchor}" 在 verification.md 找不到（死链）`);
+      }
+    } else if (r.status === "open") {
+      for (const field of ["riskLevel", "reassessWhen", "whyDeferred"]) {
+        if (typeof r[field] !== "string" || !r[field].trim()) {
+          problems.push(`${id}: open 缺 ${field}`);
+        }
+      }
+    } else {
+      problems.push(`${id}: status 非法（${r.status}），应为 open|resolved`);
+    }
+  }
+  return problems;
 }
 
 export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-suite-cn/audit-baseline.json"), read = readFileSync, exists = existsSync } = {}) {
@@ -137,13 +219,15 @@ export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-sui
 }
 
 if (isMainModule(import.meta.url)) {
-  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys } = runGuard();
+  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift } = runGuard();
   const problems = [
     ...dupes.map((p) => `duplicate copy: ${p}`),
     ...missing.map((rel) => `missing canonical: ${rel}`),
     ...staleRefs,
     ...deadRefs,
     ...orphanBaselineKeys,
+    ...orphanGlobalRules.map((name) => `orphan global rule (未挂载到 opencode.jsonc instructions): ${name}`),
+    ...knownRiskDrift,
   ];
   if (problems.length) {
     console.error(`Drift guard FAILED:\n  ${problems.join("\n  ")}`);

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
 import { homedir } from "node:os";
 
 function fakeExists(present) {
@@ -208,5 +208,120 @@ describe("findOrphanBaselineKeys", () => {
     const exists = fakeExists(new Set(["/repo/.cc-suite-cn/cc-suite-cn"]));
     const problems = findOrphanBaselineKeys({ baselinePath: "/repo/.cc-suite-cn/audit-baseline.json", read, exists });
     assert.deepEqual(problems, [], "相对键应按基线文件目录解析，而非 process.cwd()");
+  });
+});
+
+describe("findOrphanGlobalRules", () => {
+  it("所有规则都被挂载时返回 []", () => {
+    const listDir = () => ["path-rename-safety.md", "verification-discipline.md", "no-silent-thinking.md"];
+    const read = fakeRead({
+      "opencode.jsonc": JSON.stringify({ instructions: [
+        "~/.config/opencode/rules/path-rename-safety.md",
+        "~/.config/opencode/rules/verification-discipline.md",
+        "~/.config/opencode/rules/no-silent-thinking.md",
+      ] }),
+    });
+    const problems = findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read });
+    assert.deepEqual(problems, []);
+  });
+
+  it("检测未挂载的孤儿规则（文件名未出现在 instructions）", () => {
+    const listDir = () => ["path-rename-safety.md", "swift-safety.md"];
+    const read = fakeRead({ "opencode.jsonc": JSON.stringify({ instructions: ["~/.config/opencode/rules/path-rename-safety.md"] }) });
+    const problems = findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read });
+    assert.deepEqual(problems, ["swift-safety.md"]);
+  });
+
+  it("忽略非 .md 文件", () => {
+    const listDir = () => ["foo.md", "README.txt", ".DS_Store"];
+    const read = fakeRead({ "opencode.jsonc": JSON.stringify({ instructions: ["~/.config/opencode/rules/foo.md"] }) });
+    const problems = findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read });
+    assert.deepEqual(problems, []);
+  });
+
+  it("规则目录缺失时返回 [] 不崩", () => {
+    const listDir = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    const read = fakeRead({});
+    assert.deepEqual(findOrphanGlobalRules({ rulesDir: "/nonexistent", configPath: "opencode.jsonc", listDir, read }), []);
+  });
+
+  it("配置文件缺失时返回 [] 不崩", () => {
+    const listDir = () => ["foo.md"];
+    const read = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    assert.deepEqual(findOrphanGlobalRules({ rulesDir: "/rules", configPath: "opencode.jsonc", listDir, read }), []);
+  });
+});
+
+describe("findKnownRiskDrift", () => {
+  const cleanRisks = {
+    risks: [
+      { id: "TR-01", status: "resolved", title: "CLI 命令路径", anchor: "M-1" },
+      { id: "KR-01", status: "open", title: "prompt injection", riskLevel: "低", reassessWhen: "审不受信任代码时升级", whyDeferred: "本地工具无信任边界" },
+    ],
+  };
+  const verification = "M-1: resolveCli 绝对路径";
+
+  it("clean state returns []", () => {
+    const read = fakeRead({ "known-risks.json": JSON.stringify(cleanRisks), "verification.md": verification });
+    assert.deepEqual(findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read }), []);
+  });
+
+  it("检测重复 id", () => {
+    const data = { risks: [
+      { id: "TR-01", status: "resolved", title: "a", anchor: "M-1" },
+      { id: "TR-01", status: "resolved", title: "b", anchor: "M-1" },
+    ] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.equal(problems.length, 1);
+    assert.ok(problems[0].includes("重复") || problems[0].includes("duplicate") || problems[0].includes("TR-01"));
+  });
+
+  it("检测非法 status", () => {
+    const data = { risks: [{ id: "TR-01", status: "pending", title: "a" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("status") || p.includes("TR-01")));
+  });
+
+  it("检测 resolved 缺 anchor", () => {
+    const data = { risks: [{ id: "TR-01", status: "resolved", title: "a" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("anchor") || p.includes("TR-01")));
+  });
+
+  it("检测 anchor 死链（不在 verification.md）", () => {
+    const data = { risks: [{ id: "TR-01", status: "resolved", title: "a", anchor: "ZZ-99" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("ZZ-99")));
+  });
+
+  it("检测 open 缺 reassessWhen", () => {
+    const data = { risks: [{ id: "KR-01", status: "open", title: "a", riskLevel: "低", whyDeferred: "x" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("reassessWhen") || p.includes("KR-01")));
+  });
+
+  it("检测 open 缺 whyDeferred", () => {
+    const data = { risks: [{ id: "KR-01", status: "open", title: "a", riskLevel: "低", reassessWhen: "x" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("whyDeferred") || p.includes("KR-01")));
+  });
+
+  it("文件缺失/损坏返回 [] 不抛", () => {
+    const throwing = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    assert.deepEqual(findKnownRiskDrift({ knownRisksPath: "/nonexistent.json", verificationPath: "/nonexistent.md", read: throwing }), []);
+    const read = fakeRead({ "known-risks.json": "{ bad json", "verification.md": "" });
+    assert.deepEqual(findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read }), []);
+  });
+
+  it("非数组 risks 报错", () => {
+    const read = fakeRead({ "known-risks.json": JSON.stringify({ risks: "nope" }), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.length >= 1);
   });
 });
