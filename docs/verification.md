@@ -783,3 +783,27 @@
 - 🟢 **已复审**：`/verify` 只审 diff（glm+kimi）跑过。glm 4 条 + kimi 2 条，**无 high/medium 真 bug**，全部 low 设计局限/假阳，结论如下：
   - glm 4 条：① `hashesDiffer` 只迭代 before 不检测新文件 → 设计取舍（新文件风险由 cwd 隔离兜底，已加注释固化）② dir+file 同时传 sourcePaths 覆盖 → 假阳（review() 已校验 dir/file 互斥抛错）③ afterHashes 只在成功路径算 → 设计取舍（失败路径本就不信任结果，符合 fail-closed）④ `String(content)` 隐式转换 → 不采纳（String() 刻意统一 Buffer/String 的 hash 语义，去掉反而引入不一致）。
   - kimi 2 条：① `resolveReviewCwd` 死参数 → 半对（函数已无参，调用方传 backend 被忽略），已加 JSDoc 固化意图 ② cwd 双用途误读 → 假阳（把 review 的 `cwd` 参数=路径解析基址 与 `resolveReviewCwd()`=spawn 子进程 cwd 混为一谈，前者仍 process.cwd() 未变）。
+
+---
+
+# 抄作业第二批：防委派边界 + frontmatter 校验 + preflight 补全 + 发布纪律
+
+**动机**：按抄作业清单优先级 2/3/5 落地三件「小改防漂移」任务。任务 F（git 增量 hash）已砍。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| A: 防循环委派边界 | 新建 `scripts/delegation-boundary.mjs`（`BOUNDARY_INVARIANTS` 两条不变量单源）；`backends.mjs` 的 `READ_ONLY_DECLARATION` import 常量拼装（JS 侧天然单源）；4 个 `.opencode/agents/*.md` 正文逐字含不变量（prose 副本）；`delegation-boundary.test.mjs` 2 用例锁漂移 | 🟢 | 2026-08-17 |
+| B: command frontmatter 校验 | 新建 `scripts/commands.test.mjs`：16 命令 description 非空 / `$ARGUMENTS` 命令必有 argument-hint（evaluate/jobs/verify 无参豁免）/ 命令名与 AGENTS.md 对齐 / description 无模糊量词；4 用例（当前 16 命令已全合规，测试作防漂移守护） | 🟢 | 2026-08-17 |
+| C: preflight 泛化 + 发布纪律 | `preflight.mjs` 抽 `checkVersion(command)`，kimi/qwen 复用 codebuddy 的 `--version` 实测（原只 codebuddy 实测）；CLI 入口三 CLI 均版本实测；新建 `scripts/release-check.mjs`（`checkRelease` 纯函数 + `readCurrentTag`，校验 tag==package.json version）+ `release` script；preflight +4 用例、release-check 3 用例 | 🟢 | 2026-08-17 |
+
+## 实测
+
+- `npm run preflight`：三 CLI 版本实测全过（codebuddy 2.134.0 / kimi 0.35.0 / qwen 0.21.10）✅
+- `node scripts/release-check.mjs`：HEAD 无 tag → 正确报「release 未完成」exit 1（当前未打 tag，符合预期）✅
+
+## 结果
+
+- `pnpm test:unit`：**645 全绿**（原 632 + 新增 13）+ guard 绿。
+- 新增文件：`delegation-boundary.mjs` + `.test.mjs`、`commands.test.mjs`、`release-check.mjs` + `.test.mjs`；改动 `backends.mjs`、`preflight.mjs`、4 个 agent、`package.json`。

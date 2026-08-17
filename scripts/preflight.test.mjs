@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { checkCodebuddy, setSpawn, checkCli, checkEnvKeys, preflightAll, REQUIRED_CLIS, REQUIRED_KEYS } from "./preflight.mjs";
+import { checkCodebuddy, checkKimi, checkQwen, setSpawn, checkCli, checkEnvKeys, preflightAll, REQUIRED_CLIS, REQUIRED_KEYS } from "./preflight.mjs";
 
 function createMockProc() {
   const proc = new EventEmitter();
@@ -53,6 +53,56 @@ describe("checkCodebuddy", () => {
     const result = await checkCodebuddy({ timeoutMs: 20 });
     assert.equal(result.ok, false);
     assert.equal(result.reason, "timeout");
+  });
+});
+
+describe("checkVersion 泛化（kimi/qwen 复用）", () => {
+  it("checkKimi 跑 kimi --version 成功返回版本", async () => {
+    let captured = null;
+    const proc = createMockProc();
+    setSpawn((cmd, args) => { captured = { cmd, args }; return proc; });
+    const p = checkKimi();
+    proc.stdout.emit("data", Buffer.from("1.2.3\n"));
+    proc.emit("close", 0);
+    const r = await p;
+    assert.equal(captured.cmd, "kimi");
+    assert.deepEqual(captured.args, ["--version"]);
+    assert.equal(r.ok, true);
+    assert.equal(r.version, "1.2.3");
+  });
+
+  it("checkKimi ENOENT 返回 not_found + 安装提示", async () => {
+    setSpawn(() => { const e = new Error("kimi ENOENT"); e.code = "ENOENT"; throw e; });
+    const r = await checkKimi();
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, "not_found");
+    assert.ok(r.hint.includes("kimi-code"), "hint 应含 kimi 包名");
+  });
+
+  it("checkQwen 跑 qwen --version 成功返回版本", async () => {
+    let captured = null;
+    const proc = createMockProc();
+    setSpawn((cmd, args) => { captured = { cmd, args }; return proc; });
+    const p = checkQwen();
+    proc.stdout.emit("data", Buffer.from("0.21.0\n"));
+    proc.emit("close", 0);
+    const r = await p;
+    assert.equal(captured.cmd, "qwen");
+    assert.equal(r.ok, true);
+    assert.equal(r.version, "0.21.0");
+  });
+
+  it("checkCodebuddy 仍是薄包装（--version 命令正确）", async () => {
+    let captured = null;
+    const proc = createMockProc();
+    setSpawn((cmd, args) => { captured = { cmd, args }; return proc; });
+    const p = checkCodebuddy();
+    proc.stdout.emit("data", Buffer.from("2.0.0\n"));
+    proc.emit("close", 0);
+    const r = await p;
+    assert.equal(captured.cmd, "codebuddy");
+    assert.deepEqual(captured.args, ["--version"]);
+    assert.equal(r.version, "2.0.0");
   });
 });
 

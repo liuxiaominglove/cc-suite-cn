@@ -39,15 +39,16 @@ export function preflightAll({ env = process.env, which = null } = {}) {
   };
 }
 
-export function checkCodebuddy({ timeoutMs = 10000 } = {}) {
+export function checkVersion(command, { timeoutMs = 10000, installHint = null } = {}) {
   const spawn = _spawn ?? nodeSpawn;
 
+  const hint = installHint ?? `npm install -g ${command}`;
   let proc;
   try {
-    proc = spawn("codebuddy", ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
+    proc = spawn(command, ["--version"], { stdio: ["ignore", "pipe", "pipe"] });
   } catch (err) {
     if (err.code === "ENOENT") {
-      return Promise.resolve({ ok: false, reason: "not_found", hint: "npm install -g @tencent-ai/codebuddy-code" });
+      return Promise.resolve({ ok: false, reason: "not_found", hint });
     }
     throw err;
   }
@@ -68,7 +69,7 @@ export function checkCodebuddy({ timeoutMs = 10000 } = {}) {
       resolve({
         ok: false,
         reason: err.code === "ENOENT" ? "not_found" : err.message,
-        hint: err.code === "ENOENT" ? "npm install -g @tencent-ai/codebuddy-code" : undefined,
+        hint: err.code === "ENOENT" ? hint : undefined,
       });
     });
 
@@ -83,19 +84,35 @@ export function checkCodebuddy({ timeoutMs = 10000 } = {}) {
   });
 }
 
+export function checkCodebuddy(opts = {}) {
+  return checkVersion("codebuddy", { installHint: "npm install -g @tencent-ai/codebuddy-code", ...opts });
+}
+
+export function checkKimi(opts = {}) {
+  return checkVersion("kimi", { installHint: "npm install -g @moonshot-ai/kimi-code", ...opts });
+}
+
+export function checkQwen(opts = {}) {
+  return checkVersion("qwen", { installHint: "npm install -g @qwen-code/qwen-code", ...opts });
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const report = preflightAll();
-  const cb = await checkCodebuddy();
+  const versions = await Promise.all([checkCodebuddy(), checkKimi(), checkQwen()]);
 
   console.log("=== CLI 可用性 ===");
   for (const c of report.clis) {
     console.log(`${c.path ? "✅" : "❌"} ${c.name}${c.path ? ` → ${c.path}` : "（未安装）"}`);
   }
+  console.log("\n=== CLI 版本实测（--version）===");
+  const versionLines = [["codebuddy", versions[0]], ["kimi", versions[1]], ["qwen", versions[2]]];
+  for (const [name, v] of versionLines) {
+    console.log(`${v.ok ? "✅" : "❌"} ${name}: ${v.ok ? v.version : v.reason}`);
+  }
   console.log("\n=== API Key ===");
   for (const k of report.keys) {
     console.log(`${k.set ? "✅" : "❌"} ${k.name}${k.set ? "" : "（未设置，加入 ~/.zshrc）"}`);
   }
-  console.log(`\ncodebuddy 版本：${cb.ok ? cb.version : cb.reason}`);
 
   process.exit(report.ok ? 0 : 1);
 }
