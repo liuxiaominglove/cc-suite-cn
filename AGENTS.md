@@ -67,7 +67,7 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
 | `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
-| `/fix <path>` | 修复闭环六步：找 → 批判 → 裁 → 修 bug(TDD) → 验证 → 复审(门控) |
+| `/fix <path>` | 修复闭环五步：找 → 批判 → 裁 → 修 bug(TDD) → 验证（含 /verify 只审 diff） |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
@@ -152,10 +152,10 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 
 凡**修了代码**的任务，总结里必须显式声明复审状态，两种：
 
-- 🟢 **已复审**：复审（重跑 1-5 或 /verify 只审 diff）跑过、结论如何。
+- 🟢 **已复审**：/verify 只审 diff（唯一复审）跑过、结论如何。
 - ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**（如"真机验证需你授权/输密码/在场，你回来后跑 X"）。
 
-**只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/fix` 的 Step 5 后本就该硬暂停 + 问用户是否复审。）
+**只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/verify` 只审 diff 是唯一复审，没做成必须标 ⏸️。）
 
 ### 铁律（防惯例退化成空话）
 

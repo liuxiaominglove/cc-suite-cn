@@ -34,7 +34,7 @@ Load this skill when the user:
 
 ## How I Work
 
-**四角色六步**（判真假走"裁决初筛 + 终审"，谁都不批自己）：
+**四角色五步**（判真假走"裁决初筛 + 终审"，谁都不批自己）：
 
 ```
 1. 找 bug（glm + kimi）      → 产出 finding 池
@@ -42,16 +42,15 @@ Load this skill when the user:
 3. 裁决（hy3）              → 初筛：逐条判真假，verdict 落库 + codeHash【修 bug 前置硬门槛】
 4. 终审 + 修 bug（opencode） → 对 verdict=true 的做代码级核实 + TDD 修
 5. 验证                     → 编译测试 + /verify 只审 diff + 真机/UI
-6. 复审（门控）             → 重跑 1-5，独立确认无回归
 ```
 
-**命令 → 步骤映射**（不是所有命令都跑全六步）：
+**命令 → 步骤映射**（不是所有命令都跑全五步）：
 - `/audit` / `/review`：步骤 1（找 bug）
 - `/audit-full`：步骤 1 + 2 + 3（找 bug + 批判 + 裁决，不修）
 - `/review-kimi` / `/review-qwen`：单壳评审（只一个模型，非双施工队）
 - `/evaluate --arbitrate`：步骤 3（裁决）
-- `/fix`：步骤 1-5 + 门控复审（完整六步闭环）
-- `/verify`：步骤 5 里的「只审 diff」（glm+kimi 审改动行）
+- `/fix`：步骤 1-5（完整五步闭环）
+- `/verify`：步骤 5 里的「只审 diff」（唯一复审，glm+kimi 审改动行）
 - `/trace`：只查「报 → 裁 → 修」链路，不评审
 
 1. Identify target file(s) from the request.
@@ -63,15 +62,14 @@ Load this skill when the user:
 3. Critic (qwen) second opinion: `/review-qwen` — judge each finding 同意/反对 + 补漏（read-only + sandbox）.
 4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-cn/` 裁决账本).
 5. Fix real bugs: `/fix` — opencode fixes with TDD (RED → GREEN → REFACTOR), never commits automatically.
-6. Verify: `/verify` — compile+test + review `git diff HEAD`（只审 diff）+ 真机/UI 点验.
-7. 复审（门控）: `/fix` Step 6 — 拿修完的代码重跑 1-5，独立确认无回归；Step 5 后必须硬暂停 + 问用户。
+6. Verify: `/verify` — compile+test + review `git diff HEAD`（只审 diff，唯一复审）+ 真机/UI 点验.
 
 ## Critical Rules
 
 - **谁都不批自己**: 找 bug / 批判 / 裁决 / 修 bug 是四个独立角色，修 bug 只由 opencode（最了解项目 + TDD）亲自做。
 - **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。**终审既补假阴、也滤假阳**：hy3 判 false 的真 bug（假阴）和 hy3 判 true 实为 by-design 或触发条件错的 finding（假阳）都要靠 opencode 代码级核实兜住，不默认 hy3 结论或 finding 措辞准确。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
 - 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
-- **复审门控**: 修 bug 后必须独立复审（重跑 1-5）；Step 5 后硬暂停 + 问用户；复审未做（或用户说跳过）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。
+- **复审门控**: 修 bug 后必须跑 `/verify` 只审 diff（**唯一复审**，glm+kimi 审改动行）；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。
 - 找 bug 的 finding 用英文（`REVIEW_PROMPT` 要求），跨语言共识才能对齐。
 - If one worker fails, still show the others' results + a failure note.
 - If all models return empty, state that clearly. Do not fabricate issues.

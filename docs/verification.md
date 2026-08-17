@@ -703,6 +703,7 @@
 | FX-1: `/fix` 升级为六步闭环 | `fix.md` 重写：找 bug → **批判(qwen)** → 裁决 → 终审修 → 验证 → **复审(门控)**；Step 5 后硬暂停 + 问用户；复审 = 拿修完代码重跑 1-5（无第 6 步） | 🟢 | 2026-08-17 |
 | FX-2: 复审门控铁律内化 | SKILL.md Critical Rules + AGENTS.md 汇报惯例加「必带复审状态」；「修完≠走完」、复审未做必须显式标「⏸️ 尚未复审」 | 🟢 | 2026-08-17 |
 | FX-3: 同步 4 文件 + 自检 | SKILL.md 命令映射/AGENTS.md Commands 表/features.md 功能基线同步；`pnpm test:unit` 612 全绿 + guard 过（docs-consistency 关键词保留） | 🟢 | 2026-08-17 |
+| FX-4: 删除重量复审，只留只审 diff | `/fix` 六步→五步，删 Step 6「重跑 1-5 全流程复审」+「硬暂停问复审」；`/verify` 只审 diff 升级为**唯一复审**（必做）；同步 fix.md/SKILL.md/AGENTS.md/features.md（删功能 26「门控复审」） | 🟢 | 2026-08-17 |
 
 ## 二、macELTA 复审（只审 diff，glm+kimi）
 
