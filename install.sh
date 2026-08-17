@@ -7,9 +7,14 @@ DEFAULT_DIR="$HOME/cc-suite-cn"
 DRY_RUN=0
 SKIP_KEYS=0
 NO_CLONE=0
+UNINSTALL=0
 WRITE_KEY_ARG=""
 REPO_DIR=""
 RC_FILE=""
+
+MANAGED_BEGIN="# cc-suite-cn:managed:begin"
+MANAGED_END="# cc-suite-cn:managed:end"
+PROVENANCE_FILE="${CC_PROVENANCE_FILE:-$HOME/.cc-suite-cn-provenance.txt}"
 
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '\033[32m✓\033[0m %s\n' "$*"; }
@@ -26,6 +31,7 @@ usage() {
   say "  --skip-keys   跳过 API key 交互询问"
   say "  --no-clone    不 clone 仓库（使用 $DEFAULT_DIR 或当前目录）"
   say "  --write-key NAME=VALUE  内部/测试用：直接写入单个 key（幂等）"
+  say "  --uninstall  只删除 cc-suite-cn 写入的 key（哨兵块内），手动条目不动"
   say "  -h, --help    显示本帮助"
   say ""
   say "环境变量:"
@@ -38,6 +44,7 @@ parse_args() {
       --dry-run) DRY_RUN=1 ;;
       --skip-keys) SKIP_KEYS=1 ;;
       --no-clone) NO_CLONE=1 ;;
+      --uninstall) UNINSTALL=1 ;;
       -h|--help) usage; exit 0 ;;
       --write-key)
         if [ "$#" -lt 2 ]; then
@@ -85,9 +92,42 @@ write_key() {
     return 0
   fi
   touch "$RC_FILE"
-  printf "export %s='%s'\n" "$name" "$val" >> "$RC_FILE"
+  {
+    echo "$MANAGED_BEGIN"
+    echo "export ${name}='${val}'"
+    echo "$MANAGED_END"
+  } >> "$RC_FILE"
   export "$name"="$val"
+  record_managed_key "$name"
   ok "已写入 $name → $RC_FILE"
+}
+
+record_managed_key() {
+  local name="$1"
+  if [ -f "$PROVENANCE_FILE" ] && grep -qx "$name" "$PROVENANCE_FILE" 2>/dev/null; then
+    return 0
+  fi
+  echo "$name" >> "$PROVENANCE_FILE"
+}
+
+uninstall_keys() {
+  if [ ! -f "$RC_FILE" ]; then
+    warn "未找到 ${RC_FILE}，无需卸载"
+    rm -f "$PROVENANCE_FILE"
+    return 0
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "  [dry-run] 将删除 ${RC_FILE} 中 cc-suite-cn 管理的 key"
+    return 0
+  fi
+  local tmp="${RC_FILE}.cc-suite-cn.tmp"
+  sed "/${MANAGED_BEGIN}/,/${MANAGED_END}/d" "$RC_FILE" > "$tmp"
+  mv "$tmp" "$RC_FILE"
+  if [ -f "$PROVENANCE_FILE" ]; then
+    say "卸载的 key：$(tr '\n' ' ' < "$PROVENANCE_FILE")"
+    rm -f "$PROVENANCE_FILE"
+  fi
+  ok "已卸载：只删除哨兵块内的 key，手动条目不动"
 }
 
 ensure_key_interactive() {
@@ -269,6 +309,12 @@ main() {
     local name="${WRITE_KEY_ARG%%=*}" val="${WRITE_KEY_ARG#*=}"
     write_key "$name" "$val"
     exit $?
+  fi
+
+  if [ "$UNINSTALL" -eq 1 ]; then
+    detect_rc
+    uninstall_keys
+    exit 0
   fi
 
   detect_rc

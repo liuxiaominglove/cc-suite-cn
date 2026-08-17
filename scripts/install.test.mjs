@@ -42,7 +42,7 @@ describe("install.sh", () => {
     }
   });
 
-  it("--write-key 幂等：重复写不产生重复行", () => {
+  it("--write-key 哨兵块包裹 + 幂等：重复写不产生重复块", () => {
     const dir = mkdtempSync(join(tmpdir(), "ccsuite-install-"));
     const rc = join(dir, "rc");
     try {
@@ -52,9 +52,11 @@ describe("install.sh", () => {
       assert.equal(r1.status, 0, r1.stderr);
       const r2 = bash(["--write-key", "DASHSCOPE_API_KEY=abc123"], env);
       assert.equal(r2.status, 0, r2.stderr);
-      const lines = readFileSync(rc, "utf8").trim().split("\n").filter(Boolean);
-      assert.equal(lines.length, 1, "重复写应保持 1 行");
-      assert.match(lines[0], /^export DASHSCOPE_API_KEY='abc123'$/);
+      const content = readFileSync(rc, "utf8");
+      const exports = content.split("\n").filter((l) => l.startsWith("export DASHSCOPE_API_KEY="));
+      assert.equal(exports.length, 1, "重复写应保持 1 个 export");
+      assert.match(content, /# cc-suite-cn:managed:begin/);
+      assert.match(content, /# cc-suite-cn:managed:end/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -135,6 +137,59 @@ describe("install.sh", () => {
       const r = bash(["--dry-run"], envWithoutKeys({ CC_RC_FILE: rc, HOME: dir }));
       assert.equal(r.status, 0, r.stderr);
       assert.ok(!existsSync(pwned), "rc 里的 $(touch) 命令替换不应被执行");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("--uninstall 只删哨兵块，保留手动条目（负向）", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccsuite-install-"));
+    const rc = join(dir, "rc");
+    try {
+      writeFileSync(rc, "export MY_OWN_KEY='mine'\n");
+      const env = { CC_RC_FILE: rc, HOME: dir };
+      const r1 = bash(["--write-key", "DASHSCOPE_API_KEY=abc123"], env);
+      assert.equal(r1.status, 0, r1.stderr);
+      const r2 = bash(["--uninstall"], env);
+      assert.equal(r2.status, 0, r2.stderr);
+      const content = readFileSync(rc, "utf8");
+      assert.ok(content.includes("export MY_OWN_KEY='mine'"), "手动条目应保留");
+      assert.ok(!content.includes("DASHSCOPE_API_KEY"), "managed key 应被删除");
+      assert.ok(!content.includes("managed:begin"), "哨兵块 marker 应删除");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("写 key 后 provenance sidecar 记录 managed key", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccsuite-install-"));
+    const rc = join(dir, "rc");
+    const prov = join(dir, "prov");
+    try {
+      writeFileSync(rc, "");
+      const env = { CC_RC_FILE: rc, HOME: dir, CC_PROVENANCE_FILE: prov };
+      const r = bash(["--write-key", "DASHSCOPE_API_KEY=abc123"], env);
+      assert.equal(r.status, 0, r.stderr);
+      assert.ok(existsSync(prov), "应创建 provenance sidecar");
+      assert.match(readFileSync(prov, "utf8"), /DASHSCOPE_API_KEY/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("--uninstall 删除 provenance sidecar", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ccsuite-install-"));
+    const rc = join(dir, "rc");
+    const prov = join(dir, "prov");
+    try {
+      writeFileSync(rc, "");
+      const env = { CC_RC_FILE: rc, HOME: dir, CC_PROVENANCE_FILE: prov };
+      const r1 = bash(["--write-key", "DASHSCOPE_API_KEY=abc123"], env);
+      assert.equal(r1.status, 0, r1.stderr);
+      assert.ok(existsSync(prov), "写 key 后应有 provenance");
+      const r2 = bash(["--uninstall"], env);
+      assert.equal(r2.status, 0, r2.stderr);
+      assert.ok(!existsSync(prov), "--uninstall 后 provenance 应删除");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

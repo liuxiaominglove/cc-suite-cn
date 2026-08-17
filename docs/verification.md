@@ -807,3 +807,22 @@
 
 - `pnpm test:unit`：**645 全绿**（原 632 + 新增 13）+ guard 绿。
 - 新增文件：`delegation-boundary.mjs` + `.test.mjs`、`commands.test.mjs`、`release-check.mjs` + `.test.mjs`；改动 `backends.mjs`、`preflight.mjs`、4 个 agent、`package.json`。
+
+---
+
+# 抄作业第二批续：哨兵块 + provenance（任务 D）
+
+**动机**：抄作业清单优先级 4——`install.sh` 写 rc 从「裸 append」升级为「哨兵块包裹 + provenance sidecar」，可精确卸载、不误伤手动条目。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| D-1: write_key 哨兵块包裹 | 写 key 用 `# cc-suite-cn:managed:begin/end` marker 包裹（3 行/块），替代裸 append；幂等逻辑不变（`grep ^export name=` 命中即跳过） | 🟢 | 2026-08-17 |
+| D-2: `--uninstall` 只删哨兵块 | 新增 `--uninstall` 参数 + `uninstall_keys()`（`sed "/begin/,/end/d"` 删 marker 内内容，跨平台用临时文件+mv 而非 sed -i）；`install.test.mjs` +3 用例（uninstall 只删哨兵块保留手动条目（负向）/ provenance 记录 / uninstall 删 sidecar） | 🟢 | 2026-08-17 |
+| D-3: provenance sidecar | 新增 `record_managed_key()`：写 key 后把 key 名 append 到 `~/.cc-suite-cn-provenance.txt`（`CC_PROVENANCE_FILE` 可覆盖，去重）；uninstall 读它报告删除的 key 并删除 sidecar | 🟢 | 2026-08-17 |
+
+## 结果
+
+- `pnpm test:unit`：**648 全绿**（原 645 + 新增 3）+ guard 绿。
+- 改动：`install.sh`（+哨兵块 +--uninstall +provenance）、`install.test.mjs`（+3 用例，更新幂等用例为哨兵块断言）。
