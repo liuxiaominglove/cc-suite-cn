@@ -36,7 +36,7 @@ export function buildCommand(backend, { model, prompt }, { which = null } = {}) 
     case "qwen":
       return {
         command: resolveCli("qwen", { which }),
-        args: ["--sandbox", "-p", prompt],
+        args: ["--safe-mode", "--sandbox", "-p", prompt],
         stdin: null,
       };
     default:

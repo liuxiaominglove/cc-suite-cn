@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { resolve, sep, join, relative, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -339,6 +340,13 @@ export class AuthError extends Error {
   }
 }
 
+export class SourceTamperedError extends Error {
+  constructor(message = "Reviewed source files were modified during review") {
+    super(message);
+    this.name = "SourceTamperedError";
+  }
+}
+
 export async function collectSourceFiles(dirPath, exts = DEFAULT_EXTS) {
   const { readdir } = await import("node:fs/promises");
 
@@ -428,8 +436,41 @@ export function frameCode(code) {
   return `${fence}\n${code}\n${fence}`;
 }
 
-export function resolveReviewCwd(backend) {
-  return backend === "kimi" || backend === "qwen" ? tmpdir() : undefined;
+export function hashFileContent(content) {
+  return createHash("sha256").update(String(content ?? "")).digest("hex");
+}
+
+export async function snapshotSourceHashes(paths, { readFile = null } = {}) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p));
+  const hashes = {};
+  for (const p of paths ?? []) {
+    if (!p || typeof p !== "string") continue;
+    try {
+      const content = await read(p);
+      hashes[p] = hashFileContent(content);
+    } catch {
+      // 读不到的文件跳过（文件可能不存在，如 code 内联但 file 只是标签）
+    }
+  }
+  return hashes;
+}
+
+// 只检测「被审文件被修改」：只遍历 before 的 key。
+// 评审期间新建的文件不在被审集合内，其风险已由 cwd 隔离（tmpdir）兜底，故不在此检测。
+export function hashesDiffer(before, after) {
+  for (const [p, h] of Object.entries(before ?? {})) {
+    if ((after ?? {})[p] !== h) return true;
+  }
+  return false;
+}
+
+/**
+ * 所有 backend 的子进程 cwd 统一隔离到 tmpdir。
+ * 调用方仍传 backend（`resolveReviewCwd(backend)`），此处故意忽略——
+ * code 与项目规则已内联进 prompt，评审员无需项目 cwd；未知 backend 也 fail-safe 到 tmpdir。
+ */
+export function resolveReviewCwd() {
+  return tmpdir();
 }
 
 export function isAuthError(stderr) {
@@ -480,6 +521,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   let ruleCwd = cwd;
   let importContext = "";
   let stackContext = "";
+  let sourcePaths = [];
 
   if (!model || typeof model !== "string") {
     throw new RunnerError("model is required", { exitCode: -1, stderr: "model parameter is required" });
@@ -519,6 +561,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     stackContext = await collectStackContext(resolvedDir);
     const resolvedExts = exts ?? DEFAULT_EXTS;
     const srcFiles = await collectSourceFiles(resolvedDir, resolvedExts);
+    sourcePaths = srcFiles;
 
     if (srcFiles.length === 0) {
       return {
@@ -563,6 +606,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   if (file) {
     const resolved = validateFilePath(file, cwd, { allowExternal });
     ruleCwd = dirname(resolved);
+    sourcePaths = [resolved];
     if (!isNLArtifact(fileName ?? file)) {
       importContext = await collectImportContext(resolved);
       stackContext = await collectStackContext(ruleCwd);
@@ -584,6 +628,8 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   const stackSection = stackContext ? `\n\n[技术栈] ${stackContext}` : "";
   const fullPrompt = `${readOnlyPrefix}${feedbackSection}${prompt}${buildRulesSection(rules)}${buildLessonsSection(lessons)}${stackSection}${importSection}${fileLabel}\n\nCODE:\n${frameCode(code)}`;
 
+  const beforeHashes = await snapshotSourceHashes(sourcePaths);
+
   const { command, args, stdin } = buildCommand(backend, { model, prompt: fullPrompt });
 
   const { stdout } = await withRetry(async () => {
@@ -604,6 +650,11 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
 
     return { stdout };
   }, { maxRetries: retries });
+
+  const afterHashes = await snapshotSourceHashes(sourcePaths);
+  if (hashesDiffer(beforeHashes, afterHashes)) {
+    throw new SourceTamperedError();
+  }
 
   if (!stdout.trim()) {
     return {

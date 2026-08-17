@@ -753,3 +753,33 @@
 - **模型 diff 审查（复审）**：🟢 已复审——glm+kimi 审 diff，4 条 low polish 已修，2 条假阳未采纳。
 - **单测/真机**：🟢 `python3 tests/test_report.py` 21/21 + `bash tests/test_shell.sh` 5/5 + report.py 真机复跑正常。
 - **same-day 覆盖**：🟢 已修复（选 A 加时间戳，已 commit `c1d675d`）。
+
+---
+
+# 抄作业落地：defense-in-depth 只读加固（动作 0/1/2）
+
+**动机**：借鉴 xiaolai/cc-suite 的 defense-in-depth——把施工队"只读"从「一次性人工实测（`pnpm verify`）」升级为「每次评审自动 fail-closed」。对照差距：① codebuddy cwd 未隔离（唯一 cwd 落在被审项目的 backend）② 哈希验证只在 verify 脚本一次性做，没进 `review()` ③ qwen 没用 `--safe-mode`（可禁 MCP 防评审员调外援）。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| 动作 2: 运行时源文件哈希验证（每次评审自动 fail-closed） | `review-runner.mjs` 新增 `hashFileContent`(sha256)/`snapshotSourceHashes`/`hashesDiffer` + `SourceTamperedError`；`review()` 评审前后对「被审文件集合」（file 模式 1 个、dir 模式全部 source）hash 对比，变了抛 `SourceTamperedError`；读不到文件容错跳过（向后兼容）；9 单测（含 file/dir 正负向 + 容错） | 🟢 | 2026-08-17 |
+| 动作 1: codebuddy cwd 隔离到 tmpdir | `resolveReviewCwd` 从「kimi/qwen 才 tmpdir、codebuddy undefined（继承项目目录）」改为「所有 backend 统一 tmpdir」，堵住「codebuddy 子进程 cwd 落在被审项目」最大暴露面；code 已内联、AGENTS.md 已内联进 prompt，codebuddy 无需项目 cwd；2 单测（resolveReviewCwd + review 传 tmpdir cwd）+ 真实评审实测正常 | 🟢 | 2026-08-17 |
+| 动作 0: qwen 加 `--safe-mode` | `backends.mjs` qwen 命令加 `--safe-mode`（禁 hooks/extensions/skills/MCP）；前置实测 `qwen --safe-mode --sandbox -p` 组合不冲突（输出 OK + seatbelt sandbox 生效标志）；真实评审成功 | 🟢 | 2026-08-17 |
+
+## 真实评审实测（hash 校验负向 + 不误报）
+
+- **qwen（--safe-mode）审 `demos/quick-demo.js`**：成功，找到 2 真 bug（`pass = "admin123"` 赋值 vs 比较、SQL 注入），hash 校验不误报 ✅
+- **kimi 审 `demos/quick-demo.js`**：成功，同样 2 真 bug，hash 校验不误报 ✅
+- **codebuddy 审**：✅ 额度恢复后实测成功，找到同样 2 真 bug，hash 校验不误报（cwd 隔离后不退化）
+
+## 结果
+
+- `pnpm test:unit`：632 全绿（新增 defense-in-depth 10 测试）+ guard 绿。
+
+## 复审状态
+
+- 🟢 **已复审**：`/verify` 只审 diff（glm+kimi）跑过。glm 4 条 + kimi 2 条，**无 high/medium 真 bug**，全部 low 设计局限/假阳，结论如下：
+  - glm 4 条：① `hashesDiffer` 只迭代 before 不检测新文件 → 设计取舍（新文件风险由 cwd 隔离兜底，已加注释固化）② dir+file 同时传 sourcePaths 覆盖 → 假阳（review() 已校验 dir/file 互斥抛错）③ afterHashes 只在成功路径算 → 设计取舍（失败路径本就不信任结果，符合 fail-closed）④ `String(content)` 隐式转换 → 不采纳（String() 刻意统一 Buffer/String 的 hash 语义，去掉反而引入不一致）。
+  - kimi 2 条：① `resolveReviewCwd` 死参数 → 半对（函数已无参，调用方传 backend 被忽略），已加 JSDoc 固化意图 ② cwd 双用途误读 → 假阳（把 review 的 `cwd` 参数=路径解析基址 与 `resolveReviewCwd()`=spawn 子进程 cwd 混为一谈，前者仍 process.cwd() 未变）。

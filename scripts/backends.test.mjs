@@ -35,10 +35,10 @@ describe("buildCommand", () => {
     assert.equal(cmd.stdin, null);
   });
 
-  it("qwen 用绝对路径 + --sandbox，无 -y", () => {
+  it("qwen 用绝对路径 + --safe-mode + --sandbox，无 -y", () => {
     const cmd = buildCommand("qwen", { model: "qwen3-coder-plus", prompt: "review this" }, { which: WHICH.qwen });
     assert.equal(cmd.command, "/usr/local/bin/qwen");
-    assert.deepEqual(cmd.args, ["--sandbox", "-p", "review this"]);
+    assert.deepEqual(cmd.args, ["--safe-mode", "--sandbox", "-p", "review this"]);
     assert.ok(!cmd.args.includes("-y"), "qwen must stay read-only (no -y)");
     assert.equal(cmd.stdin, null);
   });

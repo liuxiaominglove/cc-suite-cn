@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, hashFileContent, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -120,12 +121,12 @@ describe("resolveReviewCwd", () => {
     assert.equal(resolveReviewCwd("qwen"), tmpdir());
   });
 
-  it("keeps codebuddy on default cwd (undefined)", () => {
-    assert.equal(resolveReviewCwd("codebuddy"), undefined);
+  it("isolates codebuddy to temp dir", () => {
+    assert.equal(resolveReviewCwd("codebuddy"), tmpdir());
   });
 
-  it("keeps unknown backend on default cwd (undefined)", () => {
-    assert.equal(resolveReviewCwd("glm"), undefined);
+  it("isolates unknown backend to temp dir (fail-safe)", () => {
+    assert.equal(resolveReviewCwd("glm"), tmpdir());
   });
 
   it("review() passes temp cwd to kimi spawn", async () => {
@@ -135,6 +136,16 @@ describe("resolveReviewCwd", () => {
       return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
     });
     await review({ model: "kimi-k2.7-code", backend: "kimi", code: "const x = 1;" });
+    assert.equal(capturedOpts.cwd, tmpdir());
+  });
+
+  it("review() passes temp cwd to codebuddy spawn", async () => {
+    let capturedOpts = null;
+    setSpawn((cmd, args, opts) => {
+      capturedOpts = opts;
+      return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+    });
+    await review({ model: "glm-5.2", backend: "codebuddy", code: "const x = 1;" });
     assert.equal(capturedOpts.cwd, tmpdir());
   });
 });
@@ -1998,6 +2009,121 @@ describe("review dir 模式注入技术栈", () => {
       assert.ok(!stdinWritten.includes("[技术栈]"), "无技术栈文件不应注入");
     } finally {
       await rm(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("source tamper protection (hash verification)", () => {
+  afterEach(() => setSpawn(null));
+
+  it("hashFileContent 同内容同 hash、异内容异 hash", () => {
+    const a = hashFileContent("abc");
+    assert.equal(a, hashFileContent("abc"));
+    assert.notEqual(a, hashFileContent("abd"));
+  });
+
+  it("snapshotSourceHashes + hashesDiffer 检测到文件被改", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));
+    try {
+      const target = join(dir, "t.js");
+      await writeFile(target, "const original = 1;\n");
+      const before = await snapshotSourceHashes([target]);
+      await writeFile(target, "const tampered = 1;\n");
+      const after = await snapshotSourceHashes([target]);
+      assert.ok(hashesDiffer(before, after), "应检测到 hash 变化");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("hashesDiffer 对不变文件返回 false（不误报）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));
+    try {
+      const target = join(dir, "t.js");
+      await writeFile(target, "const original = 1;\n");
+      const before = await snapshotSourceHashes([target]);
+      const after = await snapshotSourceHashes([target]);
+      assert.ok(!hashesDiffer(before, after), "未变不应误报");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("snapshotSourceHashes 跳过读不到的文件（容错）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));
+    try {
+      const hashes = await snapshotSourceHashes([join(dir, "nope.js")]);
+      assert.deepEqual(Object.keys(hashes), []);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("file 模式评审期间文件被改 → 抛 SourceTamperedError", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));
+    try {
+      const target = join(dir, "t.js");
+      await writeFile(target, "const original = 1;\n");
+      setSpawn(() => {
+        writeFileSync(target, "const tampered = 1;\n");
+        return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      });
+      await assert.rejects(
+        () => review({ model: "glm-5.2", backend: "codebuddy", file: target, allowExternal: true }),
+        SourceTamperedError
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("file 模式正常评审 → 不抛 SourceTamperedError（不误报）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));
+    try {
+      const target = join(dir, "t.js");
+      await writeFile(target, "const original = 1;\n");
+      setSpawn(() => createMockProcess({ stdout: MOCK_OUTPUT_VALID }));
+      const r = await review({ model: "glm-5.2", backend: "codebuddy", file: target, allowExternal: true });
+      assert.equal(r.success, true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("file 不存在时容错跳过 hash（保持向后兼容）", async () => {
+    const missing = join(tmpdir(), "definitely-not-exist-abc.js");
+    setSpawn(() => createMockProcess({ stdout: MOCK_OUTPUT_VALID }));
+    const r = await review({ model: "m", backend: "codebuddy", code: "const x = 1;", file: missing, allowExternal: true });
+    assert.equal(r.success, true, "file 不存在不应因 hash 校验崩溃");
+  });
+
+  it("dir 模式评审期间目录内文件被改 → 抛 SourceTamperedError", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hashdir-"));
+    try {
+      const f = join(dir, "a.js");
+      await writeFile(f, "const a = 1;\n");
+      setSpawn(() => {
+        writeFileSync(f, "const tampered = 1;\n");
+        return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      });
+      await assert.rejects(
+        () => review({ model: "glm-5.2", backend: "codebuddy", dir, exts: [".js"], allowExternal: true }),
+        SourceTamperedError
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("dir 模式正常评审 → 不抛 SourceTamperedError（不误报）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "cc-hashdir-"));
+    try {
+      await writeFile(join(dir, "a.js"), "const a = 1;\n");
+      setSpawn(() => createMockProcess({ stdout: MOCK_OUTPUT_VALID }));
+      const r = await review({ model: "glm-5.2", backend: "codebuddy", dir, exts: [".js"], allowExternal: true });
+      assert.equal(r.success, true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
     }
   });
 });
