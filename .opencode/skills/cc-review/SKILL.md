@@ -76,11 +76,17 @@ Load this skill when the user:
 - 汇报「已验证」必须能在 `docs/verification.md` 找到对应行（三色置信度 🟢🟡🔴）。
 - 错误路径：文件不存在/空输入 → 提示用户给路径；缺 CLI/API key → 先跑 `pnpm preflight` 自检，别硬跑。
 
-## Report Template (每次工作完总结必带三节)
+## Report Template (每次工作完总结必带：总体结论 + 行动项 + 三节)
 
-每条 cc-suite-cn 命令的总结，末尾固定附三节（详见 `AGENTS.md`「汇报惯例」）：
+每条 cc-suite-cn 命令的总结，末尾固定附「总体结论 + 行动项 + 三节」（详见 `AGENTS.md`「汇报惯例」）：
 
 ```
+## 总体结论
+按 actionable findings 严重度给一句中文结论：high>0 → 需整改；medium>0 → 需关注；否则 健康。
+
+## 行动项
+verdict=true 的 actionable findings，按 high→medium→low 排序，每条 [严重度] file:line — finding。
+
 ## 本次各 AI 表现
 - 底线（每次必加）：各模型 success / issue 数（读 job result，不编）。
 - 加码（仅当本次做了 triage/裁决）：真 bug / 假阳 / 噪音 / 共识 + precision。
@@ -95,7 +101,7 @@ Load this skill when the user:
 ```
 
 - 每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出。
-- 三节只是追加，不替代原有评审/修复内容汇报。
+- 总体结论 + 行动项 + 三节只是追加，不替代原有评审/修复内容汇报。
 
 ## Key Scripts (single source of truth in this repo)
 

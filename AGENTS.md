@@ -133,9 +133,22 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
 
-## 汇报惯例（每次 cc-suite-cn 工作完的总结必带三节）
+## 汇报惯例（每次 cc-suite-cn 工作完的总结必带：总体结论 + 行动项 + 三节）
 
-所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附三节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制三节：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制：
+
+### 总体结论（必带）
+
+按 actionable findings 的严重度给一句中文结论：
+- high > 0 → **需整改**（high = 崩溃/安全/数据损坏）
+- medium > 0 → **需关注**
+- 否则 → **健康**
+
+无 findings 也写「健康」，不许省略。
+
+### 行动项（必带）
+
+列 verdict=true 的 actionable findings，按 high→medium→low 排序，每条 `[严重度] file:line — finding`。无 actionable 写「无」。
 
 ### 第一节：本次各 AI 表现
 
