@@ -290,6 +290,28 @@ describe("adjudicate", () => {
     assert.equal(calls, 2, "should retry once after a transient exit failure");
   });
 
+  it("retries empty output then succeeds", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls += 1;
+      if (calls === 1) return mockProc("");
+      return mockProc('{"verdict":"true","evidence":"after empty retry"}');
+    });
+    const r = await adjudicate({ finding: "x", code: "y", retries: 1 });
+    assert.deepEqual(r, { verdict: "true", evidence: "after empty retry" });
+    assert.equal(calls, 2, "should retry once after empty output");
+  });
+
+  it("degrades to uncertain after empty output exhausts retries", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => { calls += 1; return mockProc(""); });
+    const r = await adjudicate({ finding: "x", code: "y", retries: 1 });
+    assert.equal(r.verdict, "uncertain");
+    assert.equal(calls, 2, "should retry then degrade to uncertain");
+  });
+
   it("文件 ≤800 行时传整文件给裁决（不截断 ±40 行）", async () => {
     let captured = null;
     setSpawn((cmd, args) => {

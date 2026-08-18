@@ -853,3 +853,10 @@
 
 - **任务 E 整体砍掉**（与任务 F 一致）。三 CLI 写保护现状：qwen 靠 `--sandbox`（init 过滤）、codebuddy 靠 `--disallowedTools`（运行时 deny，台账 90 行已实测）、kimi 靠 `--agent-file`（disallowedTools 锁写，台账 102 行已实测），三者均叠加 cwd 隔离 + 运行时 hash 验证（动作 1/2）。
 - 结论置信度：🟢（三 CLI 探查为实测；砍掉为决策，非验证结论）。
+
+## 留痕：synthai 复审漏 3 回归（教训）
+
+- **事件**：opencode 修 synthai 核心底座时，为响应 kimi 复审意见做「顺手加固」，把 `taskFn()` 挪出 try 块，引入同步 throw 泄漏并发槽的回归；另修正则量词只认单修饰词（`?` 而非 `*`）。
+- **根因**：① 对 review 反馈的加固没当独立 TDD 修复、没给被改动语句的失败路径补测；② 复审员 glm 空输出（限流型瞬时故障）被降级成「部分复审」就 commit。
+- **处理**：glm 重试后抓到 3 回归 → 已修（`synthai@d72a80c`，379 单测全绿）。机制（空输出自动重试）+ 规则（AGENTS.md 铁律 #4/#8/#9 + 复审门控「空输出必须重试」）已固化。
+- **证据锚点**：`synthai@d72a80c`（379 单测）；空输出重试单测见 `review-runner.test.mjs` / `evaluate-models.test.mjs`。

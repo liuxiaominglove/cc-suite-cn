@@ -165,15 +165,13 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
       const { exitCode, stdout, stderr, timedOut } = await runProcess({ command, args, stdin, timeout, spawn });
       if (timedOut) throw new TimeoutError("adjudication timed out");
       if (exitCode !== 0) throw new RunnerError(`adjudicator exited with code ${exitCode}`, { exitCode, stderr });
+      if (!stdout || !stdout.trim()) throw new RunnerError("adjudicator returned empty output (possible rate limit)", { exitCode, stderr });
       return { stdout };
     }, { maxRetries: retries }));
   } catch (err) {
     return { verdict: "uncertain", evidence: err instanceof TimeoutError ? "timeout" : err.message };
   }
 
-  if (!stdout || !stdout.trim()) {
-    return { verdict: "uncertain", evidence: "no output" };
-  }
   return parseVerdict(stdout);
 }
 

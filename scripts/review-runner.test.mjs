@@ -313,17 +313,17 @@ describe("review-runner", () => {
     );
   });
 
-  it("should return empty result on empty stdout", async () => {
+  it("should throw RunnerError on empty stdout (no retries)", async () => {
     setSpawn(() => createMockProcess({ stdout: "" }));
 
-    const result = await review({
-      model: "qwen-coder-plus",
-      code: "test",
-    });
-
-    assert.equal(result.success, false);
-    assert.ok(result.summary.includes("No output"));
-    assert.equal(result.issues.length, 0);
+    await assert.rejects(
+      () =>
+        review({
+          model: "qwen-coder-plus",
+          code: "test",
+        }),
+      RunnerError
+    );
   });
 
   it("should throw RunnerError when codebuddy is not found", async () => {
@@ -1296,6 +1296,35 @@ describe("review retry integration", () => {
     );
     assert.equal(calls, 1);
   });
+
+  it("retries empty output then succeeds", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      if (calls === 1) return createMockProcess({ stdout: "" });
+      return createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+    });
+    const result = await review({ model: "kimi-k2.7-code", backend: "kimi", code: "test", retries: 2 });
+    assert.equal(result.success, true);
+    assert.equal(calls, 2);
+    setRetryBackoffMs(null);
+  });
+
+  it("throws RunnerError after empty output exhausts retries", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      return createMockProcess({ stdout: "" });
+    });
+    await assert.rejects(
+      () => review({ model: "kimi-k2.7-code", backend: "kimi", code: "test", retries: 2 }),
+      RunnerError
+    );
+    assert.equal(calls, 3);
+    setRetryBackoffMs(null);
+  });
 });
 
 function makeRulesReader({ agents, claude } = {}) {
@@ -1774,6 +1803,32 @@ describe("criticize", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await criticize({ findings: [], code: "x" });
     assert.deepEqual(r, { verdicts: [], missed: [] });
+  });
+
+  it("criticize 空输出重试后成功", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      if (calls === 1) return createMockProcess({ stdout: "" });
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [{ index: 0, agree: true, reason: "ok" }], missed: [] }) });
+    });
+    const r = await criticize({ findings: [{ file: "a.js", line: 1, finding: "x" }], code: "x", retries: 2 });
+    assert.equal(calls, 2);
+    assert.equal(r.verdicts.length, 1);
+    setRetryBackoffMs(null);
+  });
+
+  it("criticize 空输出耗尽重试抛 RunnerError", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => { calls++; return createMockProcess({ stdout: "" }); });
+    await assert.rejects(
+      () => criticize({ findings: [], code: "x", retries: 2 }),
+      RunnerError
+    );
+    assert.equal(calls, 3);
+    setRetryBackoffMs(null);
   });
 });
 

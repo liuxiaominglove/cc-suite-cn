@@ -65,6 +65,7 @@ export async function criticize({ findings, code, model = CRITIC_MODEL, backend 
     const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
     if (failed && isAuthError(stderr)) throw new AuthError();
     if (failed) throw new RunnerError(`${command} exited with code ${exitCode}`, { exitCode, stderr });
+    if (!stdout.trim()) throw new RunnerError(`${command} returned empty output (possible rate limit)`, { exitCode, stderr });
     return { stdout };
   }, { maxRetries: retries });
 
@@ -648,21 +649,16 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
       throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
     }
 
+    if (!stdout.trim()) {
+      throw new RunnerError(`${command} returned empty output (possible rate limit)`, { exitCode, stderr });
+    }
+
     return { stdout };
   }, { maxRetries: retries });
 
   const afterHashes = await snapshotSourceHashes(sourcePaths);
   if (hashesDiffer(beforeHashes, afterHashes)) {
     throw new SourceTamperedError();
-  }
-
-  if (!stdout.trim()) {
-    return {
-      model,
-      success: false,
-      summary: "No output from reviewer",
-      issues: [],
-    };
   }
 
   const parsed = extractJson(stdout);
@@ -789,7 +785,12 @@ if (isMainModule(import.meta.url)) {
     const { readFile } = await import("node:fs/promises");
     const code = await readFile(file, "utf-8");
     const findings = JSON.parse(await readFile(findingsFile, "utf-8"));
-    const result = await criticize({ findings, code, model, backend });
+    let result;
+    try {
+      result = await criticize({ findings, code, model, backend, retries: 2 });
+    } catch (err) {
+      result = { verdicts: [], missed: [], error: err?.message ?? String(err) };
+    }
     if (result.missed?.length) {
       try {
         const { persistMissed } = await import("./missed-log.mjs");
