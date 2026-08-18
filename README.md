@@ -285,9 +285,14 @@ A：大陆网络访问 GitHub 不稳定，建议走镜像或代理。
 A：GLM/Hy3 走平台账号登录态，第一次跑 `codebuddy` 时按提示完成登录即可。
 
 **Q6：Hy3 没额度了怎么办？**
-A：去 https://console.cloud.tencent.com/tokenhub/models 领取新用户免费 tokens（右上角「新用户福利」）。
+A：Hy3 有**两条通道、两套额度**，先分清是哪条没额度了：
+- **B 分身 hy3**（`/b-hy3`）→ 走腾讯云 TokenHub（`TOKENHUB_API_KEY`），去 https://console.cloud.tencent.com/tokenhub/models 领新用户免费 tokens（右上角「新用户福利」）。
+- **施工队裁决 hy3**（`/evaluate --arbitrate`）→ 走 `codebuddy` 平台账号（`codebuddy --model hy3`），用的是 codebuddy 平台额度，跟 TokenHub 那笔不通用。
 
-**Q7：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
+**Q7：为什么 glm 和 hy3 都有「两条通道、两套额度」？**
+A：有意设计——`codebuddy` CLI 是 GLM-5.2 + Hy3 的**官方网关**，所以**施工队**（找 bug 的 glm、裁决的 hy3）走 codebuddy 平台账号；而 **B 分身**（opencode 子代理）的 `model` 字段须指向 opencode 认识的 provider，于是 glm 走阿里百炼（`DASHSCOPE_API_KEY`）、hy3 走 TokenHub（`TOKENHUB_API_KEY`）。后果：同一个 glm 或 hy3，B 分身和施工队**各烧一套额度、互不相通**。kimi/qwen 则 B 分身和施工队走同一 provider，只有一套额度。
+
+**Q8：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
 A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`moonshotai-cn/kimi-k2.7-code`）。
 
 ---
