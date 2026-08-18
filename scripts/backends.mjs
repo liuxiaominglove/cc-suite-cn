@@ -1,8 +1,7 @@
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { BOUNDARY_INVARIANTS } from "./delegation-boundary.mjs";
 
-export const READ_ONLY_DECLARATION = `你是只读代码评审员：禁止创建、修改、删除任何文件，禁止运行任何命令；只分析下方提供的代码，输出评审结果。${BOUNDARY_INVARIANTS[0]}；${BOUNDARY_INVARIANTS[1]}。`;
+export const READ_ONLY_DECLARATION = `你是只读代码评审员：禁止创建、修改、删除任何文件，禁止运行任何命令；只分析下方提供的代码，输出评审结果。`;
 
 const KIMI_RO_AGENT = fileURLToPath(new URL("./kimi-readonly-agent.md", import.meta.url));
 

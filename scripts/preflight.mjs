@@ -9,7 +9,7 @@ export function setSpawn(fn) {
 }
 
 export const REQUIRED_CLIS = ["codebuddy", "kimi", "qwen"];
-export const REQUIRED_KEYS = ["DASHSCOPE_API_KEY", "MOONSHOT_API_KEY", "TOKENHUB_API_KEY"];
+export const REQUIRED_KEYS = ["DASHSCOPE_API_KEY", "MOONSHOT_API_KEY"];
 
 function defaultWhich(command) {
   try {

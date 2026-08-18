@@ -20,7 +20,6 @@ function envWithoutKeys(extra = {}) {
   const env = { ...process.env, ...extra };
   delete env.DASHSCOPE_API_KEY;
   delete env.MOONSHOT_API_KEY;
-  delete env.TOKENHUB_API_KEY;
   return env;
 }
 
@@ -87,9 +86,9 @@ describe("install.sh", () => {
     const rc = join(dir, "rc");
     try {
       writeFileSync(rc, "");
-      const r = bash(["--write-key", "TOKENHUB_API_KEY=sk-abc/def+ghi="], { CC_RC_FILE: rc, HOME: dir });
+      const r = bash(["--write-key", "DASHSCOPE_API_KEY=sk-abc/def+ghi="], { CC_RC_FILE: rc, HOME: dir });
       assert.equal(r.status, 0, r.stderr);
-      assert.match(readFileSync(rc, "utf8"), /^export TOKENHUB_API_KEY='sk-abc\/def\+ghi='$/m);
+      assert.match(readFileSync(rc, "utf8"), /^export DASHSCOPE_API_KEY='sk-abc\/def\+ghi='$/m);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

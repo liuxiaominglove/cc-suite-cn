@@ -228,7 +228,7 @@ export_rc_keys() {
     return 0
   fi
   local name line v
-  for name in DASHSCOPE_API_KEY MOONSHOT_API_KEY TOKENHUB_API_KEY; do
+  for name in DASHSCOPE_API_KEY MOONSHOT_API_KEY; do
     [ -n "${!name:-}" ] && continue
     line="$(grep -E "^export ${name}=" "$RC_FILE" 2>/dev/null | head -1 || true)"
     [ -n "$line" ] || continue
@@ -243,7 +243,6 @@ setup_keys() {
   say "检查 API key ..."
   ensure_key_interactive DASHSCOPE_API_KEY "阿里百炼 dashscope.aliyun.com"
   ensure_key_interactive MOONSHOT_API_KEY "月之暗面 platform.moonshot.cn"
-  ensure_key_interactive TOKENHUB_API_KEY "腾讯 TokenHub console.cloud.tencent.com/tokenhub/models"
   export_rc_keys
 }
 

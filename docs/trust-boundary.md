@@ -2,7 +2,7 @@
 
 cc-suite-cn 的「输入信任边界」集中记录：哪些输入可信、哪些不可信，以及对应防护措施的状态。
 
-> **单一数据源 = `scripts/known-risks.json`**。本文件是给人读的视图，下面两张表由它渲染。**改动请改 JSON，别手改本表**——`guard.mjs`（`findKnownRiskDrift`）会校验 JSON 的 schema（id 唯一 / resolved 必有 anchor 且指向 verification.md / open 必有 riskLevel+reassessWhen+whyDeferred），并靠 docs-consistency 测试保证本表与 JSON 不漂移。债只许"补证据改 resolved"消失，不许物理删行。
+> **单一数据源 = `scripts/known-risks.json`**。本文件是给人读的视图，下面两张表由它渲染。**改动请改 JSON，别手改本表**——`guard.mjs`（`findKnownRiskDrift`）会校验 JSON 的 schema（id 唯一 / resolved 必有 anchor 且指向 verification.md / open 必有 riskLevel+reassessWhen+whyDeferred），并靠 docs-consistency 测试保证本表与 JSON 不漂移。债只许"补证据改 resolved"消失，不许物理删行；**唯一例外**：风险的存在前提被消除（如砍掉整个 B 分身 → 「双通道双额度」债随之消失），可物理删行，但须在 `docs/verification.md` 留痕说明。
 > 目的：不让风险项散落在归档 finding 里被遗忘，也不「为了显得安全」过度修低风险项。每条搁置项标「风险等级 + 重新评估条件」。
 
 ## 已落地（✅）
@@ -21,7 +21,6 @@ cc-suite-cn 的「输入信任边界」集中记录：哪些输入可信、哪�
 |--------|---------|-----------|-------------|
 | prompt injection（`buildAdjudicatorPrompt` 里 finding/code 直接插值） | 低 | 攻击者 = 代码作者自己，收益 = 骗过自己的裁决；本地工具无「攻击者→受害者」信任边界 | **当 cc-suite-cn 开始审「不受信任的第三方代码」时，升级为必修**（加 delimiter/转义） |
 | argv 泄漏（kimi/qwen 的 prompt 走 `-p` argv，本机 `ps` 可见被审代码） | 低 | 被审代码通常是用户自己的代码，非秘密 | **当被审代码含敏感信息（密钥/私有逻辑）时，升级为必修**（改走 stdin） |
-| glm/hy3 双通道两套额度（同一模型两个 provider：B 分身走阿里百炼/TokenHub，施工队走 codebuddy 平台） | 低 | 有意设计（codebuddy 是 glm-5.2/hy3 官方网关）；TokenHub 100 万只覆盖 B 分身 hy3，用户易误判额度归属。属运维/认知债，非安全债 | **当施工队 glm/hy3 也切到与 B 分身一致的 provider 时**（或 codebuddy 平台额度策略变化） |
 
 ## 说明
 

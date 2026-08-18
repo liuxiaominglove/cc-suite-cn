@@ -860,3 +860,24 @@
 - **根因**：① 对 review 反馈的加固没当独立 TDD 修复、没给被改动语句的失败路径补测；② 复审员 glm 空输出（限流型瞬时故障）被降级成「部分复审」就 commit。
 - **处理**：glm 重试后抓到 3 回归 → 已修（`synthai@d72a80c`，379 单测全绿）。机制（空输出自动重试）+ 规则（AGENTS.md 铁律 #4/#8/#9 + 复审门控「空输出必须重试」）已固化。
 - **证据锚点**：`synthai@d72a80c`（379 单测）；空输出重试单测见 `review-runner.test.mjs` / `evaluate-models.test.mjs`。
+
+---
+
+# 任务 G：砍掉 B 分身（承认冗余）
+
+**动机**：B 分身（opencode 子代理，4 个 agent + 4 个 `/b-*` 命令）定位尴尬——独立不如施工队（外部只读第三方）、动手不如 opencode（唯一拍板方）。历史 8 次触发全是模型加载/通道验证，从未真实上工。承认冗余，砍掉。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| G-1: 删 4 个 B 分身 agent | 删 `.opencode/agents/{glm,kimi,qwen,hy3}.md`；`docs-consistency.test.mjs` 移除 kimi.md / 架构图 kimi / 4-agent 检查 | 🟢 | 2026-08-19 |
+| G-2: 删 4 个 `/b-*` 命令 | 删 `.opencode/commands/b-{glm,kimi,qwen,hy3}.md`；AGENTS.md 命令表 + 纯查询清单同步移除 | 🟢 | 2026-08-19 |
+| G-3: 删防踢皮球边界 | 删 `delegation-boundary.mjs` + `.test.mjs`；`backends.mjs` 的 `READ_ONLY_DECLARATION` 去掉 `BOUNDARY_INVARIANTS` 拼接（B 分身是唯一真实消费者，施工队 CLI 无反向通道） | 🟢 | 2026-08-19 |
+| G-4: 删 TokenHub 通道 | 删 `opencode.json`（仅 tencent/hy3 provider，专给 B 分身 hy3）；`install.sh` 移除 TOKENHUB_API_KEY；`known-risks.json` 删 KR-03（双通道双额度债，前提消除）+ `trust-boundary.md` 同步 | 🟢 | 2026-08-19 |
+| G-5: TokenHub 残留收尾（preflight/package.json） | `preflight.mjs` 的 `REQUIRED_KEYS` 去 TOKENHUB_API_KEY；`preflight.test.mjs` 断言同步（checkEnvKeys/preflightAll 去 TOKENHUB）；`install.test.mjs` 的 base64 风格 key 用例 TOKENHUB→DASHSCOPE；`package.json` test/test:unit 移除 `delegation-boundary.test.mjs` | 🟢 | 2026-08-19 |
+
+## 结果
+
+- `pnpm test:unit`：**669 全绿** + guard 绿。
+- `/verify` diff 审查（glm+kimi）：glm 4 finding（3 假阳：self-audit 审计列表无 delegation-boundary / commands.test 动态枚举 / features.md 本就无 B 分身；1 真：台账遗漏，已补 G-5），kimi 0 finding。改动行内无回归。

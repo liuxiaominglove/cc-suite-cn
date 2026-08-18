@@ -94,7 +94,6 @@
 | **找 bug（audit）** | glm+kimi 审代码，报问题清单 | 两个监理一起巡楼，记问题 |
 | **批判员（critic）** | qwen 独立挑毛病，给"第二意见" | 另请的第三方顾问，专挑刺 |
 | **验证审计员（verifier）** | hy3 逐条判"这条是不是真 bug" | 裁判，只判真假、不找新问题 |
-| **B 分身** | opencode 身体里长出的"用施工队脑子"的分身 | 工头多长几只手，每只手用不同脑子 |
 | **job 账本** | 每个任务记一笔账（状态+结果） | 外卖订单系统，能查单、退单 |
 | **真后台** | 任务在后台独立进程跑，关了终端也不断 | 你下单后不用站店门口干等 |
 | **单一数据源** | 脚本/配置只存一份，别处只"指路"不复制 | 原件存保险柜，别处只放快捷方式 |
@@ -103,7 +102,7 @@
 
 ## 五、前提条件与安装（新手友好）
 
-> 一条命令装完。脚本会**自动装** opencode、3 个 worker CLI、clone 代码、装依赖、跑自检；**只检测不硬装** Node.js / git（缺了会提示你）。3 个 API key 会在安装过程中**交互式询问**并写进 shell 配置。
+> 一条命令装完。脚本会**自动装** opencode、3 个 worker CLI、clone 代码、装依赖、跑自检；**只检测不硬装** Node.js / git（缺了会提示你）。2 个 API key 会在安装过程中**交互式询问**并写进 shell 配置。
 
 ### 方式一：一键安装（推荐）
 
@@ -161,20 +160,18 @@ npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen
 
 分别 `codebuddy --version`、`kimi --version`、`qwen --version` 验证。
 
-### 第 4 样：3 个 API key
+### 第 4 样：2 个 API key
 
 | Key 名 | 对应模型 | 去哪申请 |
 |--------|---------|---------|
 | `DASHSCOPE_API_KEY` | Qwen（阿里通义） | https://dashscope.aliyun.com （阿里云百炼控制台 → API-KEY 管理） |
 | `MOONSHOT_API_KEY` | Kimi（月之暗面） | https://platform.moonshot.cn （开放平台 → API Keys） |
-| `TOKENHUB_API_KEY` | Hy3（腾讯混元） | https://console.cloud.tencent.com/tokenhub/models （右上角「新用户福利」可领 Hy3 免费 tokens） |
 
 写进 `~/.zshrc` 后 `source ~/.zshrc`：
 
 ```bash
 echo 'export DASHSCOPE_API_KEY=你的阿里百炼key' >> ~/.zshrc
 echo 'export MOONSHOT_API_KEY=你的月之暗面key' >> ~/.zshrc
-echo 'export TOKENHUB_API_KEY=你的腾讯TokenHub key' >> ~/.zshrc
 source ~/.zshrc
 ```
 
@@ -220,7 +217,6 @@ opencode
 | `/jobs` | 查任务账本（审计自动记账） | 看订单列表 |
 | `/result <job-id>` | 看某任务详细结果 | 点进订单看详情 |
 | `/cancel <job-id>` | 取消某任务（真杀进程） | 取消订单 |
-| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身（换脑不换身） | 直接点名某个工人干活 |
 
 ### B. 终端里敲的命令（在项目目录）
 
@@ -285,15 +281,10 @@ A：大陆网络访问 GitHub 不稳定，建议走镜像或代理。
 A：GLM/Hy3 走平台账号登录态，第一次跑 `codebuddy` 时按提示完成登录即可。
 
 **Q6：Hy3 没额度了怎么办？**
-A：Hy3 有**两条通道、两套额度**，先分清是哪条没额度了：
-- **B 分身 hy3**（`/b-hy3`）→ 走腾讯云 TokenHub（`TOKENHUB_API_KEY`），去 https://console.cloud.tencent.com/tokenhub/models 领新用户免费 tokens（右上角「新用户福利」）。
-- **施工队裁决 hy3**（`/evaluate --arbitrate`）→ 走 `codebuddy` 平台账号（`codebuddy --model hy3`），用的是 codebuddy 平台额度，跟 TokenHub 那笔不通用。
+A：Hy3（验证审计员）走 `codebuddy` 平台账号（`codebuddy --model hy3`），用的是 codebuddy 平台额度，没额度了去 codebuddy 平台充值/领额度即可。
 
-**Q7：为什么 glm 和 hy3 都有「两条通道、两套额度」？**
-A：有意设计——`codebuddy` CLI 是 GLM-5.2 + Hy3 的**官方网关**，所以**施工队**（找 bug 的 glm、裁决的 hy3）走 codebuddy 平台账号；而 **B 分身**（opencode 子代理）的 `model` 字段须指向 opencode 认识的 provider，于是 glm 走阿里百炼（`DASHSCOPE_API_KEY`）、hy3 走 TokenHub（`TOKENHUB_API_KEY`）。后果：同一个 glm 或 hy3，B 分身和施工队**各烧一套额度、互不相通**。kimi/qwen 则 B 分身和施工队走同一 provider，只有一套额度。
-
-**Q8：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
-A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`moonshotai-cn/kimi-k2.7-code`）。
+**Q7：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
+A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`kimi-k2.7-code`）。
 
 ---
 
@@ -312,6 +303,7 @@ A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归
 | **P0补强** | 抽 runner-core、写锁 cwd 隔离、账本打通、模型 ID 统一、权重接线 |
 | **角色重构** | 4 模型 4 角色：找 bug(glm+kimi) / 批判员(qwen+沙箱) / 验证审计员(hy3) / 修 bug(opencode)，废弃 codebuddy 写路径 |
 | **体检修复** | NLPM 体检出 13 项 finding 全修（模型 ID 统一 / PATH 劫持 / kimi 只读护栏 / 文档修复）+ kimi 渠道修正（alibaba-cn → moonshotai-cn） |
+| **砍 B 分身** | 承认 B 分身冗余（独立不如施工队、动手不如 opencode，从未真实上工），删 4 个 agent + 4 个 `/b-*` 命令 + TokenHub 通道 |
 
 ---
 
@@ -352,8 +344,7 @@ A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归
 | opencode | 总指挥 + 修 bug（宿主） |
 | CodeBuddy CLI | glm/hy3 的网关（找 bug + 验证审计员） |
 | kimi CLI / qwen CLI | 独立评审壳 |
-| `DASHSCOPE_API_KEY` | 阿里百炼，通吃 Qwen + GLM |
-| `TOKENHUB_API_KEY` | 腾讯云 TokenHub，Hy3 真模型 |
+| `DASHSCOPE_API_KEY` | 阿里百炼，Qwen（批判员） |
 | `MOONSHOT_API_KEY` | 月之暗面 Moonshot，Kimi（走 Moonshot 直连，非阿里） |
 
 ---
@@ -369,7 +360,6 @@ scripts/jobs.mjs                任务账本
 scripts/guard.mjs               漂移守卫
 scripts/backends.mjs            backend 定义（codebuddy/kimi/qwen）
 scripts/self-audit.mjs          自审核心脚本（dogfooding，release 前跑）
-.opencode/agents/*.md           4 个 B 分身子代理
 .opencode/skills/cc-review/     评审技能 + 权重
 docs/verification.md            验证台账
 ```

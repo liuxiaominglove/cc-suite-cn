@@ -9,12 +9,6 @@ Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrato
 ```
 opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终拍板方、亲自修）
   │
-  ├─ B 分身（日常 · opencode 子代理，换脑不换身）
-  │    ├─ qwen  → alibaba-cn/qwen3-coder-plus
-  │    ├─ glm   → alibaba-cn/glm-5.2
-  │    ├─ kimi  → moonshotai-cn/kimi-k2.7-code（Moonshot，非阿里）
-  │    └─ hy3   → tencent/hy3（真 Hy3，TokenHub）
-  │
   └─ 施工队（独立第三方 · 只读）
        ├─ 找 bug (audit):     glm(codebuddy CLI) + kimi(Moonshot 直连)（scripts/review-runner.mjs，参数化 backend）
        ├─ 批判员 (critic):    qwen（只读 + --sandbox）
@@ -22,7 +16,6 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 ```
 
 - **opencode**: 总指挥 + 修 bug — interactive coding assistant (DeepSeek V4 Pro)
-- **B 分身** (`.opencode/agents/*.md`): opencode 子代理，用各自模型的大脑做日常审/改/修
 - **找 bug** (`/audit`): glm + kimi 只读评审，产出 finding
 - **批判员** (`/review-qwen`): qwen 独立第二意见（只读 + `--sandbox`）
 - **验证审计员** (`/evaluate`): hy3 逐条裁决 finding 真假，聚合"谁找得多、谁找得准"
@@ -36,9 +29,8 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 |-------------|-----------------|
 | Node.js | >= 18.0 |
 | CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.2 + hy3 网关，走平台账号登录态） |
-| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，**Qwen（施工队批判员 + B 分身）+ B 分身 glm** 用（B 分身走 models.dev 内置 `alibaba-cn` 通道）；**施工队找 bug 的 glm 走 codebuddy CLI 平台账号，无需此 key** |
-| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`moonshotai-cn/kimi-k2.7-code`，走 Moonshot 官方直连） |
-| `TOKENHUB_API_KEY` | Set in `~/.zshrc` — 腾讯云 TokenHub，Hy3 用（真 `hy3`，端点 `tokenhub.tencentmaas.com`） |
+| `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，**Qwen（施工队批判员）** 用（qwen CLI 走阿里百炼通道）；**施工队找 bug 的 glm 走 codebuddy CLI 平台账号，无需此 key** |
+| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`kimi-k2.7-code`，走 Moonshot 官方直连） |
 
 ## Setup
 
@@ -51,7 +43,6 @@ npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen
 # Set API keys (add to ~/.zshrc for persistence)
 export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼）
 export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
-export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 
 # codebuddy CLI 走平台账号登录态（GLM-5.2 + Hy3 网关），无需单独 key
 # 自检：pnpm preflight
@@ -72,7 +63,6 @@ export TOKENHUB_API_KEY=your-tokenhub-key     # Hy3（腾讯 TokenHub）
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
 | `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
-| `/b-qwen` `/b-glm` `/b-kimi` `/b-hy3` | 派活给对应 B 分身 subagent（task 工具） |
 | `/review <path>` | Same as `/audit` |
 | `/trace <keyword|file:line>` | 变更追溯（查 finding 的报 → 裁 → 修完整链路） |
 
@@ -145,7 +135,7 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 
 ## 汇报惯例（每次 cc-suite-cn 工作完的总结必带三节）
 
-所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附三节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace` `/b-*`）不触发评审，不强制三节：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附三节。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制三节：
 
 ### 第一节：本次各 AI 表现
 
@@ -193,7 +183,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | Path | Purpose |
 |------|---------|
 | `AGENTS.md` | This file — project conventions and instructions |
-| `.opencode/commands/*.md` | 16 个斜杠命令（audit/fix/evaluate/verify/trace/jobs 等，项目级自动加载） |
+| `.opencode/commands/*.md` | 12 个斜杠命令（audit/fix/evaluate/verify/trace/jobs 等，项目级自动加载） |
 | `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
 | `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
@@ -213,8 +203,6 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
-| `.opencode/agents/*.md` | B 分身 subagent 定义（qwen/glm/kimi/hy3） |
-| `opencode.json` | provider 定义（仅 `tencent/hy3` 在仓库自定义；glm/qwen/kimi 走 models.dev 内置 `alibaba-cn`/`moonshotai-cn` provider） |
 | `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
 | `docs/trust-boundary.md` | 信任边界风险台账（人读视图，由 `scripts/known-risks.json` 渲染） |
 | `docs/features.md` | 功能基线清单（每次总结"触达功能"对照的单一数据源） |

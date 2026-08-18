@@ -122,7 +122,6 @@ describe("checkEnvKeys", () => {
     const map = Object.fromEntries(keys.map((k) => [k.name, k.set]));
     assert.equal(map.DASHSCOPE_API_KEY, true);
     assert.equal(map.MOONSHOT_API_KEY, true);
-    assert.equal(map.TOKENHUB_API_KEY, false);
   });
 
   it("treats blank strings as missing", () => {
@@ -134,7 +133,7 @@ describe("checkEnvKeys", () => {
 describe("preflightAll", () => {
   it("aggregates clis + keys and computes ok", () => {
     const which = (c) => ({ codebuddy: "/x/codebuddy", kimi: "/x/kimi", qwen: "/x/qwen" }[c] ?? null);
-    const env = { DASHSCOPE_API_KEY: "a", MOONSHOT_API_KEY: "b", TOKENHUB_API_KEY: "c" };
+    const env = { DASHSCOPE_API_KEY: "a", MOONSHOT_API_KEY: "b" };
     const r = preflightAll({ env, which });
     assert.equal(r.ok, true);
     assert.deepEqual(r.clis.map((c) => c.name), REQUIRED_CLIS);

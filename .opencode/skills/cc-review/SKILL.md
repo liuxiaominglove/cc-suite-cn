@@ -109,4 +109,3 @@ Load this skill when the user:
 - `scripts/jobs.mjs` — 任务账本 + runAudit（getFeedback 回灌）+ 后台/取消
 - `scripts/models.mjs` — 4 施工队单一数据源（WORKERS / FIND_BUG_WORKERS / CRITIC_MODEL / VERIFIER_MODEL）
 - `scripts/guard.mjs` — drift guard（单一数据源守护）
-- `.opencode/agents/*.md` — B 分身 subagent 定义

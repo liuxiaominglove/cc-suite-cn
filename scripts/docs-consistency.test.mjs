@@ -20,17 +20,6 @@ function readGlobalOrSkip(t, ...segments) {
 }
 
 describe("模型 ID 一致性（WI-1）", () => {
-  it("kimi.md 无 kimi-k2.6 残留（统一到 k2.7-code）", () => {
-    const c = readFileSync(join(ROOT, ".opencode/agents/kimi.md"), "utf8");
-    assert.doesNotMatch(c, /kimi-k2\.6/, "kimi.md 仍含旧模型 kimi-k2.6");
-  });
-
-  it("kimi.md 走 Moonshot 渠道（moonshotai-cn，非 alibaba-cn）", () => {
-    const c = readFileSync(join(ROOT, ".opencode/agents/kimi.md"), "utf8");
-    assert.match(c, /moonshotai-cn\/kimi-k2\.7-code/, "kimi.md 应走 Moonshot 渠道");
-    assert.doesNotMatch(c, /alibaba-cn\/kimi/, "B 分身 kimi 保持 Moonshot 直连，不走 alibaba-cn");
-  });
-
   it("AGENTS.md 无 kimi-k2.6 残留", () => {
     const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
     assert.doesNotMatch(c, /kimi-k2\.6/, "AGENTS.md 仍含旧模型 kimi-k2.6");
@@ -40,12 +29,6 @@ describe("模型 ID 一致性（WI-1）", () => {
     const c = readGlobalOrSkip(t, ".codebuddy", "models.json");
     if (c === null) return;
     assert.doesNotMatch(c, /qwen-coder-plus/, "models.json 仍含旧名 qwen-coder-plus");
-  });
-
-  it("AGENTS.md 架构图 kimi 走 Moonshot（无 alibaba-cn/kimi）", () => {
-    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
-    assert.match(c, /├─ kimi\s*→\s*moonshotai-cn\/kimi/, "架构图 kimi 应走 Moonshot 渠道");
-    assert.doesNotMatch(c, /├─ kimi\s*→\s*alibaba-cn/, "架构图 kimi 不应走 alibaba-cn");
   });
 
   it("AGENTS.md MOONSHOT_API_KEY 标必需（非可选）", () => {
@@ -77,15 +60,6 @@ describe("AGENTS.md 文档（WI-3）", () => {
   it("models.json 描述澄清（glm-5.2/hy3 走平台，不属自定义 endpoint）", () => {
     const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
     assert.match(c, /glm-5\.2\/hy3 走 codebuddy 平台/, "models.json 描述未澄清 glm-5.2/hy3 走平台");
-  });
-});
-
-describe("角色概念（WI-4）", () => {
-  it("4 个 agent 无「施工队分身」混淆（B 分身可改修，施工队只读）", () => {
-    for (const name of ["glm", "kimi", "qwen", "hy3"]) {
-      const c = readFileSync(join(ROOT, `.opencode/agents/${name}.md`), "utf8");
-      assert.doesNotMatch(c, /施工队分身/, `${name}.md 不应有「施工队分身」混淆`);
-    }
   });
 });
 

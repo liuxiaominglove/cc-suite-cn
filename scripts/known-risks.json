@@ -55,14 +55,6 @@
       "riskLevel": "低",
       "whyDeferred": "被审代码通常是用户自己的代码，非秘密",
       "reassessWhen": "当被审代码含敏感信息（密钥/私有逻辑）时，升级为必修（改走 stdin）"
-    },
-    {
-      "id": "KR-03",
-      "status": "open",
-      "title": "glm/hy3 双通道两套额度（同一模型两个 provider，用户易误判额度归属）",
-      "riskLevel": "低",
-      "whyDeferred": "有意设计：codebuddy CLI 是 glm-5.2/hy3 官方网关，施工队找 bug+裁决走平台账号；B 分身走阿里百炼(glm)/TokenHub(hy3)。导致同一模型两套账号额度，TokenHub 100 万只覆盖 B 分身 hy3，非全局。属运维/认知债，非安全债",
-      "reassessWhen": "当施工队 glm/hy3 也切到与 B 分身一致的 provider（阿里百炼/TokenHub）时，或 codebuddy 平台额度策略变化时"
     }
   ]
 }
