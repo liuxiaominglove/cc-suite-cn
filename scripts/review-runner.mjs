@@ -65,7 +65,7 @@ export async function criticize({ findings, code, model = CRITIC_MODEL, backend 
     const failed = exitCode !== 0 || (exitCode === null && exitSignal !== null);
     if (failed && isAuthError(stderr)) throw new AuthError();
     if (failed) throw new RunnerError(`${command} exited with code ${exitCode}`, { exitCode, stderr });
-    if (!stdout.trim()) throw new RunnerError(`${command} returned empty output (possible rate limit)`, { exitCode, stderr });
+    if (!stdout || !stdout.trim()) throw new RunnerError(`${command} returned empty output (possible rate limit)`, { exitCode, stderr });
     return { stdout };
   }, { maxRetries: retries });
 
@@ -649,7 +649,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
       throw new RunnerError(`${command} exited with code ${exitCode}, signal ${exitSignal}`, { exitCode, stderr });
     }
 
-    if (!stdout.trim()) {
+    if (!stdout || !stdout.trim()) {
       throw new RunnerError(`${command} returned empty output (possible rate limit)`, { exitCode, stderr });
     }
 
@@ -789,6 +789,7 @@ if (isMainModule(import.meta.url)) {
     try {
       result = await criticize({ findings, code, model, backend, retries: 2 });
     } catch (err) {
+      if (err instanceof AuthError) throw err;
       result = { verdicts: [], missed: [], error: err?.message ?? String(err) };
     }
     if (result.missed?.length) {
@@ -859,9 +860,14 @@ if (isMainModule(import.meta.url)) {
   }
 
   const useChunking = !!(file && !dir && !diff);
-  const result = useChunking
-    ? await reviewFile({ model, backend, file, customPrompt, allowExternal, timeout })
-    : await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff });
+  let result;
+  try {
+    result = useChunking
+      ? await reviewFile({ model, backend, file, customPrompt, allowExternal, timeout, retries: 2 })
+      : await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff, retries: 2 });
+  } catch (err) {
+    result = { model, success: false, error: err?.message ?? String(err), issues: [] };
+  }
   console.log(JSON.stringify(result, null, 2));
   if (!result.success) process.exit(1);
 }
