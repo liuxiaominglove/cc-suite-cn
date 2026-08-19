@@ -46,7 +46,7 @@ export const REVIEW_PROMPT = "Review the following code and report ONLY concrete
 
 export const NL_REVIEW_PROMPT = "Review the following natural-language prompt artifact (an opencode command, skill, agent, or rule definition), NOT executable code. Evaluate quality across these dimensions: (1) trigger description clarity; (2) explicit output format; (3) error-path coverage (empty input, missing files, malformed input); (4) vague quantifiers; (5) prohibitions without alternatives; (6) internal consistency with companion SKILL.md or AGENTS.md. Write the `finding` and `fix` fields in English. Output the result as a JSON object with fields: severity (high/medium/low), issues (array of {file, line, finding, fix}), and summary (string).";
 
-export const CRITIC_PROMPT = "你是独立代码批判员（第二意见）。下方是其他评审员（glm/kimi）报的 finding 清单 + 完整代码。你的职责不是重新扫描代码，而是批判这份清单：1) 对每条 finding 判断「同意」(真 bug) 或「反对」(假阳)，并给一句理由（核查代码对应位置与被调用函数的真实实现，若该函数已处理了 finding 所说的问题，如 ~ 展开/路径归一化/null 守卫，则判反对）；2) 指出清单遗漏的真 bug（补漏）。输出 JSON：{\"verdicts\":[{\"index\":数字,\"agree\":true/false,\"reason\":\"一句理由\"}],\"missed\":[{\"file\":\"路径\",\"line\":数字,\"finding\":\"描述\"}]}";
+export const CRITIC_PROMPT = "你是独立代码批判员（第二意见）。下方是其他评审员（glm/kimi）报的 finding 清单 + 完整代码。你的职责不是重新扫描代码，而是批判这份清单：1) 对每条 finding 判断「同意」(真 bug) 或「反对」(假阳)，并给一句理由（核查代码对应位置与被调用函数的真实实现，若该函数已处理了 finding 所说的问题，如 ~ 展开/路径归一化/null 守卫，则判反对）；2) 指出清单遗漏的真 bug（补漏）。盲评纪律：上游评审员的理由和依据均未附给你，你必须只凭代码本身独立判断，禁止猜测上游意图。输出 JSON：{\"verdicts\":[{\"index\":数字,\"agree\":true/false,\"reason\":\"一句理由\"}],\"missed\":[{\"file\":\"路径\",\"line\":数字,\"finding\":\"描述\",\"reason\":\"为什么是漏报的一句理由\"}]}";
 
 export function buildCriticPrompt(findings, code) {
   const list = (findings ?? [])
@@ -86,6 +86,28 @@ export function parseCriticArgs(args) {
     file: fileIdx !== -1 ? args[fileIdx + 1] : null,
     findingsFile: findingsIdx !== -1 ? args[findingsIdx + 1] : null,
   };
+}
+
+export function mapCriticVerdicts(verdicts, findings) {
+  return (verdicts ?? [])
+    .map((v) => {
+      const f = (findings ?? [])[Number(v?.index)];
+      if (!f) return null;
+      return { file: f.file ?? "", line: f.line ?? null, finding: f.finding ?? "", agree: v.agree === true, reason: v.reason ?? "" };
+    })
+    .filter(Boolean);
+}
+
+export function buildMissedFindings(missed, file, { projectDir = process.cwd(), model = CRITIC_MODEL } = {}) {
+  return (missed ?? []).map((m) => ({
+    file: m.file ?? file,
+    line: m.line ?? null,
+    finding: m.finding ?? "",
+    chainAnalysis: m.reason ?? "",
+    source: "qwen-critic",
+    models: [model],
+    projectDir,
+  }));
 }
 
 export const SELF_CHECK_PROMPT = "下面是你自己刚报的 finding 清单 + 完整代码。请逐条自检：对每条 finding，找到它涉及的函数，核对该函数的真实实现（在 CODE 或 [项目上下文] 里）——若该函数已处理了所说的问题（如 ~ 展开、路径归一化、null 守卫），就把这条判 keep=false。只保留经自检仍成立的 finding。输出 JSON：{\"survivors\":[{\"index\":数字,\"keep\":true/false,\"reason\":\"一句理由\"}]}";
@@ -143,7 +165,7 @@ export function isNLArtifact(file) {
   );
 }
 
-export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
+export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"chain_analysis\": \"对每条 issue 说明涉及的函数及其真实实现、为什么构成 bug\", \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
 
 const RULE_FILES = ["AGENTS.md", "CLAUDE.md"];
 const RULES_MAX_LINES = 400;
@@ -669,6 +691,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
       severity: parsed.severity ?? "unknown",
       issues: parsed.issues ?? [],
       summary: parsed.summary ?? "",
+      chainAnalysis: parsed.chain_analysis ?? "",
     };
   }
 
@@ -678,6 +701,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     severity: "unknown",
     issues: [],
     summary: stdout.trim(),
+    chainAnalysis: "",
     parseError: true,
   };
 }
@@ -760,12 +784,18 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
     .filter((c) => !c.result?.success)
     .map((c) => ({ startLine: c.startLine, error: c.result?.error ?? "unknown error" }));
 
+  const chainAnalysis = chunkResults
+    .map((c) => (typeof c.result?.chainAnalysis === "string" ? c.result.chainAnalysis.trim() : ""))
+    .filter(Boolean)
+    .join("\n");
+
   return {
     model,
     success: chunkResults.every((c) => c.result?.success),
     severity,
     issues,
     chunkErrors,
+    chainAnalysis,
     summary: `分 ${chunks.length} 块评审`,
     chunkCount: chunks.length,
   };
@@ -792,21 +822,14 @@ if (isMainModule(import.meta.url)) {
       if (err instanceof AuthError) throw err;
       result = { verdicts: [], missed: [], error: err?.message ?? String(err) };
     }
-    if (result.missed?.length) {
-      try {
-        const { persistMissed } = await import("./missed-log.mjs");
-        const entries = result.missed.map((m) => ({
-          file: m.file ?? file,
-          line: m.line ?? null,
-          finding: m.finding ?? "",
-          source: "qwen-critic",
-          projectDir: process.cwd(),
-          timestamp: new Date().toISOString(),
-        }));
-        await persistMissed(entries);
-      } catch {
-        // 漏报落库失败不阻断批判输出
-      }
+    try {
+      const { appendCritic, upsertFindings } = await import("./verdict-log.mjs");
+      const criticEntries = mapCriticVerdicts(result.verdicts, findings);
+      if (criticEntries.length) await appendCritic(criticEntries);
+      const missedFindings = buildMissedFindings(result.missed, file);
+      if (missedFindings.length) await upsertFindings(missedFindings);
+    } catch {
+      // 落账失败不阻断批判输出
     }
     console.log(JSON.stringify(result, null, 2));
     process.exit(0);

@@ -14,6 +14,11 @@ import {
   markFixed,
   confirmVerdict,
   getTrace,
+  acquireLock,
+  releaseLock,
+  upsertFindings,
+  appendCritic,
+  appendVerdicts,
 } from "./verdict-log.mjs";
 
 describe("hashContent", () => {
@@ -307,14 +312,21 @@ describe("markFixed rootCause", () => {
 });
 
 describe("confirmVerdict", () => {
-  it("给匹配 finding 追加 confirmed 终审标签", async () => {
+  it("给匹配 finding 追加 confirmed 终审标签（两步）", async () => {
     const dir = await mkdtemp(join(tmpdir(), "verdict-"));
     const p = join(dir, "log.json");
     await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
-    const r = await confirmVerdict("a.js", 1, "f", { final: "false", reason: "代码级核实：已有守卫" }, p);
+    const r = await confirmVerdict("a.js", 1, "f", {
+      final: "false", reason: "代码级核实：已有守卫",
+      independent: { final: "false", reason: "独立判：已有守卫" },
+      comparison: "一致",
+    }, p);
     assert.ok(r, "应找到匹配条目");
     assert.equal(r.confirmed.final, "false");
     assert.ok(r.confirmed.reason.includes("守卫"));
+    assert.equal(r.confirmed.independent.final, "false");
+    assert.equal(r.confirmed.independent.reason, "独立判：已有守卫");
+    assert.equal(r.confirmed.comparison, "一致");
     const log = await loadVerdicts(p);
     assert.equal(log[0].confirmed.final, "false", "持久化后 confirmed 应存在");
   });
@@ -326,10 +338,24 @@ describe("confirmVerdict", () => {
     await assert.rejects(confirmVerdict("a.js", 1, "f", { final: "maybe" }, p), /true|false/i);
   });
 
+  it("reason 空时抛错（终审依据不能为空）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await assert.rejects(confirmVerdict("a.js", 1, "f", { final: "false", reason: "  " }, p), /reason/i);
+  });
+
+  it("缺 independent 抛错（两步终审必须落实）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await assert.rejects(confirmVerdict("a.js", 1, "f", { final: "false", reason: "r" }, p), /independent/i);
+  });
+
   it("匹配不上返回 null", async () => {
     const dir = await mkdtemp(join(tmpdir(), "verdict-"));
     const p = join(dir, "log.json");
-    const r = await confirmVerdict("x.js", 1, "不存在", { final: "false" }, p);
+    const r = await confirmVerdict("x.js", 1, "不存在", { final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c" }, p);
     assert.equal(r, null);
   });
 
@@ -337,8 +363,216 @@ describe("confirmVerdict", () => {
     const dir = await mkdtemp(join(tmpdir(), "verdict-"));
     const p = join(dir, "log.json");
     await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
-    await confirmVerdict("a.js", 1, "f", { final: "false", reason: "r" }, p);
+    await confirmVerdict("a.js", 1, "f", { final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c" }, p);
     const trace = await getTrace("a.js", 1, "f", p);
     assert.equal(trace.confirmed.final, "false");
+  });
+
+  it("getTrace 全链路（报→批→裁→终审两步→修）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", fix: "fix1", chainAnalysis: "ca", models: ["glm-5.2"], source: "audit" }], p);
+    await appendCritic([{ file: "a.js", line: 1, finding: "f", agree: false, reason: "已有守卫" }], p);
+    await appendVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", evidence: "ev", codeHash: "h" }], p);
+    await confirmVerdict("a.js", 1, "f", { final: "true", reason: "r", independent: { final: "true", reason: "i" }, comparison: "一致" }, p);
+    await markFixed("a.js", 1, "f", { commit: "c1", testEvidence: "t", rootCause: "边界" }, p);
+    const trace = await getTrace("a.js", 1, "f", p);
+    assert.equal(trace.finding, "f");
+    assert.equal(trace.fix, "fix1");
+    assert.equal(trace.chainAnalysis, "ca");
+    assert.deepEqual(trace.models, ["glm-5.2"]);
+    assert.equal(trace.source, "audit");
+    assert.equal(trace.critic.agree, false);
+    assert.equal(trace.critic.reason, "已有守卫");
+    assert.equal(trace.verdict, "true");
+    assert.equal(trace.evidence, "ev");
+    assert.equal(trace.confirmed.independent.final, "true");
+    assert.equal(trace.confirmed.comparison, "一致");
+    assert.equal(trace.fixed.rootCause, "边界");
+  });
+
+  it("getTrace 半条记录各环节为 null", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", fix: "fix1" }], p);
+    const trace = await getTrace("a.js", 1, "f", p);
+    assert.equal(trace.finding, "f");
+    assert.equal(trace.fix, "fix1");
+    assert.equal(trace.critic, null);
+    assert.equal(trace.verdict, null);
+    assert.equal(trace.confirmed, null);
+    assert.equal(trace.fixed, null);
+  });
+});
+
+describe("acquireLock / releaseLock（租约锁）", () => {
+  it("acquire 后 release 可再次 acquire", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await acquireLock(lockPath, { maxWaitMs: 1000, retryMs: 10 });
+    await releaseLock(lockPath);
+    await acquireLock(lockPath, { maxWaitMs: 1000, retryMs: 10 });
+    await releaseLock(lockPath);
+  });
+
+  it("死锁接管：持有者 PID 已死", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 99999999, expiresAt: Date.now() + 60000 }));
+    await acquireLock(lockPath, { maxWaitMs: 1000, retryMs: 10 });
+    await releaseLock(lockPath);
+  });
+
+  it("TTL 过期接管（持有者活着但租约已过）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, expiresAt: Date.now() - 1000 }));
+    await acquireLock(lockPath, { maxWaitMs: 1000, retryMs: 10 });
+    await releaseLock(lockPath);
+  });
+
+  it("持有者活着且未过期则超时", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 60000 }));
+    await assert.rejects(acquireLock(lockPath, { maxWaitMs: 300, retryMs: 10 }), /timeout/i);
+  });
+
+  it("releaseLock 只删自己的锁，不删别人的", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, JSON.stringify({ pid: 99999999, expiresAt: Date.now() + 60000 }));
+    await releaseLock(lockPath);
+    const stillThere = await readFile(lockPath, "utf-8").then(() => true).catch(() => false);
+    assert.equal(stillThere, true, "别人的锁不得被删除");
+  });
+
+  it("releaseLock 删自己的锁", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, JSON.stringify({ pid: process.pid, expiresAt: Date.now() + 60000 }));
+    await releaseLock(lockPath);
+    const gone = await readFile(lockPath, "utf-8").then(() => false).catch(() => true);
+    assert.equal(gone, true, "自己的锁应被删除");
+  });
+
+  it("corrupt 锁文件能被清理（不卡死到超时）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-lock-"));
+    const lockPath = join(dir, "lock");
+    await writeFile(lockPath, "not valid json {{{");
+    await acquireLock(lockPath, { maxWaitMs: 2000, retryMs: 10 });
+    await releaseLock(lockPath);
+  });
+});
+
+describe("upsertFindings", () => {
+  it("新条目落账（含 fix/chainAnalysis/models/source）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", fix: "fix1", chainAnalysis: "ca", models: ["glm-5.2"], source: "audit" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 1);
+    assert.equal(log[0].fix, "fix1");
+    assert.equal(log[0].chainAnalysis, "ca");
+    assert.deepEqual(log[0].models, ["glm-5.2"]);
+    assert.equal(log[0].source, "audit");
+  });
+
+  it("同 key 重复落账不重复建（幂等）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const e = { file: "a.js", line: 1, finding: "f", fix: "fix1", models: ["glm-5.2"], source: "audit" };
+    await upsertFindings([e], p);
+    await upsertFindings([{ ...e, fix: "fix2" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 1, "同 key 不得重复建");
+  });
+
+  it("fill-missing-only：不覆盖已有 verdict/confirmed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    const e = { file: "a.js", line: 1, finding: "f", fix: "fix1", models: ["glm-5.2"], source: "audit" };
+    await upsertFindings([e], p);
+    // 模拟裁决 + 终审
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", evidence: "ev" }], p);
+    await confirmVerdict("a.js", 1, "f", { final: "true", reason: "r", independent: { final: "true", reason: "i" }, comparison: "c" }, p);
+    // 重跑落账（模拟 runAudit 重跑）
+    await upsertFindings([{ ...e, fix: "fix-changed" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].verdict, "true", "重跑落账不得覆盖 verdict");
+    assert.equal(log[0].confirmed.final, "true", "重跑落账不得覆盖 confirmed");
+  });
+
+  it("models 合并（多模型报同一 finding）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", models: ["glm-5.2"], source: "audit" }], p);
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", models: ["kimi-k2.7-code"], source: "audit" }], p);
+    const log = await loadVerdicts(p);
+    assert.deepEqual(log[0].models.sort(), ["glm-5.2", "kimi-k2.7-code"].sort());
+  });
+});
+
+describe("appendCritic", () => {
+  it("追加 critic 到匹配条目", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", models: ["glm-5.2"], source: "audit" }], p);
+    await appendCritic([{ file: "a.js", line: 1, finding: "f", agree: false, reason: "已有守卫" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].critic.agree, false);
+    assert.equal(log[0].critic.reason, "已有守卫");
+  });
+
+  it("匹配不上跳过不崩", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f" }], p);
+    await appendCritic([{ file: "不存在.js", line: 9, finding: "x", agree: true, reason: "r" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].critic, undefined, "匹配不上不得写 critic");
+  });
+
+  it("空 entries 不崩", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await appendCritic([], p);
+    assert.deepEqual(await loadVerdicts(p), []);
+  });
+});
+
+describe("appendVerdicts", () => {
+  it("追加 verdict 到已有 finding（保留 fix/chainAnalysis/source）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f", fix: "fix1", chainAnalysis: "ca", models: ["glm-5.2"], source: "audit" }], p);
+    await appendVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", evidence: "ev", codeHash: "h1" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 1, "不得新建重复条目");
+    assert.equal(log[0].verdict, "true");
+    assert.equal(log[0].evidence, "ev");
+    assert.equal(log[0].fix, "fix1", "必须保留找 bug 阶段的 fix");
+    assert.equal(log[0].chainAnalysis, "ca");
+    assert.equal(log[0].source, "audit");
+  });
+
+  it("找不到时新建条目", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await appendVerdicts([{ file: "x.js", line: 1, finding: "f", verdict: "false", evidence: "e" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log.length, 1);
+    assert.equal(log[0].verdict, "false");
+  });
+
+  it("重跑覆盖 verdict/evidence（更新）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f" }], p);
+    await appendVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", evidence: "old" }], p);
+    await appendVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false", evidence: "new" }], p);
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].verdict, "false", "重跑应覆盖 verdict");
+    assert.equal(log[0].evidence, "new");
   });
 });

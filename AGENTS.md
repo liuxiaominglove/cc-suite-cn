@@ -209,7 +209,6 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/known-risks.json` | 信任边界债务单一数据源（resolved/open 清单，guard 校验 schema：id 唯一/resolved 必有 anchor/open 必有风险等级+重新评估条件） |
 | `scripts/verdict-log.mjs` | 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash + confirmVerdict 终审真值） |
 | `scripts/feedback.mjs` | 个人误报回灌（终审标签 → counter-example/正例/根因/漏报 preamble） |
-| `scripts/missed-log.mjs` | qwen 批判员漏报账本（原子写 + 去重） |
 | `scripts/progress.mjs` | 各 AI 误报率进步（基于终审 confirmed 标签，`node scripts/progress.mjs`） |
 | `scripts/benchmark-core.mjs` + `scripts/benchmark.mjs` | 标注基准集（对真值算 precision/recall/f1，prompt A/B） |
 | `scripts/worker-lessons.md` | 工人版口袋书（只收终审确认教训，注入 `[评审教训]` 段） |

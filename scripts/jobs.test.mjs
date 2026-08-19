@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings } from "./jobs.mjs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -471,6 +471,21 @@ describe("runAudit", () => {
     assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
 
+  it("完成后落账：worker 带 chainAnalysis 且 persistFindingsFn 被调", async () => {
+    const review = async ({ model }) => ({
+      success: true, severity: "low",
+      issues: [{ file: "x.js", line: 1, finding: "f", fix: "fx" }],
+      summary: "ok", chainAnalysis: "ca",
+    });
+    let captured = null;
+    const result = await runAudit({ file: "x.js", review, persistAuditLog: false, persistFindingsFn: (workers) => { captured = workers; return [{ file: "x.js", line: 1, finding: "f" }]; } });
+    assert.ok(captured, "应调用 persistFindingsFn");
+    assert.equal(captured.length, 2);
+    assert.ok(captured.every((w) => w.chainAnalysis === "ca"), "worker 应带 chainAnalysis");
+    assert.equal(result.entries.length, 1, "runAudit 应透传 entries（去重后 findings）");
+    assert.equal(result.entries[0].finding, "f");
+  });
+
   it("worker reject null/undefined 时标记失败而非整体崩溃", async () => {
     const review = async ({ model }) => {
       if (model === "kimi-k2.7-code") return Promise.reject(null);
@@ -673,5 +688,60 @@ describe("runJobBackground concurrency", () => {
     const id2 = await p2;
     assert.equal(secondSpawned, true, "释放后第二个应启动");
     assert.ok(id2);
+  });
+});
+
+describe("buildFindingEntries", () => {
+  it("铺平多 worker issues 并去重，models 合并", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, chainAnalysis: "ca1", issues: [{ file: "a.js", line: 1, finding: "f1", fix: "fix1" }] },
+      { model: "kimi-k2.7-code", success: true, chainAnalysis: "ca2", issues: [{ file: "a.js", line: 1, finding: "f1", fix: "fix1" }] },
+    ];
+    const dedup = (flat) => [{ ...flat[0], cluster: flat }];
+    const entries = buildFindingEntries(workers, dedup);
+    assert.equal(entries.length, 1);
+    assert.deepEqual(entries[0].models.sort(), ["glm-5.2", "kimi-k2.7-code"].sort());
+    assert.equal(entries[0].chainAnalysis, "ca1");
+    assert.equal(entries[0].source, "audit");
+  });
+
+  it("success=false 的 worker 跳过", () => {
+    const workers = [
+      { model: "glm-5.2", success: false, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+      { model: "kimi-k2.7-code", success: true, chainAnalysis: "", issues: [{ file: "b.js", line: 2, finding: "g", fix: "fx" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].finding, "g");
+  });
+
+  it("空 workers / 全失败 返回空数组", () => {
+    const dedup = (x) => x;
+    assert.deepEqual(buildFindingEntries([], dedup), []);
+    assert.deepEqual(buildFindingEntries([{ model: "glm", success: false, issues: [] }], dedup), []);
+  });
+
+  it("persistFindings 落账失败仍返回内存 entries", async () => {
+    const workers = [
+      { model: "glm-5.2", success: true, chainAnalysis: "ca", issues: [{ file: "a.js", line: 1, finding: "f", fix: "fx" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const upsert = async () => { throw new Error("write failed"); };
+    const entries = await persistFindings(workers, { dedup, upsert });
+    assert.equal(entries.length, 1, "落账失败仍应返回 entries 供下游使用");
+    assert.equal(entries[0].finding, "f");
+  });
+
+  it("persistFindings 正常落账返回 entries", async () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    let upserted = null;
+    const upsert = async (entries) => { upserted = entries; };
+    const entries = await persistFindings(workers, { dedup, upsert });
+    assert.equal(entries.length, 1);
+    assert.equal(upserted.length, 1, "正常路径应调用 upsert");
   });
 });

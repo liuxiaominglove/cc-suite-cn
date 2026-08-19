@@ -330,7 +330,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null, persistFindingsFn = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -343,7 +343,7 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
         const r = useChunking
           ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble })
           : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
-        return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary };
+        return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary, chainAnalysis: r.chainAnalysis ?? "" };
       } catch (err) {
         return { backend, model, success: false, error: err?.message ?? String(err) };
       }
@@ -359,7 +359,64 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     }
   }
 
-  return { workers };
+  let entries = [];
+  if (persistFindingsFn) {
+    try { entries = await persistFindingsFn(workers) ?? []; } catch {}
+  } else {
+    entries = await persistFindings(workers);
+  }
+
+  return { workers, entries };
+}
+
+export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd() } = {}) {
+  const flat = [];
+  for (const w of workers ?? []) {
+    if (!w || w.success === false) continue;
+    for (const issue of w.issues ?? []) {
+      flat.push({
+        file: issue.file ?? "",
+        line: issue.line ?? null,
+        finding: issue.finding ?? "",
+        fix: issue.fix ?? "",
+        chainAnalysis: w.chainAnalysis ?? "",
+        model: w.model,
+      });
+    }
+  }
+  if (flat.length === 0) return [];
+  const clusters = dedupFn(flat);
+  return clusters.map((c) => {
+    const members = c.cluster ?? [c];
+    return {
+      file: c.file ?? "",
+      line: c.line ?? null,
+      finding: c.finding ?? "",
+      fix: c.fix ?? "",
+      chainAnalysis: c.chainAnalysis ?? "",
+      models: [...new Set(members.map((m) => m.model).filter(Boolean))],
+      source: "audit",
+      projectDir,
+    };
+  });
+}
+
+export async function persistFindings(workers, { dedup = null, upsert = null } = {}) {
+  let entries;
+  try {
+    const dedupFn = dedup ?? (await import("./evaluate-models.mjs")).dedupFindings;
+    entries = buildFindingEntries(workers, dedupFn);
+  } catch {
+    return [];
+  }
+  if (entries.length === 0) return [];
+  try {
+    const upsertFn = upsert ?? (await import("./verdict-log.mjs")).upsertFindings;
+    await upsertFn(entries);
+  } catch {
+    // 落账失败不阻断审计，但保留内存 entries 供下游（批判）使用
+  }
+  return entries;
 }
 
 export function summarizeWorkers(workers) {

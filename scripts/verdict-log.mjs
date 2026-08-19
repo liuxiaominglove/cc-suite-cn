@@ -66,10 +66,81 @@ function enqueue(fn) {
 
 export async function persistVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
   return enqueue(async () => {
-    const existing = await loadVerdicts(filePath);
-    const updated = dedupeVerdicts([...existing, ...(verdicts ?? [])]);
-    await writeVerdictFile(updated, filePath);
-    return updated;
+    return withLock(`${filePath}.lock`, async () => {
+      const existing = await loadVerdicts(filePath);
+      const updated = dedupeVerdicts([...existing, ...(verdicts ?? [])]);
+      await writeVerdictFile(updated, filePath);
+      return updated;
+    });
+  });
+}
+
+export async function upsertFindings(entries, filePath = VERDICT_LOG_PATH) {
+  return enqueue(async () => {
+    return withLock(`${filePath}.lock`, async () => {
+      const log = await loadVerdicts(filePath);
+      const updated = [...log];
+      for (const e of entries ?? []) {
+        if (!e || typeof e !== "object") continue;
+        const key = verdictKey(e);
+        const idx = updated.findIndex((v) => verdictKey(v) === key);
+        if (idx === -1) {
+          updated.push({ ...e });
+        } else {
+          // fill-missing-only：只补找 bug 阶段字段，绝不覆盖 verdict/evidence/codeHash/confirmed/fixed
+          const existing = updated[idx];
+          for (const field of ["fix", "chainAnalysis", "source"]) {
+            if (!existing[field] && e[field]) existing[field] = e[field];
+          }
+          if (Array.isArray(e.models)) {
+            const merged = new Set([...(Array.isArray(existing.models) ? existing.models : []), ...e.models].filter(Boolean));
+            existing.models = [...merged];
+          }
+        }
+      }
+      await writeVerdictFile(updated, filePath);
+      return updated;
+    });
+  });
+}
+
+export async function appendCritic(entries, filePath = VERDICT_LOG_PATH) {
+  return enqueue(async () => {
+    return withLock(`${filePath}.lock`, async () => {
+      const log = await loadVerdicts(filePath);
+      for (const e of entries ?? []) {
+        if (!e || typeof e !== "object") continue;
+        const key = verdictKey(e);
+        const target = log.find((v) => verdictKey(v) === key);
+        if (!target) continue;
+        target.critic = { agree: e.agree === true, reason: e.reason ?? "" };
+      }
+      await writeVerdictFile(log, filePath);
+      return log;
+    });
+  });
+}
+
+export async function appendVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
+  return enqueue(async () => {
+    return withLock(`${filePath}.lock`, async () => {
+      const log = await loadVerdicts(filePath);
+      for (const v of verdicts ?? []) {
+        if (!v || typeof v !== "object") continue;
+        const key = verdictKey(v);
+        const target = log.find((x) => verdictKey(x) === key);
+        if (target) {
+          target.verdict = v.verdict;
+          target.evidence = v.evidence ?? "";
+          if (v.codeHash != null) target.codeHash = v.codeHash;
+          if (Array.isArray(v.models) && v.models.length) target.models = v.models;
+        } else {
+          log.push({ ...v });
+        }
+      }
+      await writeVerdictFile(log, filePath);
+      return log;
+    });
   });
 }
 
@@ -86,28 +157,53 @@ export function isVerdictStale(verdict, currentContent) {
 
 export async function markFixed(file, line, finding, { commit, testEvidence, rootCause, fixedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
   return enqueue(async () => {
-    const log = await loadVerdicts(filePath);
-    const key = verdictKey({ file, line, finding });
-    const target = log.find((v) => verdictKey(v) === key);
-    if (!target) return null;
-    target.fixed = { commit, testEvidence, rootCause, fixedAt };
-    await writeVerdictFile(log, filePath);
-    return target;
+    return withLock(`${filePath}.lock`, async () => {
+      const log = await loadVerdicts(filePath);
+      const key = verdictKey({ file, line, finding });
+      const target = log.find((v) => verdictKey(v) === key);
+      if (!target) return null;
+      target.fixed = { commit, testEvidence, rootCause, fixedAt };
+      await writeVerdictFile(log, filePath);
+      return target;
+    });
   });
 }
 
-export async function confirmVerdict(file, line, finding, { final, reason, confirmedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
+export async function confirmVerdict(file, line, finding, { final, reason, independent = null, comparison = "", confirmedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
   if (final !== "true" && final !== "false") {
     throw new Error(`confirmVerdict final must be "true" or "false", got: ${final}`);
   }
+  if (typeof reason !== "string" || !reason.trim()) {
+    throw new Error("confirmVerdict reason must be a non-empty string (终审依据不能为空)");
+  }
+  if (!independent || typeof independent !== "object") {
+    throw new Error("confirmVerdict independent is required (两步终审：步骤 1 盲判必须落实)");
+  }
+  if (independent.final !== "true" && independent.final !== "false") {
+    throw new Error(`confirmVerdict independent.final must be "true" or "false"`);
+  }
+  if (typeof independent.reason !== "string" || !independent.reason.trim()) {
+    throw new Error("confirmVerdict independent.reason must be a non-empty string");
+  }
+  if (typeof comparison !== "string" || !comparison.trim()) {
+    throw new Error("confirmVerdict comparison must be a non-empty string (步骤 2 对比必须落实)");
+  }
   return enqueue(async () => {
-    const log = await loadVerdicts(filePath);
-    const key = verdictKey({ file, line, finding });
-    const target = log.find((v) => verdictKey(v) === key);
-    if (!target) return null;
-    target.confirmed = { final, reason: reason ?? "", confirmedAt };
-    await writeVerdictFile(log, filePath);
-    return target;
+    return withLock(`${filePath}.lock`, async () => {
+      const log = await loadVerdicts(filePath);
+      const key = verdictKey({ file, line, finding });
+      const target = log.find((v) => verdictKey(v) === key);
+      if (!target) return null;
+      target.confirmed = {
+        final,
+        reason,
+        independent: { final: independent.final, reason: independent.reason },
+        comparison,
+        confirmedAt,
+      };
+      await writeVerdictFile(log, filePath);
+      return target;
+    });
   });
 }
 
@@ -117,10 +213,95 @@ export async function getTrace(file, line, finding, filePath = VERDICT_LOG_PATH)
   const target = log.find((v) => verdictKey(v) === key);
   if (!target) return null;
   return {
-    verdict: target.verdict,
-    evidence: target.evidence ?? "",
+    finding: target.finding ?? "",
+    fix: target.fix ?? null,
+    chainAnalysis: target.chainAnalysis ?? null,
+    models: target.models ?? null,
+    source: target.source ?? null,
+    critic: target.critic ?? null,
+    verdict: target.verdict ?? null,
+    evidence: target.evidence ?? null,
     codeHash: target.codeHash ?? null,
-    fixed: target.fixed ?? null,
     confirmed: target.confirmed ?? null,
+    fixed: target.fixed ?? null,
   };
+}
+
+function isPidAlive(pid) {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code !== "ESRCH";
+  }
+}
+
+async function readLockFile(lockPath) {
+  try {
+    const raw = await readFile(lockPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") return parsed;
+    return { corrupt: true };
+  } catch (err) {
+    if (err && err.code === "ENOENT") return null;
+    return { corrupt: true };
+  }
+}
+
+export async function acquireLock(lockPath, { ttlMs = 10000, retryMs = 50, maxWaitMs = 30000, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), alive = isPidAlive } = {}) {
+  const deadline = now() + maxWaitMs;
+  for (;;) {
+    const existing = await readLockFile(lockPath);
+    const stale = existing
+      ? (existing.corrupt || !alive(existing.pid) || (typeof existing.expiresAt === "number" && existing.expiresAt < now()))
+      : false;
+    if (!existing || stale) {
+      if (stale) {
+        if (existing.corrupt) {
+          // corrupt 锁没有有效 pid/expiresAt，直接删（否则会卡到超时）
+          try { await unlink(lockPath); } catch {}
+        } else {
+          // 重读确认仍 stale 才删：缩小"删掉别人刚建的新锁"的 TOCTOU 窗口
+          const latest = await readLockFile(lockPath);
+          const sameStale = latest && !latest.corrupt && latest.pid === existing.pid && latest.expiresAt === existing.expiresAt;
+          if (sameStale) {
+            try { await unlink(lockPath); } catch {}
+          }
+        }
+      }
+      try {
+        await writeFile(lockPath, JSON.stringify({ pid: process.pid, expiresAt: now() + ttlMs }), { flag: "wx" });
+        return;
+      } catch (err) {
+        if (err && err.code === "EEXIST") {
+          // 竞争：别的进程刚建锁，重试
+        } else {
+          throw err;
+        }
+      }
+    }
+    if (now() >= deadline) {
+      throw new Error("acquireLock timeout: lock held by a live process");
+    }
+    await sleep(retryMs);
+  }
+}
+
+export async function releaseLock(lockPath) {
+  try {
+    const existing = await readLockFile(lockPath);
+    if (existing && !existing.corrupt && existing.pid === process.pid) {
+      await unlink(lockPath);
+    }
+  } catch {}
+}
+
+async function withLock(lockPath, fn) {
+  await acquireLock(lockPath);
+  try {
+    return await fn();
+  } finally {
+    await releaseLock(lockPath);
+  }
 }

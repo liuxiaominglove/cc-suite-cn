@@ -112,7 +112,7 @@ export function buildAdjudicatorPrompt(finding, code, rules = "", relatedCode = 
   const rulesSection = (rules ?? "").trim() ? `\n\n[项目规则]\n${rules}` : "";
   const relatedSection = (relatedCode ?? "").trim() ? `\n\n[相关模块源码]（本文件 import 的本地模块，判断 finding 时请查阅其中函数的真实实现）\n${relatedCode}` : "";
   const stackSection = (stackContext ?? "").trim() ? `\n\n[技术栈] ${stackContext}` : "";
-  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${stackSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
+  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。盲评纪律：上游批判员和评审员的结论与理由均未附给你，你必须只凭代码本身独立判断。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${stackSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
 }
 
 export function parseVerdict(text) {
@@ -280,6 +280,51 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   return { perModel, minSamples: MIN_SAMPLES, arbitrated: arbitrate, verdicts };
 }
 
+export async function adjudicateLedger({
+  load = null,
+  resolveCode = null,
+  resolveRules = null,
+  resolveImportContext = null,
+  resolveStackContext = null,
+  adjudicateFn = adjudicate,
+  persist = null,
+  retries = 0,
+  adjudicateConcurrency = ADJUDICATE_CONCURRENCY,
+  projectDir = null,
+  files = null,
+} = {}) {
+  const loadFn = load ?? (async () => (await import("./verdict-log.mjs")).loadVerdicts());
+  const persistFn = persist ?? (async (vs) => (await import("./verdict-log.mjs")).appendVerdicts(vs));
+  const log = await loadFn();
+  let pending = (log ?? []).filter((v) => v && v.verdict !== "true" && v.verdict !== "false");
+  if (Array.isArray(files) && files.length) {
+    pending = pending.filter((v) => files.some((f) => matchesFileFilter(v.file, f)));
+  }
+  if (pending.length === 0) return [];
+  const rules = resolveRules ? await resolveRules() : "";
+  const results = await mapLimit(pending, adjudicateConcurrency, async (f) => {
+    const file = f.file ?? "";
+    const code = resolveCode ? await resolveCode(file) : "";
+    const relatedCode = resolveImportContext ? await resolveImportContext(file) : "";
+    const stackContext = resolveStackContext ? await resolveStackContext(file) : "";
+    const result = await adjudicateFn({ finding: f.finding ?? "", code: code || "", line: f.line ?? null, rules, relatedCode, stackContext, retries });
+    return {
+      file,
+      line: f.line ?? null,
+      finding: f.finding ?? "",
+      verdict: result?.verdict,
+      evidence: result?.evidence ?? "",
+      codeHash: hashContent(code),
+      models: f.models ?? [],
+      source: f.source ?? null,
+      projectDir: projectDir || process.cwd(),
+      timestamp: new Date().toISOString(),
+    };
+  });
+  await persistFn(results);
+  return results;
+}
+
 export async function loadAudits({ files = null } = {}) {
   const { defaultStore } = await import("./jobs.mjs");
   const store = defaultStore();
@@ -368,7 +413,22 @@ export async function confirmFindings(entries, { confirmFn = null, now = () => n
       results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: `invalid final: ${final}` });
       continue;
     }
-    const matched = await confirm(e.file, e.line, e.finding, { final, reason: e?.reason ?? "", confirmedAt: batchAt });
+    const reason = typeof e?.reason === "string" ? e.reason.trim() : "";
+    if (!reason) {
+      results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: "missing reason: 终审必须附代码级依据" });
+      continue;
+    }
+    const independent = e?.independent;
+    if (!independent || typeof independent !== "object" || (independent.final !== "true" && independent.final !== "false") || typeof independent.reason !== "string" || !independent.reason.trim()) {
+      results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: "missing independent: 两步终审步骤 1 盲判必须落实" });
+      continue;
+    }
+    const comparison = typeof e?.comparison === "string" ? e.comparison.trim() : "";
+    if (!comparison) {
+      results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: "missing comparison: 两步终审步骤 2 对比必须落实" });
+      continue;
+    }
+    const matched = await confirm(e.file, e.line, e.finding, { final, reason, independent, comparison, confirmedAt: batchAt });
     results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: matched != null, matched: matched != null });
   }
   return { batchAt, results };
@@ -406,6 +466,33 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
   try {
     const arbitrate = args.includes("--arbitrate");
     const files = parseFileFilterArgs(args);
+
+    if (arbitrate) {
+      const { loadVerdicts } = await import("./verdict-log.mjs");
+      const log = await loadVerdicts();
+      const allFiles = [...new Set((log ?? []).map((v) => v.file).filter(Boolean))];
+      const resolveCode = makeResolveCode(allFiles);
+      const resolveImportContext = async (file) => {
+        if (!file || !allFiles.includes(file)) return "";
+        try { return await collectImportContext(file); } catch { return ""; }
+      };
+      const resolveStackContext = async (file) => {
+        if (!file || !allFiles.includes(file)) return "";
+        try { return await collectStackContext(dirname(file)); } catch { return ""; }
+      };
+      const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
+      const results = await adjudicateLedger({ resolveCode, resolveRules, resolveImportContext, resolveStackContext, files, retries: 2 });
+      if (results.length === 0) {
+        stdout.write("(暂无待裁决的 finding)\n");
+        return 0;
+      }
+      const t = results.filter((r) => r.verdict === "true").length;
+      const f = results.filter((r) => r.verdict === "false").length;
+      const u = results.length - t - f;
+      stdout.write(`已裁决 ${results.length} 条到统一账本（真 ${t} / 假 ${f} / 不确定 ${u}）\n`);
+      return 0;
+    }
+
     const audits = await load({ files });
 
     if (audits.length === 0) {

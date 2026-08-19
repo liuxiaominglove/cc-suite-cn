@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, hashFileContent, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, hashFileContent, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -978,6 +978,7 @@ describe("VERIFY_PROMPT", () => {
     assert.ok(VERIFY_PROMPT.includes("回归"));
     assert.ok(VERIFY_PROMPT.includes("逐处"));
     assert.ok(VERIFY_PROMPT.includes("遗漏"));
+    assert.ok(VERIFY_PROMPT.includes("chain_analysis"), "复审应要求 chain_analysis 依据字段");
   });
 });
 
@@ -1153,6 +1154,18 @@ describe("reviewFile", () => {
     const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
     const r = await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 0 });
     assert.equal(r.severity, "high");
+  });
+
+  it("聚合多块 chainAnalysis 为单个字符串（过滤空块）", async () => {
+    let i = 0;
+    const reviewFn = async () => {
+      i += 1;
+      const analysis = i === 2 ? "" : `chunk${i} analysis`;
+      return { success: true, severity: "low", issues: [], summary: "ok", chainAnalysis: analysis };
+    };
+    const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
+    const r = await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 10 });
+    assert.equal(r.chainAnalysis, "chunk1 analysis\nchunk3 analysis");
   });
 });
 
@@ -1677,6 +1690,7 @@ describe("review parses chain_analysis", () => {
     assert.equal(r.severity, "low");
     assert.equal(r.issues.length, 1);
     assert.equal(r.issues[0].finding, "real bug");
+    assert.equal(r.chainAnalysis, "issue1 involves openDb; openDb internally calls resolveDbPath which expands ~");
   });
 });
 
@@ -1764,6 +1778,7 @@ describe("criticize", () => {
     assert.match(CRITIC_PROMPT, /同意/, "应含同意");
     assert.match(CRITIC_PROMPT, /反对/, "应含反对");
     assert.match(CRITIC_PROMPT, /遗漏/, "应含补漏");
+    assert.match(CRITIC_PROMPT, /为什么是漏报/, "missed 应要求 reason 依据");
   });
 
   it("buildCriticPrompt 含 findings 清单 + code", () => {
@@ -1803,6 +1818,40 @@ describe("criticize", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await criticize({ findings: [], code: "x" });
     assert.deepEqual(r, { verdicts: [], missed: [] });
+  });
+
+  it("mapCriticVerdicts 按 index 映射回 findings（越界跳过）", () => {
+    const verdicts = [
+      { index: 0, agree: false, reason: "r0" },
+      { index: 2, agree: true, reason: "r2" },
+      { index: 99, agree: true, reason: "越界" },
+    ];
+    const findings = [
+      { file: "a.js", line: 1, finding: "f0" },
+      { file: "b.js", line: 2, finding: "f1" },
+      { file: "c.js", line: 3, finding: "f2" },
+    ];
+    const mapped = mapCriticVerdicts(verdicts, findings);
+    assert.equal(mapped.length, 2, "越界 index 应跳过");
+    assert.equal(mapped[0].file, "a.js");
+    assert.equal(mapped[0].agree, false);
+    assert.equal(mapped[1].file, "c.js");
+    assert.equal(mapped[1].agree, true);
+  });
+
+  it("buildMissedFindings 映射为 qwen-critic 条目（reason 存 chainAnalysis）", () => {
+    const missed = [{ file: "d.js", line: 4, finding: "漏报", reason: "为什么漏" }];
+    const entries = buildMissedFindings(missed, "fallback.js");
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].file, "d.js");
+    assert.equal(entries[0].source, "qwen-critic");
+    assert.equal(entries[0].chainAnalysis, "为什么漏");
+    assert.deepEqual(entries[0].models, ["qwen3-coder-plus"]);
+  });
+
+  it("buildMissedFindings 模型参数化（不硬编码）", () => {
+    const entries = buildMissedFindings([{ finding: "f" }], "fb.js", { model: "custom-critic" });
+    assert.deepEqual(entries[0].models, ["custom-critic"]);
   });
 
   it("criticize 空输出重试后成功", async () => {

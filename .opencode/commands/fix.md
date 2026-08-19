@@ -21,16 +21,18 @@ node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..."   #
 
 ## Step 2: 批判（qwen 第二意见）
 
-把 Step 1 的 findings 扁平成一个数组写到 `/tmp/findings.json`（格式 `[{file, line, finding}, ...]`，读 `<job-id>` 的 `result.workers[].issues` 逐个铺平），然后：
+从 Step 1 的 `<job-id>` 结果里读 `result.entries`（**去重后的 findings**，含 file/line/finding），写成 `/tmp/findings.json`，然后：
 
 ```
 node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3-coder-plus
 ```
 
-输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding}]}`：
+输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding, reason}]}`：
 
-- **verdicts**：qwen 逐条判「同意/反对」——判「反对」（假阳）的，Step 3 裁决 / Step 4 终审重点复核。
-- **missed**：qwen 补漏的真 bug——并入待裁清单，随 Step 4 终审一起核实。
+- **verdicts**：qwen 逐条判「同意/反对」——判「反对」（假阳）的，Step 4 终审重点复核。
+- **missed**：qwen 补漏的真 bug（含 reason）——自动落进统一账本（`source=qwen-critic`），随 Step 3 裁决一起被 hy3 判真假。
+
+> **批判是盲评**：qwen 拿到的清单只有 file/line/finding（不给 fix/chain_analysis/上游结论），必须只凭代码独立判断。
 
 ## Step 3: 裁决（hy3，强制前置，不可跳过）
 
@@ -40,9 +42,10 @@ node scripts/evaluate-models.mjs --arbitrate
 
 （若 hy3 不可用或 `--arbitrate` 报错 → 停下报告用户，**不许静默跳过**——裁决是硬门槛。）
 
-hy3 逐条判 finding 真假，并把每条 verdict 落库到 `.cc-suite-cn/verdict-log.json`（含 codeHash 代码快照）。**裁决的是当前账本里所有已完成的 audit**（累积裁决，按 file+line+finding 去重）。
+hy3 逐条裁决统一账本里**尚未裁决**的 finding（含 `source=audit` 和 `source=qwen-critic`），并把每条 `verdict/evidence/codeHash` 追加到 `.cc-suite-cn/verdict-log.json`。输出「已裁决 N 条（真 X / 假 Y / 不确定 Z）」。
 
 > **这是硬门槛**：没裁决过的 finding 不在待修清单里，opencode 不能修。跳过本步直接修，就是"先修后验"，会导致 hy3 看到的是修好的代码、误判成假阳。
+> **盲评**：hy3 裁决时只拿到 finding + 代码，不给 qwen 的批判结论、不给 glm/kimi 的 fix/chain_analysis，独立判真假。
 
 ## Step 4: 终审 + 修 bug（opencode 亲自，严格 TDD）
 
@@ -59,17 +62,26 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 - **codeHash 校验**：修前确认该文件自裁决后没被改过；若 `isVerdictStale` 为 true（代码已变），须重新 `/evaluate --arbitrate` 再修。
 - **修前分级**：对待修清单按影响**分级**——high（安全/崩溃/数据损坏）先修，low（边界/措辞类）可后置并在 `docs/verification.md` 标注"后置"；不必对每条平均用力。
 
-### 4.2 终审写回（全量打标，错题本）
+### 4.2 终审写回（两步终审，全量打标，错题本）
 
-终审对**每条** finding（不只是 verdict=true 的，含 hy3 判 false 的）都给出最终结论 `final=true/false` + 一句 `reason`，落成 JSON 数组跑 `--confirm` 写回裁决账本——这是"每个员工的错题本"，下次 /audit 会自动回灌个人误报、`progress.mjs` 据此算进步。命令：
+终审对**每条** finding（不只是 verdict=true 的，含 hy3 判 false 的）分**两步**独立判断，最后落成 JSON 数组跑 `--confirm` 写回裁决账本——这是"每个员工的错题本"，下次 /audit 会自动回灌个人误报、`progress.mjs` 据此算进步。
+
+**两步终审（盲判 → 对比）**：
+
+1. **步骤 1 盲判**：先**不看**裁决账本里 hy3 的 `verdict/evidence`、qwen 的 `agree/reason`、glm/kimi 的 `chain_analysis`——只读源码本身，独立判断这条 finding 是真是假，写下你自己的依据。
+2. **步骤 2 对比终判**：再打开 `.cc-suite-cn/verdict-log.json` 翻出上游所有理由，跟步骤 1 自己的依据对照，确认「一致」或「分歧」，做最终 `final=true/false` 判定。
+
+**`reason` 是终判依据，必须非空**（`--confirm` 会拒绝空 reason）。总结报告里显式写清两步：「步骤 1 独立判 X / 步骤 2 对比后终判 Y / 与上游一致或分歧」。
+
+命令：
 
 ```
-node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(await m.loadVerdicts(), null, 2)))"   # 先看全量清单
-# opencode 逐条终审后，写 /tmp/confirm.json：[{"file","line","finding","final":"true|false","reason":"一句理由"}, ...]
+node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(await m.loadVerdicts(), null, 2)))"   # 步骤 2 才看；步骤 1 先只读源码
+# opencode 两步终审后，写 /tmp/confirm.json：[{"file","line","finding","final":"true|false","reason":"终判依据（非空）","independent":{"final":"true|false","reason":"步骤1独立判依据"},"comparison":"与上游一致/分歧"}, ...]
 node scripts/evaluate-models.mjs --confirm /tmp/confirm.json
 ```
 
-`final` 只认 `true`/`false`；漏写某条 = 该条不进错题本，进步统计会缺样本。
+`final` 只认 `true`/`false`；`reason` / `independent.final` / `independent.reason` / `comparison` 全部非空（缺一个 `--confirm` 拒绝写回）；漏写某条 = 该条不进错题本，进步统计会缺样本。
 
 ### 4.3 修 bug（TDD）
 

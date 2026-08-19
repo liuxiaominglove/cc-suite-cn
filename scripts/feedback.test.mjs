@@ -13,6 +13,7 @@ import {
   pickMissed,
   formatMissedItem,
   buildMissedPreamble,
+  filterMissedForFeedback,
   createFeedbackResolver,
 } from "./feedback.mjs";
 
@@ -253,6 +254,21 @@ describe("createFeedbackResolver 漏报", () => {
     const s = resolve("glm-5.2", "a.js");
     assert.ok(s.includes("漏掉"), s);
     assert.ok(s.includes("missed bug"), s);
+  });
+});
+
+describe("filterMissedForFeedback", () => {
+  it("只回灌确认为真的补漏（排除假阳 + 未裁决）", () => {
+    const log = [
+      { file: "a.js", source: "qwen-critic", finding: "真补漏", verdict: "true" },
+      { file: "b.js", source: "qwen-critic", finding: "假阳补漏", verdict: "false" },
+      { file: "c.js", source: "qwen-critic", finding: "未裁决", verdict: null },
+      { file: "d.js", source: "qwen-critic", finding: "终审假", verdict: "true", confirmed: { final: "false" } },
+      { file: "e.js", source: "audit", finding: "不是补漏", verdict: "true" },
+      { file: "f.js", source: "qwen-critic", finding: "终审真", verdict: null, confirmed: { final: "true" } },
+    ];
+    const out = filterMissedForFeedback(log);
+    assert.deepEqual(out.map((v) => v.finding), ["真补漏", "终审真"]);
   });
 });
 

@@ -83,11 +83,24 @@ describe("命令/规格（WI-5）", () => {
     assert.match(c, /未提交改动|工作区/, "audit.md 缺工作区未提交提示");
   });
 
+  it("audit-full.md Step 2 批判员用 --critic（非单壳找 bug）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/audit-full.md"), "utf8");
+    assert.match(c, /--critic/, "audit-full.md 缺 --critic 批判命令");
+    assert.match(c, /--findings-file/, "audit-full.md 缺 --findings-file 输入");
+  });
+
   it("fix.md 含审计前置两道闸门", () => {
     const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
     assert.match(c, /审计前置两道闸门/, "fix.md 缺审计前置闸门声明");
     assert.match(c, /可选.*修复计划|修复计划.*可选/, "fix.md 缺可选修复计划提示");
     assert.match(c, /根因/, "fix.md 缺顺手写根因提示");
+  });
+
+  it("fix.md 含两步终审（盲判 → 对比）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
+    assert.match(c, /两步终审/, "fix.md 缺两步终审");
+    assert.match(c, /步骤 1 盲判|步骤 1.*盲判|盲判/, "fix.md 缺步骤 1 盲判");
+    assert.match(c, /步骤 2 对比|对比终判/, "fix.md 缺步骤 2 对比");
   });
 
   it("docs/trust-boundary.md 存在且含已落地 + 搁置 + 重新评估条件", () => {

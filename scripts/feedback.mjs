@@ -90,7 +90,8 @@ export function pickMissed(log, { file = null, projectDir = null, topN = 3 } = {
 
 export function formatMissedItem(v) {
   const loc = [v?.file, v?.line].filter((x) => x != null).join(":");
-  return `- ${loc || "(未知位置)"} — ${v?.finding ?? ""}`;
+  const reason = v?.chainAnalysis ? `（依据：${v.chainAnalysis}）` : "";
+  return `- ${loc || "(未知位置)"} — ${v?.finding ?? ""}${reason}`;
 }
 
 export function buildMissedPreamble(log, { file = null, projectDir = null, topN = 3 } = {}) {
@@ -98,9 +99,22 @@ export function buildMissedPreamble(log, { file = null, projectDir = null, topN 
   return items.length ? `[其他评审员发现你漏掉的 bug——这次注意]\n${items.map(formatMissedItem).join("\n")}` : "";
 }
 
+export function filterMissedForFeedback(log) {
+  return (log ?? []).filter((v) => {
+    if (!v || v.source !== "qwen-critic") return false;
+    if (v.confirmed && v.confirmed.final === "true") return true;
+    if (v.confirmed && v.confirmed.final === "false") return false;
+    return v.verdict === "true";
+  });
+}
+
 export async function createFeedbackResolver({ load = null, loadMissed = null, topN = 5, rootCauseTopN = 3, missedTopN = 3, projectDir = process.cwd() } = {}) {
   const loadFn = load ?? (await import("./verdict-log.mjs")).loadVerdicts;
-  const loadMissedFn = loadMissed ?? (await import("./missed-log.mjs")).loadMissed;
+  const loadMissedFn = loadMissed ?? (async () => {
+    const { loadVerdicts } = await import("./verdict-log.mjs");
+    const log = await loadVerdicts();
+    return filterMissedForFeedback(log);
+  });
   let log = [];
   let missed = [];
   try {

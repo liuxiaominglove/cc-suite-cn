@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-runner.mjs";
 
@@ -187,6 +187,7 @@ describe("buildAdjudicatorPrompt", () => {
     assert.ok(p.includes("removeItem null crash"), "should carry the finding");
     assert.ok(p.includes("function x(){}"), "should carry the code");
     assert.ok(p.includes("verdict"), "should ask for a verdict");
+    assert.ok(p.includes("盲评纪律"), "应含盲评纪律（独立判，不依赖上游）");
   });
 
   it("injects project rules when provided", () => {
@@ -817,8 +818,8 @@ describe("confirmFindings", () => {
     };
     const { batchAt, results } = await confirmFindings(
       [
-        { file: "a.js", line: 1, finding: "f1", final: "false", reason: "r1" },
-        { file: "b.js", line: 2, finding: "f2", final: "true", reason: "r2" },
+        { file: "a.js", line: 1, finding: "f1", final: "false", reason: "r1", independent: { final: "false", reason: "i1" }, comparison: "c1" },
+        { file: "b.js", line: 2, finding: "f2", final: "true", reason: "r2", independent: { final: "true", reason: "i2" }, comparison: "c2" },
       ],
       { confirmFn, now: () => "BATCH" }
     );
@@ -840,6 +841,27 @@ describe("confirmFindings", () => {
     assert.ok(results[0].error.includes("invalid final"));
   });
 
+  it("reason 空时记为失败条目（终审必须附依据）", async () => {
+    const confirmFn = async () => { throw new Error("不应被调用"); };
+    const { results } = await confirmFindings(
+      [{ file: "a.js", line: 1, finding: "f", final: "false", reason: "   " }],
+      { confirmFn }
+    );
+    assert.equal(results.length, 1);
+    assert.equal(results[0].ok, false);
+    assert.ok(results[0].error.includes("missing reason"), "应报缺 reason 依据");
+  });
+
+  it("缺 independent 记为失败条目（两步终审步骤 1 必须落实）", async () => {
+    const confirmFn = async () => { throw new Error("不应被调用"); };
+    const { results } = await confirmFindings(
+      [{ file: "a.js", line: 1, finding: "f", final: "false", reason: "r" }],
+      { confirmFn }
+    );
+    assert.equal(results[0].ok, false);
+    assert.ok(results[0].error.includes("missing independent"));
+  });
+
   it("空数组不报错", async () => {
     const { results } = await confirmFindings([], { confirmFn: async () => ({}) });
     assert.deepEqual(results, []);
@@ -847,7 +869,7 @@ describe("confirmFindings", () => {
 
   it("confirmFn 返回 null（未匹配）时 ok=false", async () => {
     const { results } = await confirmFindings(
-      [{ file: "a.js", line: 1, finding: "f", final: "false" }],
+      [{ file: "a.js", line: 1, finding: "f", final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c" }],
       { confirmFn: async () => null }
     );
     assert.equal(results[0].ok, false);
@@ -869,7 +891,7 @@ describe("confirmCli", () => {
   it("读 JSON 数组并写回", async () => {
     let out = "";
     let err = "";
-    const readFile = async () => JSON.stringify([{ file: "a.js", line: 1, finding: "f", final: "false" }]);
+    const readFile = async () => JSON.stringify([{ file: "a.js", line: 1, finding: "f", final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c" }]);
     const code = await confirmCli(
       ["--confirm", "x.json"],
       { readFile, confirmFn: async () => ({ confirmed: {} }), stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } } }
@@ -900,21 +922,70 @@ describe("cli --file 过滤", () => {
     let captured = null;
     const load = async (opts) => { captured = opts; return []; };
     let out = "";
-    await cli(["--arbitrate", "--file", "jobs.mjs"], { load, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    await cli(["--file", "jobs.mjs"], { load, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
     assert.deepEqual(captured.files, ["jobs.mjs"]);
   });
 
   it("把 --files 逗号多值传给 load", async () => {
     let captured = null;
     const load = async (opts) => { captured = opts; return []; };
-    await cli(["--arbitrate", "--files", "jobs.mjs,guard.mjs"], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    await cli(["--files", "jobs.mjs,guard.mjs"], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
     assert.deepEqual(captured.files, ["jobs.mjs", "guard.mjs"]);
   });
 
   it("无 --file 时传 null（向后兼容）", async () => {
     let captured = null;
     const load = async (opts) => { captured = opts; return []; };
-    await cli(["--arbitrate"], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    await cli([], { load, stdout: { write: () => {} }, stderr: { write: () => {} } });
     assert.deepEqual(captured.files, null);
+  });
+});
+
+describe("adjudicateLedger", () => {
+  it("只裁 verdict 为空的 finding，追加 verdict/evidence/codeHash", async () => {
+    const log = [
+      { file: "a.js", line: 1, finding: "f1", verdict: null },
+      { file: "b.js", line: 2, finding: "f2", verdict: "true" },
+      { file: "c.js", line: 3, finding: "f3" },
+    ];
+    const resolveCode = async (file) => `code of ${file}`;
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: `ev-${finding}` });
+    let persisted = null;
+    const persist = async (vs) => { persisted = vs; };
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist });
+    assert.equal(results.length, 2, "只裁 f1 和 f3");
+    assert.deepEqual(results.map((r) => r.finding), ["f1", "f3"]);
+    assert.equal(results[0].verdict, "true");
+    assert.equal(results[0].evidence, "ev-f1");
+    assert.ok(results[0].codeHash, "应有 codeHash");
+    assert.equal(persisted.length, 2);
+  });
+
+  it("verdict=uncertain 也重裁", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f", verdict: "uncertain" }];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async () => ({ verdict: "false", evidence: "e" });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {} });
+    assert.equal(results.length, 1);
+  });
+
+  it("空 pending 不调 persist", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f", verdict: "true" }];
+    let called = false;
+    const persist = async () => { called = true; };
+    const results = await adjudicateLedger({ load: async () => log, adjudicateFn: async () => ({}), persist });
+    assert.deepEqual(results, []);
+    assert.equal(called, false);
+  });
+
+  it("files 过滤只裁匹配的 finding", async () => {
+    const log = [
+      { file: "a.js", line: 1, finding: "f1" },
+      { file: "b.js", line: 2, finding: "f2" },
+    ];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, files: ["a.js"] });
+    assert.deepEqual(results.map((r) => r.finding), ["f1"], "应只裁 a.js");
   });
 });

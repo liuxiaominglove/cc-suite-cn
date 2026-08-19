@@ -881,3 +881,35 @@
 
 - `pnpm test:unit`：**669 全绿** + guard 绿。
 - `/verify` diff 审查（glm+kimi）：glm 4 finding（3 假阳：self-audit 审计列表无 delegation-boundary / commands.test 动态枚举 / features.md 本就无 B 分身；1 真：台账遗漏，已补 G-5），kimi 0 finding。改动行内无回归。
+
+---
+
+# 任务 H：依据对齐 + 盲评 + 两步终审 + 统一账本（阶段 2）
+
+**动机**：三个环节（找 bug/批判/裁决）的"依据"原先断裂——chain_analysis 被丢、qwen 批判不落账、missed 无依据、裁决闭眼判；终审是糊涂账；账本分散三处。目标是"一条 finding 从被报到被修，每一步谁判了什么、为什么、依据是什么，全可追溯"。
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| H-1: 保留 chain_analysis（找 bug 推理链） | `review()` 返回 `chainAnalysis`；`reviewFile()` 分块聚合（过滤空块）；`runAudit` worker 带 chainAnalysis | 🟢 | 2026-08-19 |
+| H-2: 统一账本（finding 全生命周期） | `upsertFindings`（fill-missing-only 幂等）/ `appendCritic` / `appendVerdicts` / `confirmVerdict` 两步；一条 finding 从找 bug 落账到修复全链路字段 | 🟢 | 2026-08-19 |
+| H-3: 去重前移 + 稳定主键 | `buildFindingEntries` 在 runAudit 落账时 dedup，`models`=去重簇所有模型；批判输入 = 去重后 entries | 🟢 | 2026-08-19 |
+| H-4: 盲评纪律（下游连结论都不给） | qwen/hy3 prompt 加「上游结论与理由均未附，只凭代码独立判」；裁决只给 finding+代码 | 🟢 | 2026-08-19 |
+| H-5: 两步终审强制落实 | `confirmVerdict`/`confirmFindings` 强制 `independent.final/reason` + `comparison` + `reason` 全非空，缺一拒绝写回 | 🟢 | 2026-08-19 |
+| H-6: missed 进统一账本 + 进裁决 | qwen 补漏落账 `source=qwen-critic`（reason 存 chainAnalysis），裁决统一裁 pending（含 qwen-critic）；废弃 missed-log | 🟢 | 2026-08-19 |
+| H-7: 跨进程租约锁 | `acquireLock`/`releaseLock`（PID 探活 + TTL 过期接管），写操作全部包锁 | 🟢 | 2026-08-19 |
+| H-8: getTrace 全链路 | 报→批→裁→终审(两步)→修，缺失环节显式 null | 🟢 | 2026-08-19 |
+
+## 结果
+
+- `pnpm test:unit`：**696 全绿** + guard 绿。
+- 关键改动：`verdict-log.mjs`（账本核心）、`jobs.mjs`（runAudit 落账）、`review-runner.mjs`（批判落账）、`evaluate-models.mjs`（裁决读账本 + 两步终审）、`feedback.mjs`（从统一账本读 missed）；删 `missed-log.mjs` + test。
+- 迁移：missed-log.json 为空（`[]`），无历史数据，直接删除。
+
+## 复审（/verify diff 审查，三轮）
+
+- **第一轮**：kimi 6 finding（4 真已修：runAudit 落账失败吞 entries / feedback 回灌未过滤 / buildMissedFindings 硬编码模型 / releaseLock 无条件删锁；2 假阳：REVIEW_PROMPT 缺 chain_analysis / collectProjectRules 签名）；glm 空输出（限流）。
+- **第二轮**：kimi 3 finding（--arbitrate 忽略 --file 已修 / 锁 stale 清理 race 缩小窗口 / adjudicateLedger 锁外加载 = 有意设计不修）；glm 空输出。
+- **第三轮**：glm+kimi 共识 **corrupt 锁文件不被删除会卡死 30s** → 已修；feedback 只回灌确认为真的补漏 → 已修；其余（--arbitrate 迁移缺口 / appendCritic 静默丢弃 / chainAnalysis 只留第一个 / buildMissedFindings 未校验 file）记录为已知低优先级。
+- 结论：glm+kimi 均拿到非空结论，复审门关上，改动行内无 high 回归。🟢 已复审。

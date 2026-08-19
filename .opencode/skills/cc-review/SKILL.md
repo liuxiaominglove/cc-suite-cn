@@ -40,7 +40,7 @@ Load this skill when the user:
 1. 找 bug（glm + kimi）      → 产出 finding 池
 2. 批判员（qwen）            → 独立第二意见，追加漏报
 3. 裁决（hy3）              → 初筛：逐条判真假，verdict 落库 + codeHash【修 bug 前置硬门槛】
-4. 终审 + 修 bug（opencode） → 对 verdict=true 的做代码级核实 + TDD 修
+4. 终审 + 修 bug（opencode） → 两步终审（步骤1盲判 → 步骤2对比上游理由）对 verdict=true 的做代码级核实 + TDD 修
 5. 验证                     → 编译测试 + /verify 只审 diff + 真机/UI
 ```
 
@@ -102,6 +102,7 @@ verdict=true 的 actionable findings，按 high→medium→low 排序，每条 [
 
 - 每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出。
 - 总体结论 + 行动项 + 三节只是追加，不替代原有评审/修复内容汇报。
+- **终审两步判真**（凡做了 `/fix` 终审的任务必带）：逐条写「步骤 1 独立判 X / 步骤 2 对比上游后终判 Y / 与上游一致或分歧」，两步都不能糊弄。
 
 ## Key Scripts (single source of truth in this repo)
 
@@ -109,7 +110,6 @@ verdict=true 的 actionable findings，按 high→medium→low 排序，每条 [
 - `scripts/evaluate-models.mjs` — finding 归一化/共识/去重/裁决/多维评估（`--arbitrate` 落库 verdict 含 model）
 - `scripts/verdict-log.mjs` — 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash + confirmVerdict 终审真值 + markFixed）
 - `scripts/feedback.mjs` — 个人误报回灌（终审标签 → counter-example/正例/根因/漏报 preamble）
-- `scripts/missed-log.mjs` — qwen 批判员漏报账本（persist/load 原子写去重）
 - `scripts/benchmark.mjs` + `scripts/benchmark-core.mjs` — 标注基准集跑分（对真值算 precision/recall/f1）
 - `scripts/worker-lessons.md` — 工人版口袋书（只收终审确认教训，注入 [评审教训] 段）
 - `scripts/jobs.mjs` — 任务账本 + runAudit（getFeedback 回灌）+ 后台/取消
