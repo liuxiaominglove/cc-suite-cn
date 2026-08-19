@@ -3,6 +3,11 @@ import { runAudit, summarizeWorkers } from "./jobs.mjs";
 
 const CORE_SCRIPTS = [
   "review-runner",
+  "review-tools",
+  "review-critic",
+  "review-context",
+  "review-source",
+  "review-prompts",
   "evaluate-models",
   "jobs",
   "backends",

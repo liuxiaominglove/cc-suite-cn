@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
-import { setRetryBackoffMs } from "./review-runner.mjs";
+import { setRetryBackoffMs } from "./review-tools.mjs";
 
 afterEach(() => { setSpawn(null); setRetryBackoffMs(null); });
 

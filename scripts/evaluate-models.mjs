@@ -1,6 +1,7 @@
 import { runProcess, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
-import { frameCode, extractJson, withRetry, collectProjectRules, collectImportContext, collectStackContext } from "./review-runner.mjs";
+import { frameCode, extractJson, withRetry } from "./review-tools.mjs";
+import { collectProjectRules, collectImportContext, collectStackContext } from "./review-context.mjs";
 import { hashContent, confirmVerdict } from "./verdict-log.mjs";
 import { dirname } from "node:path";
 

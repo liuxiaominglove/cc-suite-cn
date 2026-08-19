@@ -5,76 +5,13 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
-
-const MOCK_OUTPUT_VALID = JSON.stringify({
-  severity: "medium",
-  issues: [
-    { file: "test.js", line: 3, finding: "Missing semicolon", fix: "Add ;" },
-    { file: "test.js", line: 5, finding: "Unused variable", fix: "Remove it" },
-  ],
-  summary: "Found 2 issues.",
-});
-
-function createMockProcess({ stdout = "", stderr = "", exitCode = 0, signal = null, delayMs = 0, resistSigterm = false } = {}) {
-  const stdoutStream = new EventEmitter();
-  const stderrStream = new EventEmitter();
-  const events = new EventEmitter();
-
-  const killSignals = [];
-  let removeAllListenersCalled = false;
-  const removedListenerEvents = [];
-  let killed = false;
-
-  const close = (code, sig) => {
-    if (stdout) stdoutStream.emit("data", Buffer.from(stdout));
-    stdoutStream.emit("end");
-    if (stderr) stderrStream.emit("data", Buffer.from(stderr));
-    stderrStream.emit("end");
-    events.emit("close", code, sig);
-  };
-
-  const proc = {
-    stdout: stdoutStream,
-    stderr: stderrStream,
-    on: (event, cb) => {
-      events.on(event, cb);
-      return proc;
-    },
-    kill: (signal) => {
-      killed = true;
-      killSignals.push(signal);
-      if (resistSigterm && signal === "SIGTERM") {
-        return;
-      }
-      close(null, signal);
-    },
-    removeAllListeners: () => {
-      removeAllListenersCalled = true;
-    },
-    removeListener: (event) => {
-      removedListenerEvents.push(event);
-      events.removeListener(event, () => {});
-      return proc;
-    },
-    stdin: {
-      write: () => {},
-      end: () => {},
-    },
-    killSignals,
-    get removeAllListenersCalled() { return removeAllListenersCalled; },
-    get removedListenerEvents() { return removedListenerEvents; },
-    pid: 12345,
-  };
-
-  if (delayMs > 0) {
-    setTimeout(() => { if (!killed) close(exitCode, signal); }, delayMs);
-  } else if (!resistSigterm) {
-    setImmediate(() => { if (!killed) close(exitCode, signal); });
-  }
-
-  return proc;
-}
+import { review, RunnerError, TimeoutError, setSpawn, reviewFile, SourceTamperedError } from "./review-runner.mjs";
+import { AuthError, extractJson, DEFAULT_TIMEOUT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, withRetry, setRetryBackoffMs, isAuthError, isNLArtifact } from "./review-tools.mjs";
+import { VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
+import { collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection, stripMarkdownComments } from "./review-context.mjs";
+import { validateFilePath, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, snapshotSourceHashes, hashesDiffer } from "./review-source.mjs";
+import { buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, buildSelfCheckPrompt, selfCheck, applySelfCheck } from "./review-critic.mjs";
+import { MOCK_OUTPUT_VALID, createMockProcess, makeRulesReader } from "./review-test-helpers.mjs";
 
 describe("frameCode", () => {
   it("fences plain code with three backticks", () => {
@@ -1340,20 +1277,6 @@ describe("review retry integration", () => {
   });
 });
 
-function makeRulesReader({ agents, claude } = {}) {
-  return async (p) => {
-    if (p.endsWith("AGENTS.md")) {
-      if (agents !== undefined) return agents;
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    }
-    if (p.endsWith("CLAUDE.md")) {
-      if (claude !== undefined) return claude;
-      throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    }
-    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-  };
-}
-
 describe("collectProjectRules", () => {
   it("returns AGENTS.md content with a header", async () => {
     const rules = await collectProjectRules({ cwd: "/p", readFile: makeRulesReader({ agents: "禁止 X" }) });
@@ -1922,6 +1845,32 @@ describe("selfCheck", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy" });
     assert.deepEqual(r, { survivors: [] });
+  });
+
+  it("selfCheck 空输出重试后成功", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => {
+      calls++;
+      if (calls === 1) return createMockProcess({ stdout: "" });
+      return createMockProcess({ stdout: JSON.stringify({ survivors: [{ index: 0, keep: true, reason: "ok" }] }) });
+    });
+    const r = await selfCheck({ findings: [{ file: "a.js", line: 1, finding: "x" }], code: "x", model: "glm-5.2", backend: "codebuddy", retries: 2 });
+    assert.equal(calls, 2);
+    assert.equal(r.survivors.length, 1);
+    setRetryBackoffMs(null);
+  });
+
+  it("selfCheck 空输出耗尽重试抛 RunnerError", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    setSpawn(() => { calls++; return createMockProcess({ stdout: "" }); });
+    await assert.rejects(
+      () => selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy", retries: 2 }),
+      RunnerError
+    );
+    assert.equal(calls, 3);
+    setRetryBackoffMs(null);
   });
 
   it("applySelfCheck 只保留 keep=true 的 finding", () => {

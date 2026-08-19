@@ -106,7 +106,12 @@ verdict=true 的 actionable findings，按 high→medium→low 排序，每条 [
 
 ## Key Scripts (single source of truth in this repo)
 
-- `scripts/review-runner.mjs` — 只读评审（review/reviewFile/chunkCode/offsetFindings/retry/AGENTS.md 注入/自检 selfCheck/口袋书注入）
+- `scripts/review-runner.mjs` — 评审核心（review/reviewFile 编排 + CLI 入口 + 错误类 re-export 门面）
+- `scripts/review-tools.mjs` — 跑模型与工具（runModel 统一重试/错误分类/空输出检查 + frameCode/extractJson/withRetry/chunkCode/isAuthError）
+- `scripts/review-context.mjs` — 上下文采集（AGENTS.md 注入/口袋书注入/import 上下文/技术栈）
+- `scripts/review-source.mjs` — 源码快照防篡改 + git diff（collectSourceFiles/validateFilePath/snapshotSourceHashes/hashesDiffer/getDiff）
+- `scripts/review-critic.mjs` — 批判员子流程（criticize/selfCheck + mapCriticVerdicts/buildMissedFindings）
+- `scripts/review-prompts.mjs` — 评审/批判/自检/验证提示词单一数据源
 - `scripts/evaluate-models.mjs` — finding 归一化/共识/去重/裁决/多维评估（`--arbitrate` 落库 verdict 含 model）
 - `scripts/verdict-log.mjs` — 裁决账本（persist/load/getActionableFindings/isVerdictStale + codeHash + confirmVerdict 终审真值 + markFixed）
 - `scripts/feedback.mjs` — 个人误报回灌（终审标签 → counter-example/正例/根因/漏报 preamble）

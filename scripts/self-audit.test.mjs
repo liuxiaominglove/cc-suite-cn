@@ -3,15 +3,20 @@ import assert from "node:assert/strict";
 import { coreScriptPaths, selfAudit } from "./self-audit.mjs";
 
 describe("coreScriptPaths", () => {
-  it("lists the 10 core non-test scripts", () => {
+  it("lists the 15 core non-test scripts", () => {
     const paths = coreScriptPaths();
-    assert.equal(paths.length, 10);
+    assert.equal(paths.length, 15);
     for (const p of paths) {
       assert.match(p, /^scripts\/.+\.mjs$/);
       assert.ok(!p.includes(".test.mjs"), "must not include test files");
     }
     assert.ok(paths.includes("scripts/audit-baseline.mjs"), "自审清单应含 audit-baseline.mjs");
     assert.ok(paths.includes("scripts/verdict-log.mjs"), "自审清单应含 verdict-log.mjs");
+    assert.ok(paths.includes("scripts/review-tools.mjs"), "自审清单应含 review-tools.mjs（runModel 核心逻辑）");
+    assert.ok(paths.includes("scripts/review-critic.mjs"), "自审清单应含 review-critic.mjs（批判员子流程）");
+    assert.ok(paths.includes("scripts/review-context.mjs"), "自审清单应含 review-context.mjs（上下文采集）");
+    assert.ok(paths.includes("scripts/review-source.mjs"), "自审清单应含 review-source.mjs（validateFilePath 路径安全）");
+    assert.ok(paths.includes("scripts/review-prompts.mjs"), "自审清单应含 review-prompts.mjs（提示词单一数据源）");
   });
 });
 
