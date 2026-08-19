@@ -108,6 +108,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 7. **触发条件实测 + 修复建议验证所有调用点**：finding 可能"bug 是真的，触发条件写错了"（如把"argv 是相对路径"当触发，实测 argv 恒为绝对路径），修前先实测触发条件；finding 给的 fix 建议照抄可能引入回归（如"限定项目根目录"会顺带砍掉外部项目审计），落地前把建议放到每个调用方验证。
 8. **泛化而非打补丁**：finding 报"X 漏了"，先判断 X 是不是某类问题的个例，按类修，别按个例修（教训：正则量词写 `?`（零或一）只修了"NOT YET FIXED"这一个例，漏了"NOT YET FULLY FIXED"两个修饰词——应写 `*`）。
 9. **控制流重构高风险**：移动任何跨 try/finally、guard、计数器增减的代码前，先列全路径核对不变量；响应 review 反馈做的"顺手加固"同样是新修复，独立走 RED→GREEN→REFACTOR，并给被改动语句的失败路径补测。
+10. **签名重构防回调污染**：给函数新增可选参数（如 `isConfirmed(v, final?)`）时，逐个验证所有「把该函数直接作为回调」传给 `filter/map/some/every` 的调用点——这些高阶函数会传 `(element, index, array)`，`index` 会静默污染新增参数（`0 !== undefined` 成立，走错分支，静默过滤掉所有元素）。教训：progress.mjs 的 `.filter(isConfirmed)` 直传，统一签名后 `final` 被填成数字 index，全部判 false；修复 = 显式包一层 `(v) => isConfirmed(v)`。抽公共函数同理（runModel 各调用点 spawn 参数语义不一，逐个核对后才合并）。
 
 ### 外部依赖改动铁律（配置 / 渠道 / CLI）
 
