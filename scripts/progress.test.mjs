@@ -1,30 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isConfirmed, splitByBatch, fpRate, computeProgress, progressCli } from "./progress.mjs";
-
-describe("isConfirmed", () => {
-  it("只认 confirmed.final 为 true/false", () => {
-    assert.equal(isConfirmed({ confirmed: { final: "false" } }), true);
-    assert.equal(isConfirmed({ confirmed: { final: "true" } }), true);
-    assert.equal(isConfirmed({ confirmed: { final: "uncertain" } }), false);
-    assert.equal(isConfirmed({ verdict: "false" }), false);
-    assert.equal(isConfirmed(null), false);
-  });
-
-  it("两步 confirmed（含 independent/comparison）不影响判定", () => {
-    const twoStep = {
-      confirmed: {
-        final: "true",
-        reason: "终判",
-        independent: { final: "false", reason: "独立判" },
-        comparison: "分歧",
-        confirmedAt: "t",
-      },
-    };
-    assert.equal(isConfirmed(twoStep), true, "两步 confirmed 的 final 应正常识别");
-    assert.equal(isConfirmed({ ...twoStep, confirmed: { ...twoStep.confirmed, final: "false" } }), true);
-  });
-});
+import { splitByBatch, fpRate, computeProgress, progressCli } from "./progress.mjs";
 
 describe("splitByBatch", () => {
   it("空账本返回两个空数组", () => {

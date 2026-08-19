@@ -4,6 +4,9 @@ import { mkdtemp, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  modelsOf,
+  matchesModel,
+  isConfirmed,
   hashContent,
   verdictKey,
   dedupeVerdicts,
@@ -20,6 +23,85 @@ import {
   appendCritic,
   appendVerdicts,
 } from "./verdict-log.mjs";
+
+describe("modelsOf", () => {
+  it("returns models array as-is", () => {
+    assert.deepEqual(modelsOf({ models: ["glm-5.2", "kimi-k2.7-code"] }), ["glm-5.2", "kimi-k2.7-code"]);
+  });
+
+  it("wraps legacy single model field into array", () => {
+    assert.deepEqual(modelsOf({ model: "glm-5.2" }), ["glm-5.2"]);
+  });
+
+  it("returns empty for absent models", () => {
+    assert.deepEqual(modelsOf({}), []);
+    assert.deepEqual(modelsOf(null), []);
+  });
+
+  it("ignores empty-string model (空字符串不算有效模型)", () => {
+    assert.deepEqual(modelsOf({ model: "" }), []);
+    assert.deepEqual(modelsOf({ models: ["glm-5.2", ""] }), ["glm-5.2"]);
+  });
+});
+
+describe("matchesModel", () => {
+  it("matches via models array", () => {
+    assert.equal(matchesModel({ models: ["glm-5.2", "kimi-k2.7-code"] }, "glm-5.2"), true);
+  });
+
+  it("matches via legacy single model field", () => {
+    assert.equal(matchesModel({ model: "glm-5.2" }, "glm-5.2"), true);
+  });
+
+  it("returns false when model is absent", () => {
+    assert.equal(matchesModel({}, "glm-5.2"), false);
+    assert.equal(matchesModel(null, "glm-5.2"), false);
+  });
+
+  it("returns false when model not in list", () => {
+    assert.equal(matchesModel({ models: ["kimi-k2.7-code"] }, "glm-5.2"), false);
+  });
+});
+
+describe("isConfirmed", () => {
+  it("true only for confirmed final === expected (带 final 参数)", () => {
+    assert.equal(isConfirmed({ confirmed: { final: "false" } }, "false"), true);
+    assert.equal(isConfirmed({ confirmed: { final: "true" } }, "true"), true);
+    assert.equal(isConfirmed({ confirmed: { final: "false" } }, "true"), false);
+  });
+
+  it("false without confirmed (未经终审的样本不算)", () => {
+    assert.equal(isConfirmed({ verdict: "false" }, "false"), false);
+    assert.equal(isConfirmed({}, "false"), false);
+  });
+
+  it("无 final 参数时，只认 confirmed.final 为 true/false", () => {
+    assert.equal(isConfirmed({ confirmed: { final: "false" } }), true);
+    assert.equal(isConfirmed({ confirmed: { final: "true" } }), true);
+    assert.equal(isConfirmed({ confirmed: { final: "uncertain" } }), false);
+    assert.equal(isConfirmed({ verdict: "false" }), false);
+    assert.equal(isConfirmed(null), false);
+  });
+
+  it("两步 confirmed（含 independent/comparison）不影响判定", () => {
+    const twoStep = {
+      confirmed: {
+        final: "true",
+        reason: "终判",
+        independent: { final: "false", reason: "独立判" },
+        comparison: "分歧",
+        confirmedAt: "t",
+      },
+    };
+    assert.equal(isConfirmed(twoStep), true);
+    assert.equal(isConfirmed({ ...twoStep, confirmed: { ...twoStep.confirmed, final: "false" } }), true);
+  });
+
+  it("safe as Array.filter callback (index 不得污染 final 参数)", () => {
+    const log = [{ confirmed: { final: "true" } }, { confirmed: { final: "false" } }];
+    assert.equal(log.filter(isConfirmed).length, 2, "filter 直传时 index 不得误判为 final");
+  });
+});
 
 describe("hashContent", () => {
   it("returns a stable sha256 hex digest", () => {

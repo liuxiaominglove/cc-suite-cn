@@ -1,12 +1,8 @@
 import { isMainModule } from "./runner-core.mjs";
-import { loadVerdicts } from "./verdict-log.mjs";
-
-export function isConfirmed(v) {
-  return !!v?.confirmed && (v.confirmed.final === "true" || v.confirmed.final === "false");
-}
+import { loadVerdicts, isConfirmed, modelsOf } from "./verdict-log.mjs";
 
 export function splitByBatch(log) {
-  const confirmed = (log ?? []).filter(isConfirmed);
+  const confirmed = (log ?? []).filter((v) => isConfirmed(v));
   if (confirmed.length === 0) return { latest: [], historical: [] };
   const maxAt = confirmed.reduce((m, v) => {
     const t = v.confirmed.confirmedAt || "";
@@ -29,7 +25,7 @@ export function fpRate(entries) {
 function groupByModel(entries) {
   const map = {};
   for (const v of entries) {
-    const models = Array.isArray(v.models) ? v.models : (v.model ? [v.model] : []);
+    const models = modelsOf(v);
     for (const m of models) {
       if (!map[m]) map[m] = [];
       map[m].push(v);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, hashFileContent, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, AuthError, setSpawn, validateFilePath, extractJson, collectSourceFiles, DEFAULT_EXTS, DEFAULT_TIMEOUT, getDiff, setGitSpawn, VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, frameCode, resolveReviewCwd, chunkCode, offsetFindings, reviewFile, withRetry, setRetryBackoffMs, collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, isAuthError, isNLArtifact, collectWorkerLessons, buildLessonsSection, stripMarkdownComments, SELF_CHECK_PROMPT, buildSelfCheckPrompt, selfCheck, applySelfCheck, SourceTamperedError, snapshotSourceHashes, hashesDiffer } from "./review-runner.mjs";
 
 const MOCK_OUTPUT_VALID = JSON.stringify({
   severity: "medium",
@@ -2119,12 +2119,6 @@ describe("review dir 模式注入技术栈", () => {
 
 describe("source tamper protection (hash verification)", () => {
   afterEach(() => setSpawn(null));
-
-  it("hashFileContent 同内容同 hash、异内容异 hash", () => {
-    const a = hashFileContent("abc");
-    assert.equal(a, hashFileContent("abc"));
-    assert.notEqual(a, hashFileContent("abd"));
-  });
 
   it("snapshotSourceHashes + hashesDiffer 检测到文件被改", async () => {
     const dir = await mkdtemp(join(tmpdir(), "cc-hash-"));

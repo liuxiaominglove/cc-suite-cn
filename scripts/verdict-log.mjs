@@ -9,6 +9,21 @@ export function hashContent(content) {
   return createHash("sha256").update(String(content ?? "")).digest("hex");
 }
 
+export function modelsOf(v) {
+  if (Array.isArray(v?.models)) return v.models.filter((m) => typeof m === "string" && m !== "");
+  if (typeof v?.model === "string" && v.model !== "") return [v.model];
+  return [];
+}
+
+export function matchesModel(v, model) {
+  return modelsOf(v).includes(model);
+}
+
+export function isConfirmed(v, final) {
+  if (typeof final === "string") return v?.confirmed?.final === final;
+  return v?.confirmed?.final === "true" || v?.confirmed?.final === "false";
+}
+
 export function verdictKey(v) {
   return JSON.stringify([v.file ?? "", v.line ?? "", v.finding ?? ""]);
 }

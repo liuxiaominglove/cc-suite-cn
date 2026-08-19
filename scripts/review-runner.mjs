@@ -1,6 +1,5 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { createHash } from "node:crypto";
 import { resolve, sep, join, relative, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -8,6 +7,7 @@ import { jsonrepair } from "jsonrepair";
 import { buildCommand, READ_ONLY_DECLARATION } from "./backends.mjs";
 import { runProcess, setSpawn, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { CRITIC_MODEL } from "./models.mjs";
+import { hashContent } from "./verdict-log.mjs";
 
 export { setSpawn, RunnerError, TimeoutError };
 
@@ -459,10 +459,6 @@ export function frameCode(code) {
   return `${fence}\n${code}\n${fence}`;
 }
 
-export function hashFileContent(content) {
-  return createHash("sha256").update(String(content ?? "")).digest("hex");
-}
-
 export async function snapshotSourceHashes(paths, { readFile = null } = {}) {
   const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p));
   const hashes = {};
@@ -470,7 +466,7 @@ export async function snapshotSourceHashes(paths, { readFile = null } = {}) {
     if (!p || typeof p !== "string") continue;
     try {
       const content = await read(p);
-      hashes[p] = hashFileContent(content);
+      hashes[p] = hashContent(content);
     } catch {
       // 读不到的文件跳过（文件可能不存在，如 code 内联但 file 只是标签）
     }

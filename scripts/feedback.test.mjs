@@ -1,8 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  matchesModel,
-  isConfirmed,
   pickCounterExamples,
   pickExemplars,
   formatFeedbackItem,
@@ -16,38 +14,6 @@ import {
   filterMissedForFeedback,
   createFeedbackResolver,
 } from "./feedback.mjs";
-
-describe("matchesModel", () => {
-  it("matches via models array", () => {
-    assert.equal(matchesModel({ models: ["glm-5.2", "kimi-k2.7-code"] }, "glm-5.2"), true);
-  });
-
-  it("matches via legacy single model field", () => {
-    assert.equal(matchesModel({ model: "glm-5.2" }, "glm-5.2"), true);
-  });
-
-  it("returns false when model is absent", () => {
-    assert.equal(matchesModel({}, "glm-5.2"), false);
-    assert.equal(matchesModel(null, "glm-5.2"), false);
-  });
-
-  it("returns false when model not in list", () => {
-    assert.equal(matchesModel({ models: ["kimi-k2.7-code"] }, "glm-5.2"), false);
-  });
-});
-
-describe("isConfirmed", () => {
-  it("true only for confirmed final === expected", () => {
-    assert.equal(isConfirmed({ confirmed: { final: "false" } }, "false"), true);
-    assert.equal(isConfirmed({ confirmed: { final: "true" } }, "true"), true);
-    assert.equal(isConfirmed({ confirmed: { final: "false" } }, "true"), false);
-  });
-
-  it("false without confirmed (未经终审的样本不算)", () => {
-    assert.equal(isConfirmed({ verdict: "false" }, "false"), false);
-    assert.equal(isConfirmed({}, "false"), false);
-  });
-});
 
 describe("pickCounterExamples", () => {
   const log = [

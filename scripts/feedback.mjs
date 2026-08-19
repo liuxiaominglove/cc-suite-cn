@@ -1,12 +1,4 @@
-export function matchesModel(v, model) {
-  if (Array.isArray(v?.models)) return v.models.includes(model);
-  if (typeof v?.model === "string") return v.model === model;
-  return false;
-}
-
-export function isConfirmed(v, final) {
-  return !!v?.confirmed && v.confirmed.final === final;
-}
+import { matchesModel, isConfirmed } from "./verdict-log.mjs";
 
 function byRecency(a, b) {
   const ta = a?.confirmed?.confirmedAt ?? a?.timestamp ?? "";
