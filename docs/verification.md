@@ -913,3 +913,12 @@
 - **第二轮**：kimi 3 finding（--arbitrate 忽略 --file 已修 / 锁 stale 清理 race 缩小窗口 / adjudicateLedger 锁外加载 = 有意设计不修）；glm 空输出。
 - **第三轮**：glm+kimi 共识 **corrupt 锁文件不被删除会卡死 30s** → 已修；feedback 只回灌确认为真的补漏 → 已修；其余（--arbitrate 迁移缺口 / appendCritic 静默丢弃 / chainAnalysis 只留第一个 / buildMissedFindings 未校验 file）记录为已知低优先级。
 - 结论：glm+kimi 均拿到非空结论，复审门关上，改动行内无 high 回归。🟢 已复审。
+
+---
+
+# 汇报纪律反例：漏带「总体结论 + 行动项」
+
+- **事件**：`e825c7e` 刚把汇报惯例从「三节」升级为「总体结论 + 行动项 + 三节」（`SKILL.md` Report Template + `AGENTS.md` 汇报惯例），但任务 H（依据对齐 + 统一账本）完成后的总结只写了三节 + 复审状态，**漏了「总体结论」和「行动项」两节**，靠用户事后提醒才补上。
+- **根因**：模板改了，但执行时没对照新模板逐项核对——「必带项」靠自觉，没有强制锚点。
+- **教训**：总结前先读一遍 `SKILL.md` Report Template 的必带项清单，写完逐项打勾；「总体结论 + 行动项 + 三节 + 复审状态」一个都不能少。
+- **证据锚点**：`e825c7e`（模板升级 commit）；本次会话总结（已补）。
