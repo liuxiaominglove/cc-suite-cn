@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { REPORT_REQUIRED_SECTIONS, REPORT_MARKER, findMissingReportSections } from "./report-sections.mjs";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -215,5 +216,28 @@ describe("打分 finding（WI-6）", () => {
     for (const loc of mdLocations) {
       assert.ok(resolvedLocations.has(loc), `trust-boundary.md 有 JSON 里没有的已落地位置 ${loc}（手改表漂移？）`);
     }
+  });
+});
+
+describe("报告必带项（report-sections 单一数据源）", () => {
+  it("SKILL.md Report Template 含全部必带项", () => {
+    const c = readFileSync(join(ROOT, ".opencode/skills/cc-review/SKILL.md"), "utf8");
+    for (const req of REPORT_REQUIRED_SECTIONS) {
+      assert.ok(c.includes(req), `SKILL.md Report Template 缺必带项「${req}」`);
+    }
+  });
+
+  it("AGENTS.md 汇报惯例含全部必带项", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    for (const req of REPORT_REQUIRED_SECTIONS) {
+      assert.ok(c.includes(req), `AGENTS.md 汇报惯例缺必带项「${req}」`);
+    }
+  });
+
+  it("verification.md 标记之后的报告段落无缺项", () => {
+    const c = readFileSync(join(ROOT, "docs/verification.md"), "utf8");
+    assert.ok(c.includes(REPORT_MARKER), "verification.md 应有 report-required 标记");
+    const problems = findMissingReportSections(c);
+    assert.deepEqual(problems, [], `落账报告缺必带项：${JSON.stringify(problems)}`);
   });
 });
