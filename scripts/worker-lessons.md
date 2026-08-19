@@ -17,6 +17,22 @@
 - 来源：kimi 误报"argv 是相对路径"，hy3 判 false，opencode 终审核实 argv 恒为绝对路径
 -->
 
+- 规则：报告环境/部署依赖的 bug 前，先确认触发条件在真实环境成立（默认分支名、文件 exec bit、symlink 调用链），不要报"理论上可能但不实际发生"的
+- 实例：xiaolaigithub/bin/learn.sh 硬编码 refs/heads/main —— 实测默认分支均 main，触发条件不成立
+- 来源：kimi 误报默认分支硬编码/exec bit/symlink，opencode 终审实测触发条件不成立（confirmed=false）
+
+- 规则：报告"行为 bug"前，先查项目文档/设计是否有意为之（by-design），不要把文档化的设计当 bug
+- 实例：scratch/merge.mjs 同行号无条件合并 —— RESULT.md A2 文档化设计
+- 来源：kimi 误报同行号合并，opencode 终审判 by-design（confirmed=false）
+
+- 规则：报告"某参数缺失"前，先核对参数是否在 buildCommand/别处已拼装（参数拼装可能分散在多处）
+- 实例：codebuddy review FLAGS 缺 --print —— 实际 --print 已在 backends.mjs cmd.args
+- 来源：glm 误报缺 --print，opencode 终审判假阳（confirmed=false）
+
+- 规则：报告"路径未展开/相对路径"前，先确认被调函数是否已做 ~ 展开 / 路径归一化
+- 实例：scripts/backends.mjs resolveCli 已用 command -v 解析绝对路径
+- 来源：kimi 误报 argv 相对路径，hy3 判 false，opencode 终审核实 argv 恒为绝对路径
+
 - 规则：报告"删 export 无 re-export alias 会破外部 importer"前，先确认项目是否采用「单一真值彻底迁移」——若 import 已全部重连且测试全绿，删 export 是有意设计，不是 bug
 - 实例：scripts/review-runner.mjs 拆 6 模块后仅剩 review/reviewFile + 错误类门面 re-export，evaluate-models 已改从 review-tools/review-context import，无残留 importer
 - 来源：glm/kimi 在 /verify 三轮反复报 re-export 假阳，opencode 实测 grep 全仓无残留 importer + 727 测试全绿
