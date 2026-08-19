@@ -36,6 +36,7 @@ describe("install.sh", () => {
       const r = bash(["--dry-run"], { CC_RC_FILE: rc, HOME: dir });
       assert.equal(r.status, 0, r.stderr);
       assert.ok(!existsSync(rc), "--dry-run 不应创建 rc 文件");
+      assert.ok(r.stdout.includes("hooksPath"), "--dry-run 应打印 commit 复审门禁（core.hooksPath）配置提示");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

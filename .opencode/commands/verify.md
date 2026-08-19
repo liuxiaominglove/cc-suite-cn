@@ -27,6 +27,16 @@ node scripts/jobs.mjs --get "<job-id>"
 
 两模型对比报告：共识（两模型都发现）+ 各模型单独发现。
 
+## Step 3: 写复审标记（commit 门禁）
+
+按复审结论写标记（供 `.githooks/pre-commit` 硬拦「未复审 commit」，三态都写）：
+
+- **high > 0（需整改）**：`node scripts/review-gate.mjs --mark --verdict high` —— hook **硬拦**（不给 yes）；正常流程 opencode 先修 bug（TDD）→ 重新 `/verify`，high 标记是「万一没修就 commit」的兜底。
+- **medium > 0（需关注）**：`node scripts/review-gate.mjs --mark --verdict medium`（用户知情后可 commit）。
+- **无 actionable（健康）**：`node scripts/review-gate.mjs --mark --verdict clean`（直接放行 commit）。
+
+标记只覆盖 `git diff HEAD --name-only` 里的代码文件；之后任何代码改动（修 bug/新增）都会使标记失效，须重新 `/verify`。
+
 ## Critical Rules
 
 - 只读验证，不修改任何文件

@@ -296,6 +296,21 @@ run_preflight() {
   ( cd "$REPO_DIR" && npm run preflight )
 }
 
+setup_hooks() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    say "  [dry-run] 将配置 git core.hooksPath=.githooks（commit 复审门禁）"
+    return 0
+  fi
+  local existing
+  existing="$(cd "$REPO_DIR" && git config --get core.hooksPath 2>/dev/null || true)"
+  if [ -n "$existing" ] && [ "$existing" != ".githooks" ]; then
+    warn "检测到已有 core.hooksPath=${existing}，保留不覆盖；cc-suite-cn 复审门禁未启用（如需启用，手动 git config core.hooksPath .githooks）"
+    return 0
+  fi
+  ( cd "$REPO_DIR" && git config core.hooksPath .githooks && chmod +x .githooks/pre-commit ) || { err "配置 commit 复审门禁失败"; return 1; }
+  ok "已配置 commit 复审门禁（core.hooksPath=.githooks）"
+}
+
 main() {
   parse_args "$@"
 
@@ -339,6 +354,7 @@ main() {
   setup_keys
   clone_repo || exit 1
   install_deps
+  setup_hooks
   run_preflight
 
   say ""

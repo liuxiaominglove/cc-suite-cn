@@ -10,7 +10,7 @@ cc-suite-cn 的「输入信任边界」集中记录：哪些输入可信、哪�
 | 信任边界项 | 防护 | 位置 |
 |-----------|------|------|
 | CLI 命令路径 | `resolveCli` 绝对路径（防 PATH 劫持） | `scripts/backends.mjs` |
-| 被审文件路径 | `validateFilePath`（限项目目录内） | `scripts/review-runner.mjs` |
+| 被审文件路径 | `validateFilePath`（限项目目录内） | `scripts/review-source.mjs` |
 | 裁决读取的文件路径 | `resolveCode` 白名单（防 LLM 幻觉 file 字段） | `scripts/evaluate-models.mjs` |
 | job id | `isValidJobId` 正则校验（防路径穿越） | `scripts/jobs.mjs` |
 | 审计基线 commit | `gitChangedFiles` hex 格式校验（防命令注入） | `scripts/audit-baseline.mjs` |

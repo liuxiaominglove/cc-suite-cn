@@ -13,7 +13,7 @@
       "status": "resolved",
       "title": "被审文件路径",
       "protection": "validateFilePath（限项目目录内，allowExternal 白名单开关）",
-      "location": "scripts/review-runner.mjs",
+      "location": "scripts/review-source.mjs",
       "anchor": "TB-1"
     },
     {

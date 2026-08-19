@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+import { execSync } from "node:child_process";
+import { createInterface } from "node:readline";
+import { openSync, closeSync, createReadStream } from "node:fs";
+import { isCodeFile, loadGate, stageHashes, decide } from "../scripts/review-gate.mjs";
+
+const REASONS = {
+  "unreviewed": "这些代码改动尚未复审（未跑 /verify）",
+  "changed-since-review": "这些代码改动在复审后发生了变化，需重新复审",
+  "medium-unfixed": "复审结论含 medium（需关注）未处理",
+  "high-unfixed": "复审结论含 high（崩溃/安全/数据损坏）",
+  "unknown-verdict": "复审标记的 verdict 字段未知（标记文件损坏或旧格式）",
+};
+
+function stagedFiles() {
+  try {
+    const out = execSync("git diff --cached --name-only -z", { encoding: "utf8" });
+    return out.split("\0").filter(Boolean);
+  } catch {
+    // fail-closed：无法获取 staged 列表时，宁可拦也不放行
+    return null;
+  }
+}
+
+function askYesOrNo(prompt) {
+  return new Promise((resolve) => {
+    let fd;
+    try {
+      fd = openSync("/dev/tty", "r");
+    } catch {
+      resolve(null);
+      return;
+    }
+    const input = createReadStream("/dev/tty", { fd, autoClose: false });
+    const rl = createInterface({ input, output: process.stderr });
+    let settled = false;
+    const done = (ans) => {
+      if (settled) return;
+      settled = true;
+      try { rl.close(); } catch {}
+      try { closeSync(fd); } catch {}
+      resolve(ans);
+    };
+    rl.setPrompt(prompt);
+    rl.prompt();
+    rl.once("line", (line) => done(line));
+    rl.once("close", () => done(null));
+    input.on("error", () => done(null));
+  });
+}
+
+async function main() {
+  try {
+    const root = execSync("git rev-parse --show-toplevel", { encoding: "utf8" }).trim();
+    process.chdir(root);
+  } catch {
+    process.stderr.write(`\n⛔ cc-suite-cn 复审门禁：无法定位仓库根目录，保守拦截 commit。\n`);
+    return 1;
+  }
+
+  const files = stagedFiles();
+  if (files === null) {
+    process.stderr.write(`\n⛔ cc-suite-cn 复审门禁：无法获取 staged 文件列表（git diff --cached 失败），保守拦截 commit。\n`);
+    return 1;
+  }
+
+  const codeFiles = files.filter(isCodeFile);
+  if (codeFiles.length === 0) {
+    return 0;
+  }
+
+  const gate = await loadGate();
+  const hashes = await stageHashes(codeFiles);
+  const result = decide(gate, hashes);
+
+  if (result.action === "pass") {
+    return 0;
+  }
+
+  const filesText = (result.files ?? []).map((f) => `  - ${f}`).join("\n");
+  process.stderr.write(`\n⛔ cc-suite-cn 复审门禁拦下了本次 commit\n`);
+  process.stderr.write(`\n原因：${REASONS[result.reason] ?? result.reason}\n`);
+  if (filesText) process.stderr.write(`涉及代码文件：\n${filesText}\n`);
+  process.stderr.write(`\n风险：commit 后 /verify 只能审 git diff HEAD，已提交改动需 git reset --soft 补救。\n`);
+  process.stderr.write(`后果：未经复审的代码改动被固化，后期复审困难增加、可能漏 bug。\n`);
+
+  if (result.action === "block") {
+    process.stderr.write(`\n处理：必须先修 high 再重新 /verify，禁止绕过。\n`);
+    return 1;
+  }
+
+  const ans = await askYesOrNo("\n[1/2] 你已知晓上述风险和后果。\n[2/2] 输入 yes 仍要提交（风险自负），其他任意输入取消：");
+  if (ans && ans.trim().toLowerCase() === "yes") {
+    process.stderr.write(`已确认，放行提交。\n`);
+    return 0;
+  }
+  if (ans === null) {
+    process.stderr.write(`\n非交互环境，无法确认。请先 /verify 复审，或用 git commit --no-verify 显式跳过。\n`);
+    return 1;
+  }
+  process.stderr.write(`已取消提交。请先跑 /verify 复审。\n`);
+  return 1;
+}
+
+try {
+  process.exitCode = await main();
+} catch (err) {
+  process.stderr.write(`\n⛔ cc-suite-cn 复审门禁异常：${err?.message ?? err}，保守拦截 commit。\n`);
+  process.exitCode = 1;
+}

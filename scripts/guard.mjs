@@ -9,6 +9,13 @@ const HOME = homedir();
 
 export const CANONICAL_FILES = [
   "scripts/review-runner.mjs",
+  "scripts/review-tools.mjs",
+  "scripts/review-context.mjs",
+  "scripts/review-source.mjs",
+  "scripts/review-critic.mjs",
+  "scripts/review-prompts.mjs",
+  "scripts/review-gate.mjs",
+  ".githooks/pre-commit",
   ".opencode/skills/cc-review/SKILL.md",
   "install.sh",
   "scripts/known-risks.json",

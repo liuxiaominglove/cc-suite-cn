@@ -198,7 +198,13 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 |------|---------|
 | `AGENTS.md` | This file — project conventions and instructions |
 | `.opencode/commands/*.md` | 12 个斜杠命令（audit/fix/evaluate/verify/trace/jobs 等，项目级自动加载） |
-| `scripts/review-runner.mjs` | 只读评审 runner（参数化 backend，超时/错误/JSON 解析） |
+| `scripts/review-runner.mjs` | 评审核心（review/reviewFile 编排 + CLI 入口 + 错误类 re-export 门面） |
+| `scripts/review-tools.mjs` | 跑模型与工具（runModel 统一重试/错误分类/空输出检查 + frameCode/extractJson/withRetry/chunkCode/isAuthError） |
+| `scripts/review-context.mjs` | 上下文采集（AGENTS.md 注入/口袋书注入/import 上下文/技术栈） |
+| `scripts/review-source.mjs` | 源码快照防篡改 + git diff（collectSourceFiles/validateFilePath/snapshotSourceHashes/hashesDiffer/getDiff） |
+| `scripts/review-critic.mjs` | 批判员子流程（criticize/selfCheck + mapCriticVerdicts/buildMissedFindings） |
+| `scripts/review-prompts.mjs` | 评审/批判/自检/验证提示词单一数据源 |
+| `scripts/review-gate.mjs` | commit 复审门禁单一真源（markReviewed/stageHashes/decide + isCodeFile，`.githooks/pre-commit` 硬拦未复审/high） |
 | `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
 | `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 角色常量 FIND_BUG_WORKERS/CRITIC_MODEL/VERIFIER_MODEL + canonicalModel） |
@@ -213,7 +219,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/progress.mjs` | 各 AI 误报率进步（基于终审 confirmed 标签，`node scripts/progress.mjs`） |
 | `scripts/benchmark-core.mjs` + `scripts/benchmark.mjs` | 标注基准集（对真值算 precision/recall/f1，prompt A/B） |
 | `scripts/worker-lessons.md` | 工人版口袋书（只收终审确认教训，注入 `[评审教训]` 段） |
-| `scripts/self-audit.mjs` | 自审 8 个核心脚本（`pnpm self-audit`，release 前跑） |
+| `scripts/self-audit.mjs` | 自审 15 个核心脚本（`pnpm self-audit`，release 前跑） |
 | `scripts/guard.test.mjs` | Unit tests for the guard |
 | `.opencode/skills/cc-review/SKILL.md` | Canonical orchestrator skill |
 | `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
