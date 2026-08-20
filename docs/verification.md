@@ -105,10 +105,57 @@
 | VF-1: /verify 复审 guard 棘轮改动（glm+kimi 找 3 真 bug + 1 假阳，TDD 修） | ① `findKnownRiskDrift` 对缺失/损坏 known-risks.json 改 fail-closed（原静默 `[]`，silent-pass）；② `findOrphanGlobalRules` 改 JSONC 解析 instructions（字符串感知去注释，URL `//` 不误删）+ anchor 校验改词边界（`M-1` 不误匹配 `M-10`）；③ docs-consistency 加反向检查（trust-boundary.md 已落地位置必须都在 JSON）。假阳：`CC-1`/`SA-6`/`SA-15`「不在 diff」——实际早已存在 verification.md。guard.test.mjs 43 用例 + 全量 669 绿 | 🟢 | 2026-08-17 |
 | 复审（diff）评审员 glm → qwen（VERIFY_WORKERS 分流） | `models.mjs` 加 `VERIFY_WORKERS=[qwen3-coder-plus,kimi-k2.7-code]`；`jobs.mjs runAudit` 按 `diff` 分流（diff→qwen+kimi，非 diff→glm+kimi，`workerList` 命名消歧）；`jobs.test.mjs` 新增分流用例（diff 走 qwen+kimi backend/model、非 diff 走 glm+kimi），787 单测 + guard 绿；真实 `--run-audit --diff` 24 文件大 payload 实测 qwen OK(3)+kimi OK(3) 均非空（历史依据：glm 11/32=34.4% diff 空输出、kimi 0 次） | 🟢 | 2026-08-20 |
 | 账本清理批A（130 条 actionable-unconfirmed 终审写回） | 备份 verdict-log.json → 代码级两步终审 130 条（假阳/陈旧 120 final=false + 真 bug 9 final=true + 真已修 1 final=true+fixed）→ `--confirm` 写回 130 条 + `markFixed` 1 条；终审暴露并 TDD 修复真 bug：`getActionableFindings` 忽略 `confirmed.final`（终审判假的假阳仍在待修清单），加 `v.confirmed?.final !== "false"` 过滤 + 专测，789 单测绿；成效：actionable 批A 130→9、全账本 212→89，confirmed 44→174，progress 出现各模型误报率 | 🟢 | 2026-08-20 |
+| 账本清理批B/C/D（demos 22 + learnunk 30 + macELTA 19 = 71 条） | 备份后分 3 批代码级两步终审（批D 相对路径 Sources/*.swift 映射到 macELTA 根读码）→ `--confirm` 分 3 批次写回：demos 22 全 by-design false；learnunk 30（真 bug 2：TUI CJK 溢出/loadConcepts 无 try-catch，假阳 28 含 match 同步误报/analyzeProject 已内部 try-catch）；macELTA 19（真 bug 8：bezel 定时器竞态/Quartz 翻转/RunLoop 重入/剪贴板竞态/usleep 阻塞/windowHeight*2 误用，假阳 11 含 assertNil 实为泛型 T?/UInt32 已 sanitize/endpoint 已能清空）；成效：全账本 actionable 89→29（剩 12 真未修 + 17 条 scratch/xiaolaigithub 既往 confirmed-true 未修），confirmed 247 条；798 单测 + guard 绿（本轮纯数据未碰代码） | 🟢 | 2026-08-20 |
 
 > 说明：上述评审结论固化为 `pnpm verify:e2e`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
 > 写能力分工（角色重构后）：**修 bug 只由 opencode（总指挥）亲自做**（最了解项目 + TDD）。施工队（glm/kimi/qwen/hy3）全部只读——找 bug / 批判 / 验证。写后不自动合并。
+
+---
+
+# 外部项目待修清单
+
+> **单一数据源 = `.cc-suite-cn/verdict-log.json` 的 `final=true && !fixed` 条目**；本节为人读视图，勿手改、勿与账本脱节。这些是外部项目的 bug，cc-suite-cn 不代修，由各自项目 owner `/fix`。
+
+## macELTA（8 条，本次代码级终审判 true）
+
+> 相对路径 `Sources/*.swift` 映射到 `/Users/liuxiaoming/project/macELTA/EnglishTranslator/Sources/`。
+
+- `Sources/SettingsWindowController.swift` HotkeyRecorder.record — bezel 复位 asyncAfter 未判 isRecording，新录制期间旧定时器清掉橙色指示
+- `Sources/ScreenshotEngine.swift:179` — makeVisionFriendly 非翻转 CGContext 直接 draw，Quartz 上下翻转致 OCR 图像颠倒
+- `Sources/TranslationPipeline.swift` startTextTranslation/startHoverTranslation — 0.3s RunLoop 处理待处理热键事件可重入
+- `Sources/TranslationPipeline.swift` getSelectedTextViaCopyPasteboard — 剪贴板仅凭全局 changeCount 判定 + 无条件 restore 覆盖他应用写入
+- `Sources/TranslationPipeline.swift:105-109,210-224,245-280` — Cmd+C 兜底 usleep 阻塞主线程，Accessibility 授权弹窗无法先弹出
+- `Sources/TranslationPipeline.swift:371-435` — 剪贴板轮询竞态（同上）
+- `Sources/ParagraphDetector.swift:246` — extractWindow 把 windowHeight*2 当 screenHeight 传 contentTop，阈值随窗口缩放
+- `EnglishTranslator/Sources/SettingsWindowController.swift:941` — bezel 复位竞态（同上）
+
+## learnunk（2 条，本次代码级终审判 true）
+
+- `src/ui.js:346` — wrap(width-8) 首行前缀「是什么: 」显示宽 16，长 CJK 首行溢出致 TUI 错位
+- `src/concepts.js:47` — loadConcepts 无 per-file try/catch，单个不可读 .md 中断整个加载
+
+## scratch + xiaolaigithub（17 条，既往 confirmed-true 未修，待重验）
+
+> 上一会话已终审判 true、本次未重验的旧结论；「重验 + 修」作为另立任务，待动该项目时一起做。
+
+- `xiaolaigithub/bin/collect.sh:5,14,18` — 快照文件名仅 date +%F，同日多次运行静默覆盖
+- `scratch/findings-store.mjs:12-18` — findings 文件含非法 JSON/空 未兜底
+- `scratch/findings-store.mjs:21-23` — updateFindingStatus 传 null/undefined 未兜底
+- `scratch/verify.mjs:9,13` — buildVerifyPrompt 直接插值 finding 文本（注入）
+- `scratch/context.mjs:24` — walkDir 对每项 statSync 未判类型
+- `scratch/context.mjs:37` — expandPaths 用 for...of，字符串参数被逐字迭代
+- `scratch/context.mjs:11` — prepareContext 缺 content 字段
+- `scratch/context.mjs:65` — resolveFindingFile basename 映射到首个匹配
+- `scratch/normalize.mjs:6` — fenced JSON 结尾围栏无换行时解析失败
+- `scratch/normalize.mjs:4-10` — stripCodeFence 全围栏正则要求换行
+- `scratch/normalize.mjs:27-30` — parseFindings 用 startsWith('[') 门控
+- `scratch/merge.mjs:26` — 多行文本匹配触发合并
+- `scratch/orchestrator.mjs:65` — resolveFindingFile basename fallback 首个匹配
+- `scratch/orchestrator.mjs:63` — 多文件 basename 重映射
+- `scratch/orchestrator.mjs:35` — 长 worker 响应在 JSON 解析前截断
+- `scratch/audit-fix.mjs:45-47` — severity 跳过循环只把 open 降为 skipped
+- `scratch/dispatch.mjs:26,31` — opts.mode 非法值未兜底
 
 ---
 
