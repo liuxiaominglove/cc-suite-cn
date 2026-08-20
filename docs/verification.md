@@ -37,8 +37,8 @@
 | P6: 回调记录 + 统计 + 警告阈值 | 回调写入 JSONL、implement 返回 `callbackCount/callbacks/warnCallbacks`（≥3 警告）；单测覆盖 | 🟢 | 2026-08-13 |
 | P6: 回调上限 5 次（硬限制） | 桥内计数，第 6 次返回"已达回调上限"；单测覆盖 | 🟢 | 2026-08-13 |
 | bridge 默认超时常量化（bridge 300s / 非 bridge 120s） | `resolveTimeout` 单测 5 用例；`implement()` 签名改 `timeout=null`，桥模式不再被 120s 误杀 | 🟢 | 2026-08-14 |
-| P6 双向回调 e2e 固化 | `pnpm verify` → `verify-bridge.mjs`：callbackCount≥1 + opencode 答案 42 传回 + 闸门关 callbackCount=0 | 🟢 | 2026-08-14 |
-| #3 真后台 + 真取消 e2e 固化 | `pnpm verify` → `verify-background.mjs`：后台 running→completed + pid + 日志 + cancel 后进程 ESRCH | 🟢 | 2026-08-14 |
+| P6 双向回调 e2e 固化 | `pnpm verify:e2e` → `verify-bridge.mjs`：callbackCount≥1 + opencode 答案 42 传回 + 闸门关 callbackCount=0 | 🟢 | 2026-08-14 |
+| #3 真后台 + 真取消 e2e 固化 | `pnpm verify:e2e` → `verify-background.mjs`：后台 running→completed + pid + 日志 + cancel 后进程 ESRCH | 🟢 | 2026-08-14 |
 | review-e2e 四施工队实跑 | `pnpm test:e2e` 5/5：glm/hy3/kimi/qwen 均 success + 视角差异 | 🟢 | 2026-08-14 |
 | kimi 卡死在 base64"脑内解码"提示 → 已修复 | `frameCode` 自适应反引号围栏替代 base64；kimi 评审含 ``` 的 review-runner.mjs 81s 完成（原挂死 >5min）；e2e 加回归守卫 | 🟢 | 2026-08-14 |
 | isAuthError 误报 → 已修复 | 只在进程真正失败（非零退出）时判 AuthError；exit 0 时 stderr 的 "401"/"unauthorized"（如 kimi reasoning 引用）不再误报；单测覆盖正负向 | 🟢 | 2026-08-14 |
@@ -103,8 +103,10 @@
 | kimi 渠道错误修正（alibaba-cn → moonshotai-cn） | 阿里百炼**无 Kimi**（用户从阿里官方确认）；B 分身 kimi 原本 `alibaba-cn/kimi-k2.6` 从始至终是坏的（opencode 从未连 Moonshot，分身从未真正跑过）；修正 `kimi.md` model → `moonshotai-cn/kimi-k2.7-code`（models.dev 权威）+ AGENTS.md 三处（架构图 / DASHSCOPE 去掉"通吃 Kimi" / MOONSHOT_API_KEY 从可选改必需）；重启 opencode 后实测 @kimi 分身自报 `moonshotai-cn/kimi-k2.7-code`（渠道+版本号均生效） | 🟢 | 2026-08-15 |
 | TB-1: 被审文件路径 `validateFilePath` 限项目目录内 | `review-runner.mjs` 加 `validateFilePath`（默认限 `baseDir` 内，`allowExternal` 显式放行外部）；`review-runner.test.mjs` 5 用例（含 `../../etc/passwd` 拒绝、`/` 根放行） | 🟢 | 2026-08-17 |
 | VF-1: /verify 复审 guard 棘轮改动（glm+kimi 找 3 真 bug + 1 假阳，TDD 修） | ① `findKnownRiskDrift` 对缺失/损坏 known-risks.json 改 fail-closed（原静默 `[]`，silent-pass）；② `findOrphanGlobalRules` 改 JSONC 解析 instructions（字符串感知去注释，URL `//` 不误删）+ anchor 校验改词边界（`M-1` 不误匹配 `M-10`）；③ docs-consistency 加反向检查（trust-boundary.md 已落地位置必须都在 JSON）。假阳：`CC-1`/`SA-6`/`SA-15`「不在 diff」——实际早已存在 verification.md。guard.test.mjs 43 用例 + 全量 669 绿 | 🟢 | 2026-08-17 |
+| 复审（diff）评审员 glm → qwen（VERIFY_WORKERS 分流） | `models.mjs` 加 `VERIFY_WORKERS=[qwen3-coder-plus,kimi-k2.7-code]`；`jobs.mjs runAudit` 按 `diff` 分流（diff→qwen+kimi，非 diff→glm+kimi，`workerList` 命名消歧）；`jobs.test.mjs` 新增分流用例（diff 走 qwen+kimi backend/model、非 diff 走 glm+kimi），787 单测 + guard 绿；真实 `--run-audit --diff` 24 文件大 payload 实测 qwen OK(3)+kimi OK(3) 均非空（历史依据：glm 11/32=34.4% diff 空输出、kimi 0 次） | 🟢 | 2026-08-20 |
+| 账本清理批A（130 条 actionable-unconfirmed 终审写回） | 备份 verdict-log.json → 代码级两步终审 130 条（假阳/陈旧 120 final=false + 真 bug 9 final=true + 真已修 1 final=true+fixed）→ `--confirm` 写回 130 条 + `markFixed` 1 条；终审暴露并 TDD 修复真 bug：`getActionableFindings` 忽略 `confirmed.final`（终审判假的假阳仍在待修清单），加 `v.confirmed?.final !== "false"` 过滤 + 专测，789 单测绿；成效：actionable 批A 130→9、全账本 212→89，confirmed 44→174，progress 出现各模型误报率 | 🟢 | 2026-08-20 |
 
-> 说明：上述评审结论固化为 `pnpm verify`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
+> 说明：上述评审结论固化为 `pnpm verify:e2e`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
 > 写能力分工（角色重构后）：**修 bug 只由 opencode（总指挥）亲自做**（最了解项目 + TDD）。施工队（glm/kimi/qwen/hy3）全部只读——找 bug / 批判 / 验证。写后不自动合并。
 
@@ -760,7 +762,7 @@
 
 # 抄作业落地：defense-in-depth 只读加固（动作 0/1/2）
 
-**动机**：借鉴 xiaolai/cc-suite 的 defense-in-depth——把施工队"只读"从「一次性人工实测（`pnpm verify`）」升级为「每次评审自动 fail-closed」。对照差距：① codebuddy cwd 未隔离（唯一 cwd 落在被审项目的 backend）② 哈希验证只在 verify 脚本一次性做，没进 `review()` ③ qwen 没用 `--safe-mode`（可禁 MCP 防评审员调外援）。
+**动机**：借鉴 xiaolai/cc-suite 的 defense-in-depth——把施工队"只读"从「一次性人工实测（`pnpm verify:e2e`）」升级为「每次评审自动 fail-closed」。对照差距：① codebuddy cwd 未隔离（唯一 cwd 落在被审项目的 backend）② 哈希验证只在 verify 脚本一次性做，没进 `review()` ③ qwen 没用 `--safe-mode`（可禁 MCP 防评审员调外援）。
 
 ## 改动台账
 

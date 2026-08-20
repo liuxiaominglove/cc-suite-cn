@@ -210,6 +210,7 @@ opencode
 | `/audit <文件/目录>` | glm+kimi 找 bug（记入账本 + audit-log） | 两个监理巡楼 |
 | `/audit-full <文件>` | 完整审计：找 bug + 批判员 + 裁决 | 全套体检 |
 | `/fix <bug>` | 修复闭环：找 → 裁 → 修(TDD) → 验证 | 看病到治好 |
+| `/fix-incremental <项目根目录>` | 增量修复：只审/修自上次以来变更的文件，修完自动更新基线 | 只复诊有新症状的 |
 | `/review-kimi <文件>` | 只叫 Kimi 审 | 单医生看诊 |
 | `/review-qwen <文件>` | 只叫 Qwen 审（批判员） | 单医生看诊 |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） | 赛后统计 MVP |
@@ -225,7 +226,7 @@ opencode
 | `npm test` | 跑全部测试 + 漂移守卫（会读 `~/.zshrc` 里的 key） |
 | `npm run test:unit` | 只跑单元测试（不需联网、不需 key） |
 | `npm run test:e2e` | 跑端到端测试 |
-| `npm run verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `npm run verify:e2e` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `npm run self-audit` | 自审 8 个核心脚本（glm+kimi 找 bug，release 前跑） |
 | `npm run preflight` | 检查 CLI 与 key 是否就绪 |
 | `node scripts/jobs.mjs --run-audit --file x.js` | glm+kimi 找 bug + 记 1 条账 |

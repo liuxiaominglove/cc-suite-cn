@@ -10,22 +10,28 @@ agent: build
 
 > `$ARGUMENTS` 是**路径**：文件用 `--file`，目录用 `--dir`（用 Bash `test -d <path>` 判定是文件还是目录；路径不存在 → 提示用户）。空参数 → 提示用户给路径（同 `/audit` 的对话框模式）。
 
+> **项目根目录（`--project-dir`）**：落账时按项目根隔离，否则外部项目审计的 finding 会记错归属。先取项目根：目录 → `git -C "<目录>" rev-parse --show-toplevel`；文件 → `git -C "$(dirname "<文件>")" rev-parse --show-toplevel`；非 git 仓库则省略 `--project-dir`。下面所有 `--run-audit` / `--arbitrate` 都带 `--project-dir "<项目根>"`。
+
 ## Step 1: 找 bug（glm + kimi）
 
 ```
-node scripts/jobs.mjs --run-audit --file "<path>"     # 文件
-node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..."   # 目录
+node scripts/jobs.mjs --run-audit --file "<path>" --project-dir "<项目根>"     # 文件
+node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..." --project-dir "<项目根>"   # 目录
 ```
 
 记下输出的 `<job-id>`。**超时/卡住 → 先 `ps` 核对真实进程；账本「running」可能是超时残留僵尸，用 `node scripts/jobs.mjs --cancel <id>` 清理后重跑。**
 
 ## Step 2: 批判（qwen 第二意见）
 
-从 Step 1 的 `<job-id>` 结果里读 `result.entries`（**去重后的 findings**，含 file/line/finding），写成 `/tmp/findings.json`，然后：
+从 Step 1 的 `<job-id>` 结果里读 `result.entries`（**去重后的 findings**，含 file/line/finding）。
+
+> **critic 一次只审一个文件**：把 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --backend qwen --model qwen3-coder-plus
 ```
+
+文件模式（`$ARGUMENTS` 是单文件）只有一组；目录模式按文件分组循环。无 findings 的文件跳过。
 
 输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding, reason}]}`：
 
@@ -37,7 +43,7 @@ node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/f
 ## Step 3: 裁决（hy3，强制前置，不可跳过）
 
 ```
-node scripts/evaluate-models.mjs --arbitrate
+node scripts/evaluate-models.mjs --arbitrate --project-dir "<项目根>"
 ```
 
 （若 hy3 不可用或 `--arbitrate` 报错 → 停下报告用户，**不许静默跳过**——裁决是硬门槛。）
@@ -52,10 +58,10 @@ hy3 逐条裁决统一账本里**尚未裁决**的 finding（含 `source=audit` 
 ### 4.1 读待修清单
 
 ```
-node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(m.getActionableFindings(await m.loadVerdicts()), null, 2)))"
+node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(m.getActionableFindings(await m.loadVerdicts(), { projectDir: \"<项目根>\" }), null, 2)))"
 ```
 
-待修清单 = `verdict === "true"` 的 finding。
+待修清单 = `verdict === "true"` 且 `projectDir === "<项目根>"` 的 finding。
 
 - **清单为空** → 报告"未发现真 bug"并**停止**，不进入修复。
 - 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy3 是 LLM 判断、会看走眼——既可能**假阴**（漏真 bug），也可能**假阳**（判 true 实为 by-design 或触发条件写错）。终审要同时兜住这两种。
@@ -111,7 +117,7 @@ TDD 五步：
    ```
    node scripts/jobs.mjs --run-audit --diff
    ```
-   （glm+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给评审员。）
+   （qwen+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给评审员。）
 3. **真机/UI 手动点验**（UI 类改动必须）：
    > **UI 类改动（AppKit / SwiftUI / HTML / CSS）附加「真机手动验证清单」**：AI 审计只看代码、看不到渲染结果，「代码写了对、屏幕上没显示出来」这类问题（如控件 frame 容不下文案、负 y 子视图被裁剪、提示文字被裁掉）只有真机点开才抓得到。列出要人工点验的项（哪个界面 / 哪个控件 / 预期看到什么），让用户照着验一遍，结果标 🟡。
 

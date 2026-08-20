@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 
 export function checkRelease({ version, tag }) {
   const problems = [];
@@ -23,7 +24,7 @@ export function readCurrentTag({ exec = execSync, root = process.cwd() } = {}) {
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
   const tag = readCurrentTag({ root: ROOT });
   const problems = checkRelease({ version: pkg.version, tag });

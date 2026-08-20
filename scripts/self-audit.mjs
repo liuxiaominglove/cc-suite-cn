@@ -1,4 +1,4 @@
-import { pathToFileURL } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 import { runAudit, summarizeWorkers } from "./jobs.mjs";
 
 const CORE_SCRIPTS = [
@@ -45,7 +45,7 @@ async function main() {
   console.log(`\n合计 ${total} 条 finding。下一步：/evaluate --arbitrate 裁决 → /fix 修复（TDD）。`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((e) => {
     console.error(e.message);
     process.exit(1);

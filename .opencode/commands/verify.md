@@ -1,11 +1,11 @@
 ---
-description: 验证修复/实现是否正确（只发 git diff，glm+kimi 双施工队逐处审查，省 tokens，记入账本）
+description: 验证修复/实现是否正确（只发 git diff，qwen+kimi 双施工队逐处审查，省 tokens，记入账本）
 agent: build
 ---
 
 # 验证（diff 审查）
 
-用 glm + kimi 双施工队验证改动是否正确、有无回归。**只发 `git diff HEAD` 的改动区域（hunk + 上下文），不整个文件重发，省 tokens。** 记入任务账本。
+用 qwen+kimi 双施工队验证改动是否正确、有无回归。**只发 `git diff HEAD` 的改动区域（hunk + 上下文），不整个文件重发，省 tokens。** 记入任务账本。
 
 > **硬规则：本命令只自动复审 1 次。** 复审后发现 high/medium，**只列现状（finding 清单 + verdict），不自动修复、不自动重新复审**；修复与再审必须由用户显式发起。跑完 Step 3 即停。
 
@@ -20,7 +20,7 @@ node scripts/review-gate.mjs --check-stale
 - `--check-stale` 输出 `stale=true` → 停止（改动未变，上次复审结论仍有效，别重复审）。
 - 输出 `stale=false` → 继续。
 
-## Step 1: Run（glm+kimi 两评审员并行，diff 模式，记入账本）
+## Step 1: Run（qwen+kimi 两评审员并行，diff 模式，记入账本）
 
 用 Bash 工具运行（在项目目录）：
 

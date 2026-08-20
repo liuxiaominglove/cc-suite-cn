@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitHead, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs } from "./audit-baseline.mjs";
+import { gitHead, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs, findProjectRoot } from "./audit-baseline.mjs";
 
 function fakeExec(handler) {
   return (cmd, opts) => {
@@ -314,5 +314,47 @@ describe("gitDirty / detectAuditScope dirty", () => {
     };
     const r = await detectAuditScope("/proj", { cwd: "/repo", exec, path: p });
     assert.equal(r.dirty, true, "应返回 dirty=true");
+  });
+});
+
+describe("findProjectRoot", () => {
+  it("git 仓库内返回根路径（trim）", () => {
+    const exec = fakeExec((cmd) => (cmd.includes("rev-parse --show-toplevel") ? "/repo/proj\n" : undefined));
+    assert.equal(findProjectRoot("/repo/proj/src", { exec }), "/repo/proj");
+  });
+
+  it("非 git 目录返回 null", () => {
+    const exec = () => { throw new Error("fatal: not a git repository"); };
+    assert.equal(findProjectRoot("/notgit", { exec }), null);
+  });
+
+  it("exec 返回空串时返回空串（不抛错）", () => {
+    const exec = fakeExec((cmd) => (cmd.includes("rev-parse --show-toplevel") ? "" : undefined));
+    assert.equal(findProjectRoot("/repo", { exec }), "");
+  });
+
+  it("startPath 含空格时不拼进命令、走 cwd", () => {
+    let capturedCmd = null, capturedOpts = null;
+    const exec = (cmd, opts) => { capturedCmd = cmd; capturedOpts = opts; return "/repo/proj\n"; };
+    const stat = () => ({ isFile: () => false });
+    assert.equal(findProjectRoot("/repo/My Project/src", { exec, stat }), "/repo/proj");
+    assert.ok(!capturedCmd.includes("My Project"), "startPath 不应拼进命令字符串");
+    assert.equal(capturedOpts.cwd, "/repo/My Project/src");
+  });
+
+  it("startPath 是文件时自动 dirname", () => {
+    let capturedOpts = null;
+    const exec = (cmd, opts) => { capturedOpts = opts; return "/repo/proj\n"; };
+    const stat = (p) => ({ isFile: () => p === "/repo/proj/src/foo.mjs" });
+    assert.equal(findProjectRoot("/repo/proj/src/foo.mjs", { exec, stat }), "/repo/proj");
+    assert.equal(capturedOpts.cwd, "/repo/proj/src");
+  });
+
+  it("stat 失败（路径不可读）不崩，仍按原路径试 git", () => {
+    let capturedOpts = null;
+    const exec = (cmd, opts) => { capturedOpts = opts; throw new Error("not git"); };
+    const stat = () => { throw new Error("ENOENT"); };
+    assert.equal(findProjectRoot("/nonexistent", { exec, stat }), null);
+    assert.equal(capturedOpts.cwd, "/nonexistent");
   });
 });

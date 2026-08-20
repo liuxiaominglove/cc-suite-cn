@@ -1595,6 +1595,28 @@ describe("collectImportContext", () => {
     const ctx = await collectImportContext(join(dir, "main.js"));
     assert.ok(!ctx.includes("API_TOKEN"), "不得读取项目外的无扩展名文件");
   });
+
+  it("rootDir 越界的 source-ext import 不读取（信息泄露）", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "cc-escape3-"));
+    const dir = join(parent, "proj");
+    await mkdir(dir, { recursive: true });
+    await mkdir(join(parent, "outside"), { recursive: true });
+    await writeFile(join(dir, "main.js"), 'import secret from "../outside/secret.js";\n');
+    await writeFile(join(parent, "outside", "secret.js"), "export const API_KEY = 'leaked';");
+    const ctx = await collectImportContext(join(dir, "main.js"), { rootDir: dir });
+    assert.ok(!ctx.includes("API_KEY"), "不得读取 rootDir 外的 source-ext 文件");
+  });
+
+  it("rootDir 内的 ../ 兄弟目录 import 正常读取", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "cc-sib-"));
+    const dir = join(parent, "proj");
+    await mkdir(join(dir, "src"), { recursive: true });
+    await mkdir(join(dir, "shared"), { recursive: true });
+    await writeFile(join(dir, "src", "main.js"), 'import { h } from "../shared/helper.js";\n');
+    await writeFile(join(dir, "shared", "helper.js"), "export const h = 1;");
+    const ctx = await collectImportContext(join(dir, "src", "main.js"), { rootDir: dir });
+    assert.match(ctx, /helper\.js/, "rootDir 内的 ../ 兄弟 import 应读取");
+  });
 });
 
 describe("review parses chain_analysis", () => {

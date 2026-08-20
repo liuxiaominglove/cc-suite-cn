@@ -224,6 +224,16 @@ describe("getActionableFindings", () => {
     assert.equal(out[0].finding, "real");
   });
 
+  it("排除已终审判 false 的条目（假阳不进待修清单）", () => {
+    const log = [
+      { file: "a.js", finding: "real", verdict: "true" },
+      { file: "b.js", finding: "confirmed false", verdict: "true", confirmed: { final: "false" } },
+      { file: "c.js", finding: "confirmed true", verdict: "true", confirmed: { final: "true" } },
+    ];
+    const out = getActionableFindings(log);
+    assert.deepEqual(out.map((v) => v.finding).sort(), ["confirmed true", "real"]);
+  });
+
   it("按 projectDir 过滤只返回该项目的可修 finding", () => {
     const log = [
       { file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" },

@@ -31,6 +31,8 @@
 | 23 | 终审写回（--confirm） | `evaluate-models.mjs --confirm <json>` | opencode 终审全量打标 final 写回错题本 | "WT-12 终审写回" |
 | 24 | 进步统计 | `node scripts/progress.mjs` | 每模型历史→本次误报率 + 方向 | "WT-13 进步统计" |
 | 25 | 批判员进 /fix（五步闭环） | `/fix` Step 2 | 找 bug 后 qwen 批判，再裁决 | "FX-1 批判员进 /fix" |
+| 26 | 增量审查+修复 | `/fix-incremental` | `--detect` 变更文件 → 只审/修变更 → `--save` 更新基线 | "增量修复闭环" |
+| 27 | 项目根目录落账（projectDir 隔离） | `--project-dir` | 外部项目审计 finding 的 projectDir 记成被审项目根（非 cwd），`getActionableFindings(projectDir)` 能筛出 | "projectDir 写入修正" |
 
 ## 三色判定
 

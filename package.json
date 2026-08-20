@@ -29,7 +29,7 @@
     "release": "node scripts/release-check.mjs",
     "self-audit": "zsh -c 'source ~/.zshrc && node scripts/self-audit.mjs'",
     "benchmark": "zsh -c 'source ~/.zshrc && node scripts/benchmark.mjs --workers all'",
-    "verify": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs && node scripts/verify/verify-background.mjs && node scripts/verify/verify-kimi-sandbox.mjs'"
+    "verify:e2e": "zsh -c 'source ~/.zshrc && node scripts/verify/verify-review.mjs && node scripts/verify/verify-background.mjs && node scripts/verify/verify-kimi-sandbox.mjs'"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",

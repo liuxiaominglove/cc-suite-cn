@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
-import { FIND_BUG_WORKERS } from "./models.mjs";
+import { FIND_BUG_WORKERS, VERIFY_WORKERS } from "./models.mjs";
 import { isMainModule } from "./runner-core.mjs";
 import { verdictFromFindings } from "./review-gate.mjs";
+import { acquireLock, releaseLock } from "./verdict-log.mjs";
+import { findProjectRoot } from "./audit-baseline.mjs";
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -53,20 +55,36 @@ export function createJobStore({ dir }) {
     return job;
   }
 
-  async function update(id, patch) {
-    const job = await get(id);
-    if (!job) return null;
-    const updated = { ...job, ...patch };
-    const file = jobFile(id);
+  async function writeAtomic(file, obj) {
     const tmp = `${file}.${Date.now()}-${randomBytes(3).toString("hex")}.tmp`;
-    await writeFile(tmp, JSON.stringify(updated, null, 2));
+    await writeFile(tmp, JSON.stringify(obj, null, 2));
     try {
       await rename(tmp, file);
     } catch (err) {
       await unlink(tmp).catch(() => {});
       throw err;
     }
-    return updated;
+  }
+
+  async function withJobLock(id, fn) {
+    const lockPath = `${jobFile(id)}.lock`;
+    await acquireLock(lockPath);
+    try {
+      return await fn();
+    } finally {
+      await releaseLock(lockPath);
+    }
+  }
+
+  async function update(id, patch) {
+    if (!isValidJobId(id)) return null;
+    return withJobLock(id, async () => {
+      const job = await get(id);
+      if (!job) return null;
+      const updated = { ...job, ...patch };
+      await writeAtomic(jobFile(id), updated);
+      return updated;
+    });
   }
 
   async function list() {
@@ -84,7 +102,15 @@ export function createJobStore({ dir }) {
   }
 
   async function cancel(id) {
-    return update(id, { status: "cancelled", finishedAt: new Date().toISOString() });
+    if (!isValidJobId(id)) return null;
+    return withJobLock(id, async () => {
+      const job = await get(id);
+      if (!job) return null;
+      if (job.status !== "running") return job;
+      const updated = { ...job, status: "cancelled", finishedAt: new Date().toISOString() };
+      await writeAtomic(jobFile(id), updated);
+      return updated;
+    });
   }
 
   return { create, get, update, list, cancel };
@@ -121,6 +147,7 @@ export function spawnWorker(spec, { spawn = nodeSpawn, logPath = null, openLog =
     ["--exts", spec.exts],
     ["--ms", spec.ms],
     ["--prompt", spec.prompt],
+    ["--project-dir", spec.projectDir],
   ]) {
     if (val) args.push(flag, String(val));
   }
@@ -267,6 +294,8 @@ export function parseArgs(args) {
         if (Number.isFinite(n) && n > 0) r.maxConcurrent = n;
       }
       if (prompt) r.prompt = prompt;
+      const projectDir = flag("project-dir");
+      if (projectDir) r.projectDir = projectDir;
       if (rest.includes("--diff")) r.diff = true;
       if (rest.includes("--allow-external")) r.allowExternal = true;
       if (hasBackground) r.background = true;
@@ -284,6 +313,8 @@ export function parseArgs(args) {
       if (dir) r.dir = dir;
       if (exts) r.exts = exts.split(",").map((e) => e.trim());
       if (prompt) r.prompt = prompt;
+      const projectDir = flag("project-dir");
+      if (projectDir) r.projectDir = projectDir;
       if (rest.includes("--diff")) r.diff = true;
       if (rest.includes("--allow-external")) r.allowExternal = true;
       return r;
@@ -331,14 +362,18 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null, persistFindingsFn = null }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null, persistFindingsFn = null, projectDir = null, findRoot = null, upsert = null, dedup = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
   const { reviewFile } = await import("./review-runner.mjs");
   const useChunking = !!(file && !dir && !diff);
+  const rootFn = findRoot ?? findProjectRoot;
+  const target = file ?? dir;
+  const resolvedProjectDir = projectDir ?? (diff || !target ? process.cwd() : (rootFn(target) ?? process.cwd()));
+  const workerList = diff ? VERIFY_WORKERS : AUDIT_WORKERS;
   const workers = await Promise.all(
-    AUDIT_WORKERS.map(async ({ backend, model }) => {
+    workerList.map(async ({ backend, model }) => {
       try {
         const feedbackPreamble = getFeedback ? await getFeedback(model, file) : null;
         const r = useChunking
@@ -362,9 +397,9 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
 
   let entries = [];
   if (persistFindingsFn) {
-    try { entries = await persistFindingsFn(workers) ?? []; } catch {}
+    try { entries = await persistFindingsFn(workers, { projectDir: resolvedProjectDir }) ?? []; } catch {}
   } else {
-    entries = await persistFindings(workers);
+    entries = await persistFindings(workers, { projectDir: resolvedProjectDir, upsert, dedup });
   }
 
   return { workers, entries, verdict: verdictFromFindings(workers) };
@@ -402,11 +437,11 @@ export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd
   });
 }
 
-export async function persistFindings(workers, { dedup = null, upsert = null } = {}) {
+export async function persistFindings(workers, { dedup = null, upsert = null, projectDir = process.cwd() } = {}) {
   let entries;
   try {
     const dedupFn = dedup ?? (await import("./evaluate-models.mjs")).dedupFindings;
-    entries = buildFindingEntries(workers, dedupFn);
+    entries = buildFindingEntries(workers, dedupFn, { projectDir: projectDir || process.cwd() });
   } catch {
     return [];
   }
@@ -482,11 +517,11 @@ if (isMainModule(import.meta.url)) {
   } else if (parsed.action === "run-audit") {
     const meta = buildMeta(parsed);
     if (parsed.background) {
-      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, prompt: parsed.prompt, allowExternal: parsed.allowExternal }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
+      const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, prompt: parsed.prompt, allowExternal: parsed.allowExternal, projectDir: parsed.projectDir }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
       console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
     } else {
       const getFeedback = await resolveFeedback();
-      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback }));
+      const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback, projectDir: parsed.projectDir }));
       const job = await store.get(id);
       const summary = job?.result?.workers ? `  ${summarizeWorkers(job.result.workers)}` : "";
       console.log(`${id}  [${job.status}]${summary}`);
@@ -504,7 +539,7 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     }
     const getFeedback = await resolveFeedback();
-    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback }));
+    await updateJobWithResult(store, parsed.jobId, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback, projectDir: parsed.projectDir }));
   } else if (parsed.action === "worker-sleep") {
     if (!parsed.jobId) {
       console.error("--job-id is required for worker-sleep");

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, dirname, basename, isAbsolute } from "node:path";
+import { join, resolve, dirname, basename, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainModule } from "./runner-core.mjs";
 
@@ -108,6 +108,26 @@ export function findDeadReferences(skillFiles = [".opencode/skills/cc-review/SKI
   return problems;
 }
 
+const INLINE_MAIN_MODULE_RE = /(?:import\.meta\.url\s*===\s*pathToFileURL\(\s*process\.argv\[1\]\s*\)(?:\.href)?|pathToFileURL\(\s*process\.argv\[1\]\s*\)(?:\.href)?\s*===\s*import\.meta\.url)/;
+
+export function findInlineMainModule({ root = REPO_ROOT, read = readFileSync, listFiles = null } = {}) {
+  const files = (listFiles ?? ((r) => collectRepoFiles(r, [".mjs"])))(root);
+  const problems = [];
+  for (const f of files) {
+    if (!f.endsWith(".mjs") || f.endsWith(".test.mjs")) continue;
+    let content;
+    try {
+      content = read(f, "utf-8");
+    } catch {
+      continue;
+    }
+    if (typeof content === "string" && INLINE_MAIN_MODULE_RE.test(content)) {
+      problems.push(f.startsWith(root) ? relative(root, f) : f);
+    }
+  }
+  return problems;
+}
+
 export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES, refFiles = GLOBAL_REF_FILES, skillFiles = [".opencode/skills/cc-review/SKILL.md"], exists = existsSync, read = readFileSync, root = REPO_ROOT } = {}) {
   return {
     dupes: findDuplicateCopies(copies, exists),
@@ -117,6 +137,7 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     orphanBaselineKeys: findOrphanBaselineKeys({ baselinePath: join(root, ".cc-suite-cn/audit-baseline.json"), read, exists }),
     orphanGlobalRules: findOrphanGlobalRules({ read }),
     knownRiskDrift: findKnownRiskDrift({ read, root }),
+    inlineMainModule: findInlineMainModule({ root, read }),
   };
 }
 
@@ -279,7 +300,7 @@ export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-sui
 }
 
 if (isMainModule(import.meta.url)) {
-  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift } = runGuard();
+  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift, inlineMainModule } = runGuard();
   const problems = [
     ...dupes.map((p) => `duplicate copy: ${p}`),
     ...missing.map((rel) => `missing canonical: ${rel}`),
@@ -288,6 +309,7 @@ if (isMainModule(import.meta.url)) {
     ...orphanBaselineKeys,
     ...orphanGlobalRules.map((name) => `orphan global rule (未挂载到 opencode.jsonc instructions): ${name}`),
     ...knownRiskDrift,
+    ...inlineMainModule.map((p) => `inline isMainModule drift (应改用 runner-core.isMainModule): ${p}`),
   ];
   if (problems.length) {
     console.error(`Drift guard FAILED:\n  ${problems.join("\n  ")}`);

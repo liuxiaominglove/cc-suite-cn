@@ -35,6 +35,7 @@ import {
   SourceTamperedError,
 } from "./review-source.mjs";
 import { criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings } from "./review-critic.mjs";
+import { findProjectRoot } from "./audit-baseline.mjs";
 
 export { setSpawn, RunnerError, TimeoutError, AuthError, SourceTamperedError };
 
@@ -137,7 +138,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     ruleCwd = dirname(resolved);
     sourcePaths = [resolved];
     if (!isNLArtifact(fileName ?? file)) {
-      importContext = await collectImportContext(resolved);
+      importContext = await collectImportContext(resolved, { rootDir: findProjectRoot(resolved) ?? cwd });
       stackContext = await collectStackContext(ruleCwd);
     }
     if (typeof code !== "string" || code === "") {

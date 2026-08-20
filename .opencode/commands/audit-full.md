@@ -10,6 +10,8 @@ agent: build
 
 > `$ARGUMENTS` 是**路径**（文件或目录）。空参数 → 提示用户「请指定文件或目录，如 `/audit-full src/file.ts`」，不继续。
 
+> **项目根目录（`--project-dir`）**：先取项目根——目录 → `git -C "<目录>" rev-parse --show-toplevel`；文件 → `git -C "$(dirname "<文件>")" rev-parse --show-toplevel`；非 git 则省略。下面 `--run-audit` / `--arbitrate` 都带 `--project-dir "<项目根>"`。
+
 | 环节 | 角色 | 干什么 |
 |------|------|--------|
 | 1. 找 bug | glm + kimi | 并行评审，报问题清单 |
@@ -19,7 +21,7 @@ agent: build
 ## Step 1: 找 bug（在项目目录运行）
 
 ```
-node scripts/jobs.mjs --run-audit --file "<target>"
+node scripts/jobs.mjs --run-audit --file "<target>" --project-dir "<项目根>"
 ```
 
 （结果里的 `result.entries` 是**去重后**的 findings，已自动落进统一账本。）
@@ -37,7 +39,7 @@ node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/f
 ## Step 3: 验证审计员裁决
 
 ```
-node scripts/evaluate-models.mjs --arbitrate
+node scripts/evaluate-models.mjs --arbitrate --project-dir "<项目根>"
 ```
 
 （裁决统一账本里尚未裁决的 finding，输出「已裁决 N 条（真/假/不确定）」。）

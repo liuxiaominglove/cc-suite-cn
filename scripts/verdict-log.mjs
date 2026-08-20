@@ -161,7 +161,7 @@ export async function appendVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
 
 export function getActionableFindings(log, { projectDir = null } = {}) {
   return (log ?? []).filter(
-    (v) => v.verdict === "true" && !v.fixed && (projectDir == null || v.projectDir === projectDir)
+    (v) => v.verdict === "true" && !v.fixed && v.confirmed?.final !== "false" && (projectDir == null || v.projectDir === projectDir)
   );
 }
 

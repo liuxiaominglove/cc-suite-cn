@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 import { WORKERS, FIND_BUG_WORKERS } from "./models.mjs";
 import { review } from "./review-runner.mjs";
 import { scoreFindings, aggregateByModel, parseManifest } from "./benchmark-core.mjs";
@@ -140,7 +141,7 @@ async function main() {
   console.log(`\n基线已落库：.cc-suite-cn/benchmark-baseline.json`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((e) => {
     console.error(e.message);
     process.exit(1);

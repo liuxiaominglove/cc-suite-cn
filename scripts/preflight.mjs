@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn, execSync } from "node:child_process";
 import { Buffer } from "node:buffer";
-import { pathToFileURL } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 
 let _spawn = null;
 
@@ -96,7 +96,7 @@ export function checkQwen(opts = {}) {
   return checkVersion("qwen", { installHint: "npm install -g @qwen-code/qwen-code", ...opts });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const report = preflightAll();
   const versions = await Promise.all([checkCodebuddy(), checkKimi(), checkQwen()]);
 

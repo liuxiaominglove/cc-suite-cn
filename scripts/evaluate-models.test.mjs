@@ -941,6 +941,22 @@ describe("cli --file 过滤", () => {
   });
 });
 
+describe("cli --arbitrate --project-dir", () => {
+  it("把 --project-dir 传给 adjudicateLedgerFn", async () => {
+    let captured = null;
+    const adjudicateLedgerFn = async (opts) => { captured = opts.projectDir; return []; };
+    await cli(["--arbitrate", "--project-dir", "/p"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.equal(captured, "/p");
+  });
+
+  it("不传 --project-dir 时透传 null（兼容）", async () => {
+    let captured = "sentinel";
+    const adjudicateLedgerFn = async (opts) => { captured = opts.projectDir ?? "none"; return []; };
+    await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.equal(captured, "none");
+  });
+});
+
 describe("adjudicateLedger", () => {
   it("只裁 verdict 为空的 finding，追加 verdict/evidence/codeHash", async () => {
     const log = [
@@ -987,5 +1003,34 @@ describe("adjudicateLedger", () => {
     const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
     const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, files: ["a.js"] });
     assert.deepEqual(results.map((r) => r.finding), ["f1"], "应只裁 a.js");
+  });
+
+  it("传 projectDir 时落库结果用传入值（不 fallback cwd）", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f" }];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, projectDir: "/p" });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].projectDir, "/p");
+  });
+
+  it("不传 projectDir 时 fallback process.cwd()（兼容旧行为）", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f" }];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {} });
+    assert.equal(results[0].projectDir, process.cwd());
+  });
+
+  it("裁决时保留 finding 自身的 projectDir，不被 cwd/传入值覆盖", async () => {
+    const log = [
+      { file: "a.js", line: 1, finding: "f1", projectDir: "/external/project" },
+      { file: "b.js", line: 2, finding: "f2" },
+    ];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, projectDir: "/p" });
+    assert.equal(results.find((r) => r.finding === "f1").projectDir, "/external/project", "有自身 projectDir 的保留原值");
+    assert.equal(results.find((r) => r.finding === "f2").projectDir, "/p", "无自身 projectDir 的用传入值");
   });
 });

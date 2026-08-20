@@ -55,10 +55,11 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 | `pnpm test` | Run full test suite (loads env from `~/.zshrc`) |
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
-| `pnpm verify` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `pnpm verify:e2e` | 一键重跑 4 评审员只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
 | `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
 | `/fix <path>` | 修复闭环五步：找 → 批判 → 裁 → 修 bug(TDD) → 验证（含 /verify 只审 diff） |
+| `/fix-incremental <project-dir>` | 增量修复闭环：只对自基线以来变更的文件跑五步，修完自动更新基线 |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
@@ -72,9 +73,11 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 |---|---|
 | 任一脚本 `.mjs` | `pnpm test:unit`（内循环，秒级离线） |
 | guard / 文档 / 规则 | `pnpm test:unit` + `node scripts/guard.mjs` |
-| 出 release / 推前 | `pnpm test` + `pnpm verify` + `pnpm self-audit`（门禁，只跑一次） |
+| 出 release / 推前 | `pnpm test` + `pnpm verify:e2e` + `pnpm self-audit`（门禁，只跑一次） |
 
-铁律：**慢内循环 = 被禁用的门禁**。`pnpm verify` / `pnpm self-audit` 起外部 CLI、联网、计费，只配 release 前跑一次，绝不进编辑循环；gate 挡住正当工作就**修 gate**，别跳过（`--no-verify` / 删 hook 都属于跳过，需显式授权 + 记录理由）。
+铁律：**慢内循环 = 被禁用的门禁**。`pnpm verify:e2e` / `pnpm self-audit` 起外部 CLI、联网、计费，只配 release 前跑一次，绝不进编辑循环；gate 挡住正当工作就**修 gate**，别跳过（`--no-verify` / 删 hook 都属于跳过，需显式授权 + 记录理由）。
+
+> 教训（2026-08-20）：`/verify`（修 bug 后唯一复审）曾与 `pnpm verify`（release 门禁）因同名被混淆——opencode 拿「门禁不进编辑循环」当借口，该跑 `/verify` 的没跑、还标了 ⏸️。已改名 `pnpm verify:e2e` + 上文「复审 vs 门禁」对照表 + ⏸️ 只许三种理由，三重防再犯。别再串。
 
 ## Usage
 
@@ -133,12 +136,20 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **复审只自动跑 1 次**: `/verify` 由 opencode 自动发起时，每个改动集只跑 1 次；复审后发现 high/medium，**只列现状（finding 清单 + verdict）、不自动修复、不自动重新复审**；修复与再审必须由用户显式发起。内循环用 `pnpm test:unit`，门禁 `/verify` 只跑一次——把门禁当内循环反复跑（10 轮复审）是反面教材。
 - **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
 - **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
-- **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
+- **验证脚本**: `scripts/verify/` + `pnpm verify:e2e`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
 - **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
+
+### 复审 vs 门禁（易混命令对照，单一数据源）
+
+| 命令 | 是什么 | 何时跑 | 谁发起 | 跑几次 |
+|------|--------|--------|--------|--------|
+| `/verify` | 修 bug 后唯一复审（只审 diff） | 每次改完代码必跑 | opencode 自动 | 1 次 |
+| `pnpm verify:e2e` | release 门禁（重跑 4 评审员 + 真后台） | 仅 release / 推前 | 用户手动 | 1 次 |
+| `pnpm test:unit` | 内循环单测 | 改代码随手跑 | 任意 | 不限 |
 
 ## 汇报惯例（每次 cc-suite-cn 工作完的总结必带：总体结论 + 行动项 + 三节）
 
-所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/fix-incremental` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制：
 
 ### 总体结论（必带）
 
@@ -171,7 +182,11 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 凡**修了代码**的任务，总结里必须显式声明复审状态，两种：
 
 - 🟢 **已复审**：/verify 只审 diff（唯一复审）跑过、结论如何。
-- ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**（如"真机验证需你授权/输密码/在场，你回来后跑 X"）。
+- ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**。⏸️ 只允许以下三种客观理由，此外一律违规：
+  1. `git diff` 空（无改动可审）
+  2. 真机/UI 验证需用户授权/输密码/在场
+  3. 评审员空输出且重试耗尽
+  > 「门禁不进编辑循环」**不是** ⏸️ 的合法理由——那条管 `pnpm verify:e2e`（release 门禁），与 `/verify`（修 bug 后唯一复审）无关，两者别混。
 
 **只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/verify` 只审 diff 是唯一复审，没做成必须标 ⏸️。）
 
@@ -199,7 +214,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | Path | Purpose |
 |------|---------|
 | `AGENTS.md` | This file — project conventions and instructions |
-| `.opencode/commands/*.md` | 12 个斜杠命令（audit/fix/evaluate/verify/trace/jobs 等，项目级自动加载） |
+| `.opencode/commands/*.md` | 13 个斜杠命令（audit/fix/fix-incremental/evaluate/verify/trace/jobs 等，项目级自动加载） |
 | `scripts/review-runner.mjs` | 评审核心（review/reviewFile 编排 + CLI 入口 + 错误类 re-export 门面） |
 | `scripts/review-tools.mjs` | 跑模型与工具（runModel 统一重试/错误分类/空输出检查 + frameCode/extractJson/withRetry/chunkCode/isAuthError） |
 | `scripts/review-context.mjs` | 上下文采集（AGENTS.md 注入/口袋书注入/import 上下文/技术栈） |

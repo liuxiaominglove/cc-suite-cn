@@ -1,7 +1,9 @@
 import { execSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMainModule } from "./runner-core.mjs";
 
 export const BASELINE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/audit-baseline.json");
 
@@ -10,6 +12,21 @@ export const COMMIT_HASH_RE = /^[a-f0-9]{7,40}$/;
 export function gitHead(cwd = process.cwd(), exec = execSync) {
   try {
     return exec("git rev-parse HEAD", { cwd, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+export function findProjectRoot(startPath, { exec = execSync, stat = statSync } = {}) {
+  let dir = startPath;
+  try {
+    if (stat(startPath).isFile()) dir = dirname(startPath);
+  } catch {
+    // stat 失败（路径不存在/不可读），仍按原路径试 git
+  }
+  try {
+    const out = exec("git rev-parse --show-toplevel", { cwd: dir, encoding: "utf8" });
+    return typeof out === "string" ? out.trim() : null;
   } catch {
     return null;
   }
@@ -117,7 +134,7 @@ export function parseSaveArgs(args) {
   return { project, commit, hasCommitFlag };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const action = args[0];
   const project = args[1];

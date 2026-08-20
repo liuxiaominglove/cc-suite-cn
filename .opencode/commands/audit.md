@@ -45,18 +45,20 @@ node scripts/audit-baseline.mjs --detect "<项目根目录>"
 | directory path | 用 `--dir` 模式（`--exts` 匹配文件类型） |
 | 路径不存在/不可读 | 提示用户路径无效，不继续 |
 
+> **项目根目录（`--project-dir`）**：先取项目根——目录 → `git -C "<目录>" rev-parse --show-toplevel`；文件 → `git -C "$(dirname "<文件>")" rev-parse --show-toplevel`；非 git 则省略。落账时按项目根隔离，外部项目审计必须带上，否则 finding 归属记错。
+
 ## Step 2: Run（2 施工队并行，记入账本）
 
 用 Bash 工具运行（在项目目录）：
 
 ```
-node scripts/jobs.mjs --run-audit --file "<target>"
+node scripts/jobs.mjs --run-audit --file "<target>" --project-dir "<项目根>"
 ```
 
 目录模式：
 
 ```
-node scripts/jobs.mjs --run-audit --dir "<target>" --exts ".js,.ts,.py,.swift,..."
+node scripts/jobs.mjs --run-audit --dir "<target>" --exts ".js,.ts,.py,.swift,..." --project-dir "<项目根>"
 ```
 
 输出形如 `<job-id>  [completed]`。记下 job-id。

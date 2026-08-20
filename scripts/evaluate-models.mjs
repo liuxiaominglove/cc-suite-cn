@@ -318,7 +318,7 @@ export async function adjudicateLedger({
       codeHash: hashContent(code),
       models: f.models ?? [],
       source: f.source ?? null,
-      projectDir: projectDir || process.cwd(),
+      projectDir: f.projectDir ?? projectDir ?? process.cwd(),
       timestamp: new Date().toISOString(),
     };
   });
@@ -353,6 +353,14 @@ export function parseFileFilterArgs(args) {
   const fileIdx = args.indexOf("--file");
   if (fileIdx !== -1 && args[fileIdx + 1] && !args[fileIdx + 1].startsWith("--")) {
     return [args[fileIdx + 1]];
+  }
+  return null;
+}
+
+export function parseProjectDirArg(args) {
+  const idx = args.indexOf("--project-dir");
+  if (idx !== -1 && args[idx + 1] && !args[idx + 1].startsWith("--")) {
+    return args[idx + 1];
   }
   return null;
 }
@@ -463,10 +471,11 @@ export async function confirmCli(args = process.argv.slice(2), { readFile = null
 }
 
 
-export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr } = {}) {
+export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr, adjudicateLedgerFn = null } = {}) {
   try {
     const arbitrate = args.includes("--arbitrate");
     const files = parseFileFilterArgs(args);
+    const projectDir = parseProjectDirArg(args);
 
     if (arbitrate) {
       const { loadVerdicts } = await import("./verdict-log.mjs");
@@ -482,7 +491,8 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
         try { return await collectStackContext(dirname(file)); } catch { return ""; }
       };
       const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
-      const results = await adjudicateLedger({ resolveCode, resolveRules, resolveImportContext, resolveStackContext, files, retries: 2 });
+      const fn = adjudicateLedgerFn ?? adjudicateLedger;
+      const results = await fn({ resolveCode, resolveRules, resolveImportContext, resolveStackContext, files, retries: 2, projectDir });
       if (results.length === 0) {
         stdout.write("(暂无待裁决的 finding)\n");
         return 0;

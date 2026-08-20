@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, findInlineMainModule, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
 import { homedir } from "node:os";
 
 function fakeExists(present) {
@@ -351,5 +351,58 @@ describe("findKnownRiskDrift", () => {
     const read = fakeRead({ "known-risks.json": JSON.stringify({ risks: "nope" }), "verification.md": verification });
     const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
     assert.ok(problems.length >= 1);
+  });
+});
+
+describe("findInlineMainModule", () => {
+  it("检出内联 pathToFileURL(process.argv[1]) 的文件", () => {
+    const listFiles = () => ["/repo/scripts/foo.mjs"];
+    const read = fakeRead({ "/repo/scripts/foo.mjs": "if (import.meta.url === pathToFileURL(process.argv[1]).href) {" });
+    const problems = findInlineMainModule({ root: "/repo", read, listFiles });
+    assert.equal(problems.length, 1);
+    assert.ok(problems[0].includes("foo.mjs"));
+  });
+
+  it("检出反向操作数顺序的内联判断", () => {
+    const listFiles = () => ["/repo/scripts/reversed.mjs"];
+    const read = fakeRead({ "/repo/scripts/reversed.mjs": "if (pathToFileURL(process.argv[1]).href === import.meta.url) {" });
+    const problems = findInlineMainModule({ root: "/repo", read, listFiles });
+    assert.equal(problems.length, 1, "反向比较不得漏检");
+  });
+
+  it("检出带空白变体的内联判断", () => {
+    const listFiles = () => ["/repo/scripts/ws.mjs"];
+    const read = fakeRead({ "/repo/scripts/ws.mjs": "if (import.meta.url === pathToFileURL( process.argv[1] ).href) {" });
+    const problems = findInlineMainModule({ root: "/repo", read, listFiles });
+    assert.equal(problems.length, 1, "pathToFileURL 内空白不得漏检");
+  });
+
+  it("用了 isMainModule 的文件不报", () => {
+    const listFiles = () => ["/repo/scripts/bar.mjs"];
+    const read = fakeRead({ "/repo/scripts/bar.mjs": "if (isMainModule(import.meta.url)) {" });
+    assert.deepEqual(findInlineMainModule({ root: "/repo", read, listFiles }), []);
+  });
+
+  it("runner-core 内部 pathToFileURL(argv1) 不误报", () => {
+    const listFiles = () => ["/repo/scripts/runner-core.mjs"];
+    const read = fakeRead({ "/repo/scripts/runner-core.mjs": "return importMetaUrl === pathToFileURL(argv1).href;" });
+    assert.deepEqual(findInlineMainModule({ root: "/repo", read, listFiles }), []);
+  });
+
+  it("无命中返回 []", () => {
+    const listFiles = () => ["/repo/scripts/a.mjs"];
+    const read = fakeRead({ "/repo/scripts/a.mjs": "console.log('hi')" });
+    assert.deepEqual(findInlineMainModule({ root: "/repo", read, listFiles }), []);
+  });
+
+  it("读不到的文件跳过不崩", () => {
+    const listFiles = () => ["/repo/scripts/missing.mjs"];
+    const read = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    assert.deepEqual(findInlineMainModule({ root: "/repo", read, listFiles }), []);
+  });
+
+  it("当前 repo 无内联 isMainModule 漂移（统一到 runner-core）", () => {
+    const { inlineMainModule } = runGuard();
+    assert.deepEqual(inlineMainModule, [], `仍内联 pathToFileURL(process.argv[1]) 的文件：${inlineMainModule.join(", ")}`);
   });
 });

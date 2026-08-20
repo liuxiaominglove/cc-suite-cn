@@ -1,4 +1,4 @@
-import { join, dirname, resolve } from "node:path";
+import { join, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SOURCE_IMPORT_EXTS } from "./review-tools.mjs";
 
@@ -80,7 +80,14 @@ function extractExports(content) {
   return [...new Set(names)];
 }
 
-export async function collectImportContext(filePath, { readFile = null } = {}) {
+function isWithinRoot(abs, rootDir) {
+  if (!rootDir) return true;
+  const resolvedRoot = resolve(rootDir);
+  const prefix = resolvedRoot.endsWith(sep) ? resolvedRoot : resolvedRoot + sep;
+  return abs === resolvedRoot || abs.startsWith(prefix);
+}
+
+export async function collectImportContext(filePath, { readFile = null, rootDir = null } = {}) {
   const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
   const content = await read(filePath).catch(() => "");
   if (!content) return "";
@@ -103,6 +110,7 @@ export async function collectImportContext(filePath, { readFile = null } = {}) {
   const parts = [];
   for (const imp of [...new Set(localImports)]) {
     const abs = resolve(baseDir, imp);
+    if (!isWithinRoot(abs, rootDir)) continue;
     const hasSourceExt = SOURCE_IMPORT_EXTS.some((e) => abs.endsWith(e));
     const indexCandidates = [`${abs}/index.js`, `${abs}/index.mjs`, `${abs}/index.ts`];
     const extCandidates = SOURCE_IMPORT_EXTS.map((e) => `${abs}${e}`);

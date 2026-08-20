@@ -97,6 +97,27 @@ describe("createJobStore", () => {
     assert.ok(cancelled.finishedAt);
   });
 
+  it("cancel 不覆盖已终态 job（completed 保持原状）", async () => {
+    const { store } = await makeStore();
+    const created = await store.create({ type: "review" });
+    await store.update(created.id, { status: "completed", result: { ok: true } });
+    const after = await store.cancel(created.id);
+    assert.equal(after.status, "completed", "completed 是终态，cancel 不得覆盖");
+    assert.deepEqual(after.result, { ok: true });
+  });
+
+  it("并发 update 都生效（锁串行化，不丢 patch）", async () => {
+    const { store } = await makeStore();
+    const created = await store.create({ type: "review" });
+    await Promise.all([
+      store.update(created.id, { result: "A" }),
+      store.update(created.id, { error: "B" }),
+    ]);
+    const final = await store.get(created.id);
+    assert.equal(final.result, "A", "第一个 patch 不丢");
+    assert.equal(final.error, "B", "第二个 patch 不丢");
+  });
+
   it("persists across store instances on the same dir", async () => {
     const { store, dir } = await makeStore();
     const created = await store.create({ type: "review", model: "kimi" });
@@ -221,6 +242,18 @@ describe("parseArgs", () => {
     const r = parseArgs(["--run-review", "--model", "glm-5.2", "--file", "x.md", "--allow-external", "--prompt", "评审"]);
     assert.equal(r.allowExternal, true);
     assert.equal(r.prompt, "评审");
+  });
+
+  it("parses --project-dir on run-audit", () => {
+    assert.equal(parseArgs(["--run-audit", "--file", "x.js", "--project-dir", "/p"]).projectDir, "/p");
+  });
+
+  it("omits projectDir when --project-dir not given", () => {
+    assert.equal(parseArgs(["--run-audit", "--file", "x.js"]).projectDir, undefined);
+  });
+
+  it("parses --project-dir on worker-audit", () => {
+    assert.equal(parseArgs(["--worker-audit", "--job-id", "j1", "--file", "x.js", "--project-dir", "/p"]).projectDir, "/p");
   });
 });
 
@@ -459,6 +492,24 @@ describe("runAudit", () => {
     );
   });
 
+  it("diff 模式（复审）用 qwen+kimi，非 diff 找 bug 用 glm+kimi", async () => {
+    const calls = [];
+    const review = async ({ model, backend }) => {
+      calls.push({ model, backend });
+      return { success: true, severity: "low", issues: [], summary: `ok ${model}` };
+    };
+    const result = await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: () => [] });
+    assert.equal(calls.length, 2);
+    assert.deepEqual(
+      result.workers.map((w) => w.model).sort(),
+      ["qwen3-coder-plus", "kimi-k2.7-code"].sort()
+    );
+    assert.deepEqual(
+      result.workers.map((w) => w.backend).sort(),
+      ["qwen", "kimi"].sort()
+    );
+  });
+
   it("captures a failing worker without rejecting", async () => {
     const review = async ({ model }) => {
       if (model === "kimi-k2.7-code") throw new Error("kimi down");
@@ -541,6 +592,42 @@ describe("runAudit", () => {
     };
     await runAudit({ file: "x.js", review, persistAuditLog: false });
     assert.deepEqual(captured, [null, null]);
+  });
+
+  it("透传 projectDir 给 persistFindingsFn", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let captured = null;
+    await runAudit({ file: "x.js", review, persistAuditLog: false, projectDir: "/p", persistFindingsFn: (workers, opts) => { captured = opts?.projectDir; return []; } });
+    assert.equal(captured, "/p");
+  });
+
+  it("不传 projectDir 时透传 process.cwd()", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let captured = "sentinel";
+    await runAudit({ file: "x.js", review, persistAuditLog: false, persistFindingsFn: (workers, opts) => { captured = opts?.projectDir; return []; } });
+    assert.equal(captured, process.cwd());
+  });
+
+  it("无 projectDir 时从 file 的 git 根推导（外部项目不误归）", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let captured = null;
+    await runAudit({ file: "/ext/proj/src/x.js", review, persistAuditLog: false, findRoot: () => "/ext/proj", persistFindingsFn: (workers, opts) => { captured = opts?.projectDir; return []; } });
+    assert.equal(captured, "/ext/proj");
+  });
+
+  it("显式 projectDir 优先于 git 根推导", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let captured = null;
+    await runAudit({ file: "/ext/proj/src/x.js", review, persistAuditLog: false, projectDir: "/explicit", findRoot: () => "/ext/proj", persistFindingsFn: (workers, opts) => { captured = opts?.projectDir; return []; } });
+    assert.equal(captured, "/explicit");
+  });
+
+  it("注入 upsert 时不写真实账本（测试/调用方隔离）", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [{ file: "x.js", line: 1, finding: "f", fix: "fx" }], summary: "ok" });
+    let upserted = null;
+    const result = await runAudit({ file: "x.js", review, persistAuditLog: false, upsert: async (es) => { upserted = es; } });
+    assert.deepEqual((upserted ?? []).map((e) => e.finding), ["f"], "应走注入的 upsert 而非真实账本");
+    assert.equal(result.entries.length, 1);
   });
 });
 
@@ -743,5 +830,57 @@ describe("buildFindingEntries", () => {
     const entries = await persistFindings(workers, { dedup, upsert });
     assert.equal(entries.length, 1);
     assert.equal(upserted.length, 1, "正常路径应调用 upsert");
+  });
+
+  it("buildFindingEntries 传 projectDir 时写入每条 entry", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup, { projectDir: "/p" });
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].projectDir, "/p");
+  });
+
+  it("buildFindingEntries 不传 projectDir 时落 process.cwd()（兼容旧行为）", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup);
+    assert.equal(entries[0].projectDir, process.cwd());
+  });
+
+  it("persistFindings 透传 projectDir 到落账 entries", async () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    let upserted = null;
+    const upsert = async (entries) => { upserted = entries; };
+    await persistFindings(workers, { dedup, upsert, projectDir: "/p" });
+    assert.equal(upserted[0].projectDir, "/p");
+  });
+
+  it("persistFindings 不传 projectDir 时落 process.cwd()", async () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    let upserted = null;
+    const upsert = async (entries) => { upserted = entries; };
+    await persistFindings(workers, { dedup, upsert });
+    assert.equal(upserted[0].projectDir, process.cwd());
+  });
+
+  it("persistFindings 显式传 null 时落 process.cwd()（null 兜底）", async () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    let upserted = null;
+    const upsert = async (entries) => { upserted = entries; };
+    await persistFindings(workers, { dedup, upsert, projectDir: null });
+    assert.equal(upserted[0].projectDir, process.cwd());
   });
 });
