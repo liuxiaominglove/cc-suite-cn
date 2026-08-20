@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { FIND_BUG_WORKERS } from "./models.mjs";
 import { isMainModule } from "./runner-core.mjs";
+import { verdictFromFindings } from "./review-gate.mjs";
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -366,7 +367,7 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     entries = await persistFindings(workers);
   }
 
-  return { workers, entries };
+  return { workers, entries, verdict: verdictFromFindings(workers) };
 }
 
 export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd() } = {}) {

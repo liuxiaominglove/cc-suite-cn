@@ -1,11 +1,33 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decide, isCodeFile, markReviewed, stageHashes, loadGate } from "./review-gate.mjs";
+import { decide, isCodeFile, markReviewed, stageHashes, loadGate, verdictFromFindings, isDiffUnchanged } from "./review-gate.mjs";
 import { hashContent } from "./verdict-log.mjs";
 
 const GATE = fileURLToPath(new URL("./review-gate.mjs", import.meta.url));
+
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), "cc-gate-"));
+  spawnSync("git", ["init", "-q"], { cwd: dir });
+  spawnSync("git", ["config", "user.email", "t@t"], { cwd: dir });
+  spawnSync("git", ["config", "user.name", "t"], { cwd: dir });
+  writeFileSync(join(dir, "a.mjs"), "export const x = 1;\n");
+  spawnSync("git", ["add", "a.mjs"], { cwd: dir });
+  spawnSync("git", ["commit", "-qm", "init"], { cwd: dir });
+  return dir;
+}
+
+function runGate(args, cwd, gatePath) {
+  return spawnSync(process.execPath, [GATE, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: { ...process.env, CC_REVIEW_GATE_PATH: gatePath },
+  });
+}
 
 describe("isCodeFile", () => {
   it("代码扩展名为 true", () => {
@@ -138,6 +160,53 @@ describe("loadGate", () => {
   });
 });
 
+describe("verdictFromFindings", () => {
+  it("空 / 全 low → clean", () => {
+    assert.equal(verdictFromFindings([]), "clean");
+    assert.equal(verdictFromFindings([{ severity: "low" }, { severity: "low" }]), "clean");
+  });
+
+  it("有 high → high（取最高）", () => {
+    assert.equal(verdictFromFindings([{ severity: "medium" }, { severity: "high" }]), "high");
+  });
+
+  it("有 medium 无 high → medium", () => {
+    assert.equal(verdictFromFindings([{ severity: "low" }, { severity: "medium" }]), "medium");
+  });
+
+  it("有 unknown/缺失 severity → 保守 medium（不静默 clean 放行）", () => {
+    assert.equal(verdictFromFindings([{ severity: "unknown" }]), "medium");
+    assert.equal(verdictFromFindings([{}]), "medium");
+  });
+
+  it("任意异常 severity（error/failed/意外字符串）→ 保守 medium", () => {
+    assert.equal(verdictFromFindings([{ severity: "error" }]), "medium");
+    assert.equal(verdictFromFindings([{ severity: "failed" }]), "medium");
+    assert.equal(verdictFromFindings([{ severity: "critical" }]), "medium");
+  });
+});
+
+describe("isDiffUnchanged", () => {
+  it("无标记 → false（可审）", () => {
+    assert.equal(isDiffUnchanged(null, { "a.mjs": "h1" }), false);
+  });
+
+  it("hash 一致 → true（拒绝重审）", () => {
+    const gate = { files: { "a.mjs": "h1" }, verdict: "clean" };
+    assert.equal(isDiffUnchanged(gate, { "a.mjs": "h1" }), true);
+  });
+
+  it("hash 不同 → false（可审）", () => {
+    const gate = { files: { "a.mjs": "h1" }, verdict: "clean" };
+    assert.equal(isDiffUnchanged(gate, { "a.mjs": "h2" }), false);
+  });
+
+  it("新增文件（集合不同）→ false（可审）", () => {
+    const gate = { files: { "a.mjs": "h1" }, verdict: "clean" };
+    assert.equal(isDiffUnchanged(gate, { "a.mjs": "h1", "b.mjs": "h2" }), false);
+  });
+});
+
 describe("CLI", () => {
   it("--mark 拒绝非法 verdict（exit 1，不写标记）", () => {
     const r = spawnSync(process.execPath, [GATE, "--mark", "--verdict", "bogus"], { encoding: "utf8" });
@@ -155,5 +224,47 @@ describe("CLI", () => {
     const r = spawnSync(process.execPath, [GATE], { encoding: "utf8" });
     assert.equal(r.status, 1);
     assert.ok(r.stderr.includes("Usage"), r.stderr);
+  });
+});
+
+describe("CLI --check-stale 集成", () => {
+  it("无标记 → stale=false exit 0", () => {
+    const dir = makeRepo();
+    try {
+      const r = runGate(["--check-stale"], dir, join(dir, "gate.json"));
+      assert.equal(r.status, 0, r.stderr);
+      assert.ok(r.stdout.includes("stale=false"), r.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("有标记 + 改动未变 → stale=true exit 1", () => {
+    const dir = makeRepo();
+    try {
+      const gp = join(dir, "gate.json");
+      const m = runGate(["--mark", "--verdict", "clean"], dir, gp);
+      assert.equal(m.status, 0, m.stderr);
+      const r = runGate(["--check-stale"], dir, gp);
+      assert.equal(r.status, 1, r.stdout);
+      assert.ok(r.stdout.includes("stale=true"), r.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("有标记 + 改动变化 → stale=false exit 0", () => {
+    const dir = makeRepo();
+    try {
+      const gp = join(dir, "gate.json");
+      const m = runGate(["--mark", "--verdict", "clean"], dir, gp);
+      assert.equal(m.status, 0, m.stderr);
+      writeFileSync(join(dir, "a.mjs"), "export const x = 2;\n");
+      const r = runGate(["--check-stale"], dir, gp);
+      assert.equal(r.status, 0, r.stdout);
+      assert.ok(r.stdout.includes("stale=false"), r.stdout);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

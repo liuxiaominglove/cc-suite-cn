@@ -8,6 +8,11 @@ import { isMainModule } from "./runner-core.mjs";
 
 export const REVIEW_GATE_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/review-gate.json");
 
+// 标记文件路径可注入：默认 REVIEW_GATE_PATH，测试可用 CC_REVIEW_GATE_PATH 指到临时位置隔离。
+export function reviewGatePath() {
+  return process.env.CC_REVIEW_GATE_PATH ?? REVIEW_GATE_PATH;
+}
+
 export const CODE_EXTS = [...new Set([...DEFAULT_EXTS, ...SOURCE_IMPORT_EXTS])];
 
 const HOOK_PATHS = [".githooks/pre-commit"];
@@ -46,6 +51,26 @@ export function decide(gate, stagedHashes) {
   return { action: "confirm", reason: "unknown-verdict", files: paths };
 }
 
+// 从各评审员的顶层 severity 取最高，算出复审结论（健康判定单一真源，不再人工判）。
+export function verdictFromFindings(workers) {
+  const severities = (workers ?? []).map((w) => w?.severity);
+  if (severities.includes("high")) return "high";
+  if (severities.includes("medium")) return "medium";
+  // 枚举合法值域 {high, medium, low}：凡非 low 的异常值（unknown/undefined/error/意外字符串）→ 保守判 medium，不静默 clean 放行
+  if (severities.some((s) => s !== "low")) return "medium";
+  return "clean";
+}
+
+// 判断当前 diff 的代码文件 hash 是否与上次复审标记一致（一致 = 改动未变，拒绝重复审）。
+export function isDiffUnchanged(gate, currentHashes) {
+  if (!gate) return false;
+  const files = gate.files ?? {};
+  const gateKeys = Object.keys(files);
+  const curKeys = Object.keys(currentHashes ?? {});
+  if (gateKeys.length !== curKeys.length) return false;
+  return gateKeys.every((k) => files[k] === currentHashes[k]);
+}
+
 export async function loadGate({ filePath = REVIEW_GATE_PATH, readFile = null } = {}) {
   const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
   try {
@@ -58,10 +83,8 @@ export async function loadGate({ filePath = REVIEW_GATE_PATH, readFile = null } 
   }
 }
 
-export async function markReviewed({ files, verdict, filePath = REVIEW_GATE_PATH, readFile = null, writeFile = null, mkdir = null, rename = null } = {}) {
-  if (verdict !== "clean" && verdict !== "medium" && verdict !== "high") {
-    throw new Error(`markReviewed verdict 必填（clean|medium|high），got: ${verdict}`);
-  }
+// 读工作区文件内容算 hash（读不到 = 删除，记特殊值与 stageHashes 对齐）。
+async function workingHashes(files, readFile) {
   const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
   const hashes = {};
   for (const f of files ?? []) {
@@ -69,10 +92,17 @@ export async function markReviewed({ files, verdict, filePath = REVIEW_GATE_PATH
     try {
       hashes[f] = hashContent(await read(f));
     } catch {
-      // 读不到 = 文件已删除；记录特殊值，与 stageHashes 的删除语义对齐
       hashes[f] = "deleted";
     }
   }
+  return hashes;
+}
+
+export async function markReviewed({ files, verdict, filePath = REVIEW_GATE_PATH, readFile = null, writeFile = null, mkdir = null, rename = null } = {}) {
+  if (verdict !== "clean" && verdict !== "medium" && verdict !== "high") {
+    throw new Error(`markReviewed verdict 必填（clean|medium|high），got: ${verdict}`);
+  }
+  const hashes = await workingHashes(files, readFile);
   const gate = { files: hashes, verdict };
   const mk = mkdir ?? (async (p) => (await import("node:fs/promises")).mkdir(p, { recursive: true }));
   const wr = writeFile ?? (async (p, d) => (await import("node:fs/promises")).writeFile(p, d, "utf-8"));
@@ -103,6 +133,37 @@ export async function stageHashes(files, { gitShow = null } = {}) {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
+
+  if (args.includes("--check-stale")) {
+    try {
+      process.chdir(execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim());
+    } catch {
+      console.log("stale=false（无法定位仓库根目录，允许复审）");
+      process.exit(0);
+    }
+    const gate = await loadGate({ filePath: reviewGatePath() });
+    if (!gate) {
+      console.log("stale=false verdict=（无复审标记，可复审）");
+      process.exit(0);
+    }
+    let files;
+    try {
+      files = execFileSync("git", ["diff", "HEAD", "--name-only", "-z"], { encoding: "utf8" })
+        .split("\0").filter(Boolean);
+    } catch {
+      console.log("stale=true（git diff 失败，保守拒绝重审）");
+      process.exit(1);
+    }
+    const codeFiles = files.filter(isCodeFile);
+    const currentHashes = await workingHashes(codeFiles);
+    if (isDiffUnchanged(gate, currentHashes)) {
+      console.log(`stale=true（改动未变，上次复审结论 verdict=${gate.verdict} 仍有效，拒绝重复审）`);
+      process.exit(1);
+    }
+    console.log(`stale=false verdict=${gate.verdict}（改动已变化，可复审）`);
+    process.exit(0);
+  }
+
   if (!args.includes("--mark")) {
     console.error("Usage: node review-gate.mjs --mark --verdict <clean|medium|high>");
     process.exit(1);
@@ -130,7 +191,7 @@ if (isMainModule(import.meta.url)) {
     process.exit(1);
   }
   const codeFiles = files.filter(isCodeFile);
-  await markReviewed({ files: codeFiles, verdict });
+  await markReviewed({ files: codeFiles, verdict, filePath: reviewGatePath() });
   console.log(`复审标记已写：${codeFiles.length} 个代码文件，verdict=${verdict}`);
   process.exit(0);
 }

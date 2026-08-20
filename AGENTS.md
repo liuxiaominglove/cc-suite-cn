@@ -109,6 +109,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 8. **泛化而非打补丁**：finding 报"X 漏了"，先判断 X 是不是某类问题的个例，按类修，别按个例修（教训：正则量词写 `?`（零或一）只修了"NOT YET FIXED"这一个例，漏了"NOT YET FULLY FIXED"两个修饰词——应写 `*`）。
 9. **控制流重构高风险**：移动任何跨 try/finally、guard、计数器增减的代码前，先列全路径核对不变量；响应 review 反馈做的"顺手加固"同样是新修复，独立走 RED→GREEN→REFACTOR，并给被改动语句的失败路径补测。
 10. **签名重构防回调污染**：给函数新增可选参数（如 `isConfirmed(v, final?)`）时，逐个验证所有「把该函数直接作为回调」传给 `filter/map/some/every` 的调用点——这些高阶函数会传 `(element, index, array)`，`index` 会静默污染新增参数（`0 !== undefined` 成立，走错分支，静默过滤掉所有元素）。教训：progress.mjs 的 `.filter(isConfirmed)` 直传，统一签名后 `final` 被填成数字 index，全部判 false；修复 = 显式包一层 `(v) => isConfirmed(v)`。抽公共函数同理（runModel 各调用点 spawn 参数语义不一，逐个核对后才合并）。
+11. **兜底分支 fail-closed**：任何「枚举 + 兜底」的分支，凡不属于合法枚举的值，一律走保守/拦截兜底，禁止静默 fall-through 到「放行/成功」。区分「已知的低风险」（如 low）与「未知」（如 unknown/undefined/error/意外字符串）——未知必须保守，因为漏拦不可逆、误拦可逆。教训：verdictFromFindings 初版把 unknown 静默归 clean（fail-open，高危代码漏拦）；修复 = 枚举合法值域 `{high,medium,low}`，凡非 low 一律保守判 medium。
 
 ### 外部依赖改动铁律（配置 / 渠道 / CLI）
 
@@ -129,6 +130,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 The global rule `~/.config/opencode/rules/verification-discipline.md` applies everywhere. This section defines its project-specific instantiation:
 
 - **能力动词清单**: 审 / 改 / 修 —— 每个动词都要有独立的 🟢 证据，缺一个不许说满。
+- **复审只自动跑 1 次**: `/verify` 由 opencode 自动发起时，每个改动集只跑 1 次；复审后发现 high/medium，**只列现状（finding 清单 + verdict）、不自动修复、不自动重新复审**；修复与再审必须由用户显式发起。内循环用 `pnpm test:unit`，门禁 `/verify` 只跑一次——把门禁当内循环反复跑（10 轮复审）是反面教材。
 - **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
 - **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
 - **验证脚本**: `scripts/verify/` + `pnpm verify`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
