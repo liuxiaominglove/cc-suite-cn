@@ -107,6 +107,8 @@
 | 账本清理批A（130 条 actionable-unconfirmed 终审写回） | 备份 verdict-log.json → 代码级两步终审 130 条（假阳/陈旧 120 final=false + 真 bug 9 final=true + 真已修 1 final=true+fixed）→ `--confirm` 写回 130 条 + `markFixed` 1 条；终审暴露并 TDD 修复真 bug：`getActionableFindings` 忽略 `confirmed.final`（终审判假的假阳仍在待修清单），加 `v.confirmed?.final !== "false"` 过滤 + 专测，789 单测绿；成效：actionable 批A 130→9、全账本 212→89，confirmed 44→174，progress 出现各模型误报率 | 🟢 | 2026-08-20 |
 | 账本清理批B/C/D（demos 22 + learnunk 30 + macELTA 19 = 71 条） | 备份后分 3 批代码级两步终审（批D 相对路径 Sources/*.swift 映射到 macELTA 根读码）→ `--confirm` 分 3 批次写回：demos 22 全 by-design false；learnunk 30（真 bug 2：TUI CJK 溢出/loadConcepts 无 try-catch，假阳 28 含 match 同步误报/analyzeProject 已内部 try-catch）；macELTA 19（真 bug 8：bezel 定时器竞态/Quartz 翻转/RunLoop 重入/剪贴板竞态/usleep 阻塞/windowHeight*2 误用，假阳 11 含 assertNil 实为泛型 T?/UInt32 已 sanitize/endpoint 已能清空）；成效：全账本 actionable 89→29（剩 12 真未修 + 17 条 scratch/xiaolaigithub 既往 confirmed-true 未修），confirmed 247 条；798 单测 + guard 绿（本轮纯数据未碰代码） | 🟢 | 2026-08-20 |
 
+> **复审评审员变更（2026-08-20）**：`/verify` 只审 diff 的复审评审员从 glm+kimi 改为 qwen+kimi（见上表第 106 行）。本台账中 **2026-08-20 之前** 出现的「复审 glm+kimi / glm 复审建议」均为当时的历史表述，非当前配置。
+
 > 说明：上述评审结论固化为 `pnpm verify:e2e`（`scripts/verify/verify-review.mjs` + `verify-background.mjs`），一键重跑 4 评审员只读负向 + 真后台真取消。（`verify-bridge.mjs` 已随反向桥删除）
 
 > 写能力分工（角色重构后）：**修 bug 只由 opencode（总指挥）亲自做**（最了解项目 + TDD）。施工队（glm/kimi/qwen/hy3）全部只读——找 bug / 批判 / 验证。写后不自动合并。

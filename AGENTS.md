@@ -190,7 +190,7 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 
 **只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/verify` 只审 diff 是唯一复审，没做成必须标 ⏸️。）
 
-**评审员空输出/超时/error = 复审门没关上，不是"部分通过"**：必须重试到拿到非空结论（`review`/`criticize`/`adjudicate` 已内置空输出重试；仍空就重跑一次 job），重试耗尽才允许标 ⏸️。**非 🟢 一律不 commit**，不得拿"一个评审员过了、另一个失败了"当半审放行（教训：synthai 那次 glm 空输出，若直接标 🟡 就漏了它事后抓到的 3 个回归）。
+**评审员空输出/超时/error = 复审门没关上，不是"部分通过"**：必须重试到拿到非空结论（`review`/`criticize`/`adjudicate` 已内置空输出重试；仍空就重跑一次 job），重试耗尽才允许标 ⏸️。**非 🟢 一律不 commit**，不得拿"一个评审员过了、另一个失败了"当半审放行（教训：synthai 那次 glm 空输出——当时复审评审员还是 glm+kimi——若直接标 🟡 就漏了它事后抓到的 3 个回归）。
 
 ### 铁律（防惯例退化成空话）
 
