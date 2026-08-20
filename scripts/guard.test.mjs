@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, findInlineMainModule, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, findInlineMainModule, findUnlistedCanonical, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
 import { homedir } from "node:os";
 
 function fakeExists(present) {
@@ -51,6 +51,30 @@ describe("findMissingCanonical", () => {
     const exists = fakeExists(present);
     const missing = findMissingCanonical(CANONICAL_FILES, exists, "/repo");
     assert.ok(missing.includes(".opencode/skills/cc-review/SKILL.md"));
+  });
+});
+
+describe("findUnlistedCanonical", () => {
+  it("returns [] when all non-test .mjs are listed", () => {
+    const listFiles = () => ["/repo/scripts/a.mjs", "/repo/scripts/b.mjs", "/repo/scripts/a.test.mjs"];
+    const canonicals = ["scripts/a.mjs", "scripts/b.mjs"];
+    assert.deepEqual(findUnlistedCanonical({ root: "/repo", listFiles, canonicals }), []);
+  });
+
+  it("reports a non-test .mjs not in the canonical list", () => {
+    const listFiles = () => ["/repo/scripts/a.mjs", "/repo/scripts/new.mjs"];
+    const canonicals = ["scripts/a.mjs"];
+    assert.deepEqual(findUnlistedCanonical({ root: "/repo", listFiles, canonicals }), ["scripts/new.mjs"]);
+  });
+
+  it("skips .test.mjs files", () => {
+    const listFiles = () => ["/repo/scripts/a.test.mjs"];
+    assert.deepEqual(findUnlistedCanonical({ root: "/repo", listFiles, canonicals: [] }), []);
+  });
+
+  it("当前 repo 无漏登记的 canonical 脚本（清单与 scripts/*.mjs 闭合）", () => {
+    const { unlistedCanonical } = runGuard();
+    assert.deepEqual(unlistedCanonical, [], `漏登记的脚本：${unlistedCanonical.join(", ")}`);
   });
 });
 

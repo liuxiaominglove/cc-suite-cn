@@ -31,6 +31,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 | CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.2 + hy3 网关，走平台账号登录态） |
 | `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，**Qwen（施工队批判员）** 用（qwen CLI 走阿里百炼通道）；**施工队找 bug 的 glm 走 codebuddy CLI 平台账号，无需此 key** |
 | `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`kimi-k2.7-code`，走 Moonshot 官方直连） |
+| 平台 | macOS / Linux 专用（**不支持 Windows**——guard 路径比较走 POSIX `/` 分隔，`/dev/tty`、`~/.config/opencode` 等均 Unix 约定） |
 
 ## Setup
 

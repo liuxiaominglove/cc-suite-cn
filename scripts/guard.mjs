@@ -8,14 +8,35 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = homedir();
 
 export const CANONICAL_FILES = [
-  "scripts/review-runner.mjs",
-  "scripts/review-tools.mjs",
+  "scripts/audit-baseline.mjs",
+  "scripts/backends.mjs",
+  "scripts/benchmark-core.mjs",
+  "scripts/benchmark.mjs",
+  "scripts/evaluate-models.mjs",
+  "scripts/feedback.mjs",
+  "scripts/guard.mjs",
+  "scripts/jobs.mjs",
+  "scripts/models.mjs",
+  "scripts/preflight.mjs",
+  "scripts/progress.mjs",
+  "scripts/release-check.mjs",
+  "scripts/report-sections.mjs",
   "scripts/review-context.mjs",
-  "scripts/review-source.mjs",
   "scripts/review-critic.mjs",
-  "scripts/review-prompts.mjs",
   "scripts/review-gate.mjs",
+  "scripts/review-prompts.mjs",
+  "scripts/review-runner.mjs",
+  "scripts/review-source.mjs",
+  "scripts/review-test-helpers.mjs",
+  "scripts/review-tools.mjs",
+  "scripts/runner-core.mjs",
+  "scripts/self-audit.mjs",
+  "scripts/verdict-log.mjs",
+  "scripts/verify/verify-background.mjs",
+  "scripts/verify/verify-kimi-sandbox.mjs",
+  "scripts/verify/verify-review.mjs",
   ".githooks/pre-commit",
+  ".opencode/skills/cc-review/audit-logger.mjs",
   ".opencode/skills/cc-review/SKILL.md",
   "install.sh",
   "scripts/known-risks.json",
@@ -128,7 +149,21 @@ export function findInlineMainModule({ root = REPO_ROOT, read = readFileSync, li
   return problems;
 }
 
-export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES, refFiles = GLOBAL_REF_FILES, skillFiles = [".opencode/skills/cc-review/SKILL.md"], exists = existsSync, read = readFileSync, root = REPO_ROOT } = {}) {
+// 反向补全棘轮：全仓非 test 的 .mjs（含 scripts/verify、.opencode/skills 等，跳过 node_modules/.git）必须都在 CANONICAL_FILES 里，漏登记当场报。
+// 正向 findMissingCanonical 防"删了"，本检查防"漏了加"——两条腿各司其职，不互相替代。
+export function findUnlistedCanonical({ root = REPO_ROOT, listFiles = null, canonicals = CANONICAL_FILES } = {}) {
+  const files = (listFiles ?? ((r) => collectRepoFiles(r, [".mjs"])))(root);
+  const listed = new Set(canonicals);
+  const problems = [];
+  for (const f of files) {
+    if (!f.endsWith(".mjs") || f.endsWith(".test.mjs")) continue;
+    const rel = f.startsWith(root) ? relative(root, f) : f;
+    if (!listed.has(rel)) problems.push(rel);
+  }
+  return problems;
+}
+
+export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES, refFiles = GLOBAL_REF_FILES, skillFiles = [".opencode/skills/cc-review/SKILL.md"], exists = existsSync, read = readFileSync, root = REPO_ROOT, listFiles = null } = {}) {
   return {
     dupes: findDuplicateCopies(copies, exists),
     missing: findMissingCanonical(canonicals, exists, root),
@@ -138,6 +173,7 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     orphanGlobalRules: findOrphanGlobalRules({ read }),
     knownRiskDrift: findKnownRiskDrift({ read, root }),
     inlineMainModule: findInlineMainModule({ root, read }),
+    unlistedCanonical: findUnlistedCanonical({ root, listFiles, canonicals }),
   };
 }
 
@@ -300,7 +336,7 @@ export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-sui
 }
 
 if (isMainModule(import.meta.url)) {
-  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift, inlineMainModule } = runGuard();
+  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift, inlineMainModule, unlistedCanonical } = runGuard();
   const problems = [
     ...dupes.map((p) => `duplicate copy: ${p}`),
     ...missing.map((rel) => `missing canonical: ${rel}`),
@@ -310,6 +346,7 @@ if (isMainModule(import.meta.url)) {
     ...orphanGlobalRules.map((name) => `orphan global rule (未挂载到 opencode.jsonc instructions): ${name}`),
     ...knownRiskDrift,
     ...inlineMainModule.map((p) => `inline isMainModule drift (应改用 runner-core.isMainModule): ${p}`),
+    ...unlistedCanonical.map((p) => `unlisted canonical script (漏登记，请加入 CANONICAL_FILES): ${p}`),
   ];
   if (problems.length) {
     console.error(`Drift guard FAILED:\n  ${problems.join("\n  ")}`);
