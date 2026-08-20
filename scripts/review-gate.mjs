@@ -114,18 +114,24 @@ export async function markReviewed({ files, verdict, filePath = REVIEW_GATE_PATH
   return gate;
 }
 
+// 区分「读失败（超限/异常）」与「文件已删」——未知状态不静默归入已知的 "deleted"。
+function isMaxBufferError(err) {
+  return err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" || /maxBuffer/i.test(err?.message ?? "");
+}
+
 // hook 用：读 staged blob 的内容 hash（git show :<path>），而不是工作区文件——
 // commit 提交的是 staged 内容，不是工作区。
 export async function stageHashes(files, { gitShow = null } = {}) {
+  // TODO 后置：改流式 hash 去 64MB 上限；超限读失败已记 "unreadable" 强制 confirm，不静默当删除。
   const show = gitShow ?? ((f) => execFileSync("git", ["show", `:${f}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }));
   const hashes = {};
   for (const f of files ?? []) {
     if (!f || typeof f !== "string") continue;
     try {
       hashes[f] = hashContent(await show(f));
-    } catch {
-      // git show 读不到 = 文件在 index 里已删除；记特殊值与 markReviewed 对齐
-      hashes[f] = "deleted";
+    } catch (err) {
+      // git show 读不到 = 文件在 index 里已删除；读失败（超限）= 文件存在但读不出，两者分开记
+      hashes[f] = isMaxBufferError(err) ? "unreadable" : "deleted";
     }
   }
   return hashes;

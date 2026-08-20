@@ -108,6 +108,13 @@ describe("decide", () => {
     assert.equal(r.reason, "changed-since-review");
     assert.deepEqual(r.files, ["b.mjs"]);
   });
+
+  it("复审后文件读失败(unreadable) → confirm（fail-closed，不许 pass）", () => {
+    const gate = { files: { "a.mjs": "h1" }, verdict: "clean" };
+    const r = decide(gate, { "a.mjs": "unreadable" });
+    assert.equal(r.action, "confirm");
+    assert.equal(r.reason, "changed-since-review");
+  });
 });
 
 describe("markReviewed", () => {
@@ -140,6 +147,19 @@ describe("stageHashes", () => {
   it("git show 读不到 → hash 'deleted'（与 markReviewed 删除语义对齐）", async () => {
     const hashes = await stageHashes(["a.mjs"], { gitShow: async () => { throw new Error("fail"); } });
     assert.equal(hashes["a.mjs"], "deleted");
+  });
+
+  it("git show 超限读失败 → hash 'unreadable'（不静默当删除）", async () => {
+    const err = new Error("stdout maxBuffer length exceeded");
+    err.code = "ERR_CHILD_PROCESS_STDIO_MAXBUFFER";
+    const hashes = await stageHashes(["a.mjs"], { gitShow: async () => { throw err; } });
+    assert.equal(hashes["a.mjs"], "unreadable");
+  });
+
+  it("git show 超限读失败（仅 message 含 maxBuffer、无 code）→ 'unreadable'", async () => {
+    const err = new Error("stdout maxBuffer length exceeded");
+    const hashes = await stageHashes(["a.mjs"], { gitShow: async () => { throw err; } });
+    assert.equal(hashes["a.mjs"], "unreadable");
   });
 });
 
