@@ -493,7 +493,13 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
 
     const { perModel, minSamples } = await evaluateModels({ audits });
     const ledgerFn = loadLedger ?? (async () => (await import("./verdict-log.mjs")).loadVerdicts());
-    const precision = computePrecision(await ledgerFn());
+    let ledger = [];
+    try {
+      ledger = await ledgerFn();
+    } catch (err) {
+      stderr.write(`Warning: 裁决账本读取失败（${err?.message ?? String(err)}），precision 列跳过\n`);
+    }
+    const precision = computePrecision(ledger);
 
     stdout.write("模型性能评估\n");
     stdout.write("=".repeat(60) + "\n");

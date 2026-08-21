@@ -851,6 +851,19 @@ describe("cli 非 arbitrate 输出 precision", () => {
     assert.ok(out.includes("glm-5.2"), "应含 glm 行");
     assert.ok(out.includes("kimi-k2.7-code"), "应含 kimi 行");
   });
+
+  it("账本损坏时优雅降级：precision 列标 —，数量/共识照常显示", async () => {
+    const load = async () => [
+      { file: "a.js", workers: [{ model: "glm-5.2", success: true, issues: [{ finding: "a" }] }] },
+    ];
+    const loadLedger = async () => { throw new Error("corrupted verdict log"); };
+    let out = "";
+    let err = "";
+    await cli([], { load, loadLedger, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } } });
+    assert.ok(out.includes("glm-5.2"), "数量/共识行仍应显示");
+    assert.ok(out.includes("—"), "precision 列应标 —");
+    assert.ok(err.includes("裁决账本"), "应打 stderr 警告");
+  });
 });
 
 describe("adjudicateLedger", () => {
