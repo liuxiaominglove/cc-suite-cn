@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, setSpawn, reviewFile, SourceTamperedError } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, setSpawn, reviewFile, reviewDir, SourceTamperedError } from "./review-runner.mjs";
 import { AuthError, extractJson, DEFAULT_TIMEOUT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, withRetry, setRetryBackoffMs, isAuthError, isNLArtifact } from "./review-tools.mjs";
 import { VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
 import { collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection, stripMarkdownComments } from "./review-context.mjs";
@@ -1103,6 +1103,93 @@ describe("reviewFile", () => {
     const readFn = async () => Array(1600).fill("const x = 1;").join("\n");
     const r = await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 10 });
     assert.equal(r.chainAnalysis, "chunk1 analysis\nchunk3 analysis");
+  });
+});
+
+describe("reviewDir", () => {
+  it("reviews each source file separately, not one concatenated payload", async () => {
+    const reviewed = [];
+    const reviewFileFn = async ({ file }) => {
+      reviewed.push(file);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const r = await reviewDir({ model: "glm-5.2", backend: "codebuddy", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(r.success, true);
+    assert.equal(r.fileCount, 2);
+    assert.equal(r.dir, `${FIXTURES}/swift-project`, "non-empty path must also carry dir");
+    assert.equal(r.error, null, "no top-level error when all files succeed");
+    assert.equal(reviewed.length, 2, "should call reviewFile once per file, not once with concatenated content");
+    assert.ok(reviewed[0].endsWith("main.swift"), "main.swift first (sorted)");
+    assert.ok(reviewed[1].endsWith("utils.swift"), "utils.swift second (sorted)");
+  });
+
+  it("reviews files serially (never overlapping)", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const reviewFileFn = async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      active -= 1;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(maxActive, 1, "files must be reviewed one at a time (serial)");
+  });
+
+  it("forces file field to the relative path on merged issues", async () => {
+    const reviewFileFn = async ({ file }) => {
+      if (file.endsWith("main.swift")) return { success: true, severity: "low", issues: [{ line: 1, finding: "f1", file: "WRONG" }], summary: "ok" };
+      return { success: true, severity: "low", issues: [{ line: 2, finding: "f2" }], summary: "ok" };
+    };
+    const r = await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(r.issues.length, 2);
+    const files = r.issues.map((i) => i.file).sort();
+    assert.deepEqual(files, ["main.swift", "subdir/utils.swift"]);
+  });
+
+  it("returns empty result for directory with no matching files", async () => {
+    const reviewFileFn = async () => {
+      throw new Error("should not review any file");
+    };
+    const r = await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/empty`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(r.success, false);
+    assert.equal(r.fileCount, 0);
+    assert.ok(r.summary.includes("No source files found"));
+    assert.ok(r.error.includes("No source files found"), "empty dir must expose a top-level error");
+    assert.equal(r.severity, "unknown", "empty dir must expose severity for shape consistency");
+    assert.equal(r.chainAnalysis, "", "empty dir must expose chainAnalysis for shape consistency");
+  });
+
+  it("takes the highest severity across files", async () => {
+    const sevs = ["low", "high"];
+    let i = 0;
+    const reviewFileFn = async () => ({ success: true, severity: sevs[i++], issues: [], summary: "ok" });
+    const r = await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(r.severity, "high");
+  });
+
+  it("keeps other files' issues when one file fails", async () => {
+    const reviewFileFn = async ({ file }) => {
+      if (file.endsWith("main.swift")) throw new Error("down");
+      return { success: true, severity: "low", issues: [{ line: 1, finding: "ok" }], summary: "ok" };
+    };
+    const r = await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
+    assert.equal(r.success, false);
+    assert.equal(r.issues.length, 1, "keep the successful file's issues");
+    assert.equal(r.fileErrors.length, 1, "expose the failed file");
+    assert.equal(r.fileErrors[0].file, "main.swift");
+    assert.equal(r.error, "main.swift: down", "top-level error must summarize fileErrors");
+  });
+
+  it("logs per-file progress in order", async () => {
+    const logs = [];
+    const reviewFileFn = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    await reviewDir({ model: "glm-5.2", backend: "codebuddy", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn, log: (m) => logs.push(m) });
+    assert.deepEqual(logs, [
+      "[glm-5.2] [1/2] main.swift\n",
+      "[glm-5.2] [2/2] subdir/utils.swift\n",
+    ]);
   });
 });
 

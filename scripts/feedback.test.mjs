@@ -98,7 +98,7 @@ describe("createFeedbackResolver", () => {
     const load = async () => [
       { file: "a.js", finding: "误报", model: "glm-5.2", confirmed: { final: "false", reason: "r" } },
     ];
-    const resolve = await createFeedbackResolver({ load });
+    const resolve = await createFeedbackResolver({ load, loadMissed: async () => [] });
     const s = resolve("glm-5.2");
     assert.ok(s.includes("历史误报"), s);
     assert.equal(resolve("kimi-k2.7-code"), "");
@@ -106,7 +106,7 @@ describe("createFeedbackResolver", () => {
 
   it("load 抛错时降级为返回空 preamble 的 resolver", async () => {
     const load = async () => { throw new Error("corrupted"); };
-    const resolve = await createFeedbackResolver({ load });
+    const resolve = await createFeedbackResolver({ load, loadMissed: async () => [] });
     assert.equal(resolve("glm-5.2"), "");
   });
 

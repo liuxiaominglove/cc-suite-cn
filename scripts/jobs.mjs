@@ -366,8 +366,7 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
-  const { reviewFile } = await import("./review-runner.mjs");
-  const useChunking = !!(file && !dir && !diff);
+  const { reviewFile, reviewDir } = await import("./review-runner.mjs");
   const rootFn = findRoot ?? findProjectRoot;
   const target = file ?? dir;
   const resolvedProjectDir = projectDir ?? (diff || !target ? process.cwd() : (rootFn(target) ?? process.cwd()));
@@ -376,10 +375,15 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     workerList.map(async ({ backend, model }) => {
       try {
         const feedbackPreamble = getFeedback ? await getFeedback(model, file) : null;
-        const r = useChunking
-          ? await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble })
-          : await review({ model, backend, file, dir, exts, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
-        return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary, chainAnalysis: r.chainAnalysis ?? "" };
+        let r;
+        if (file) {
+          r = await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble });
+        } else if (dir) {
+          r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble });
+        } else {
+          r = await review({ model, backend, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
+        }
+        return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary, chainAnalysis: r.chainAnalysis ?? "", error: r.error ?? null };
       } catch (err) {
         return { backend, model, success: false, error: err?.message ?? String(err) };
       }

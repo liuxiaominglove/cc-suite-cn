@@ -252,6 +252,92 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   };
 }
 
+// 目录评审：逐文件串行审（每文件内部仍按 800 行分块），不再把所有文件拼成一个巨 payload。
+// 根因教训（2026-08-21）：--dir 模式曾把所有文件拼成单一 payload 一次性发给 codebuddy，
+// 项目一大（几十文件 / 几十万字符）就卡死超时；单文件模式有 800 行分块兜底，目录模式却没有。
+export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFileFn = null, collectFn = null, retries = 0, feedbackPreamble = null, cwd = process.cwd(), log = (msg) => process.stderr.write(msg) }) {
+  const collect = collectFn ?? collectSourceFiles;
+  const reviewFileUsed = reviewFileFn ?? reviewFile;
+
+  const resolvedDir = validateFilePath(dir, cwd, { allowExternal });
+  const srcFiles = await collect(resolvedDir, exts);
+
+  if (srcFiles.length === 0) {
+    const emptySummary = `No source files found in ${dir} (exts: ${exts.join(",")})`;
+    return {
+      model,
+      success: false,
+      error: emptySummary,
+      severity: "unknown",
+      issues: [],
+      summary: emptySummary,
+      chainAnalysis: "",
+      dir,
+      fileCount: 0,
+    };
+  }
+
+  const total = srcFiles.length;
+  if (total > MAX_FILES_WARN) {
+    log(`Warning: ${total} source files found — reviewing each file separately (serial, may take a while)\n`);
+  }
+
+  const fileResults = [];
+  for (let i = 0; i < total; i++) {
+    const f = srcFiles[i];
+    const relPath = relative(resolvedDir, f);
+    log(`[${model}] [${i + 1}/${total}] ${relPath}\n`);
+    try {
+      const r = await reviewFileUsed({ model, backend, file: f, chunkSize, overlap, timeout, customPrompt, allowExternal, retries, feedbackPreamble });
+      fileResults.push({ file: relPath, result: r });
+    } catch (err) {
+      fileResults.push({ file: relPath, result: { success: false, error: err?.message ?? String(err) } });
+    }
+  }
+
+  const issues = [];
+  for (const { file, result } of fileResults) {
+    if (!result || result.success === false) continue;
+    for (const issue of result.issues ?? []) {
+      if (!issue || typeof issue !== "object") continue;
+      issues.push({ ...issue, file });
+    }
+  }
+
+  const SEVERITY_ORDER = { high: 3, medium: 2, low: 1 };
+  const severity = fileResults.reduce((worst, { result }) => {
+    const s = result?.severity;
+    if (!s) return worst;
+    return (SEVERITY_ORDER[s] ?? 0) > (SEVERITY_ORDER[worst] ?? 0) ? s : worst;
+  }, "unknown");
+
+  const fileErrors = fileResults
+    .filter(({ result }) => !result?.success)
+    .map(({ file, result }) => ({ file, error: result?.error ?? "unknown error" }));
+
+  const chainAnalysis = fileResults
+    .map(({ result }) => (typeof result?.chainAnalysis === "string" ? result.chainAnalysis.trim() : ""))
+    .filter(Boolean)
+    .join("\n");
+
+  const error = fileErrors.length
+    ? fileErrors.map(({ file, error }) => `${file}: ${error}`).join("; ")
+    : null;
+
+  return {
+    model,
+    success: fileResults.every(({ result }) => result?.success),
+    severity,
+    issues,
+    fileErrors,
+    error,
+    chainAnalysis,
+    summary: `分 ${srcFiles.length} 个文件评审`,
+    fileCount: srcFiles.length,
+    dir,
+  };
+}
+
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const criticIdx = args.indexOf("--critic");
@@ -328,17 +414,25 @@ if (isMainModule(import.meta.url)) {
     process.exit(1);
   }
 
+  if (diff && (file || dir)) {
+    console.error("--diff is mutually exclusive with --file and --dir");
+    process.exit(1);
+  }
+
   if (!file && !dir && !diff) {
     console.error("Either --file, --dir, or --diff is required");
     process.exit(1);
   }
 
-  const useChunking = !!(file && !dir && !diff);
   let result;
   try {
-    result = useChunking
-      ? await reviewFile({ model, backend, file, customPrompt, allowExternal, timeout, retries: 2 })
-      : await review({ model, file, dir, exts, customPrompt, timeout, allowExternal, backend, diff, retries: 2 });
+    if (file) {
+      result = await reviewFile({ model, backend, file, customPrompt, allowExternal, timeout, retries: 2 });
+    } else if (dir) {
+      result = await reviewDir({ model, backend, dir, exts: exts ?? DEFAULT_EXTS, customPrompt, allowExternal, timeout, retries: 2 });
+    } else {
+      result = await review({ model, backend, diff, customPrompt, timeout, allowExternal, retries: 2 });
+    }
   } catch (err) {
     result = { model, success: false, error: err?.message ?? String(err), issues: [] };
   }
