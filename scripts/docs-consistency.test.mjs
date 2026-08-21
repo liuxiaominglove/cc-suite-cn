@@ -76,6 +76,13 @@ describe("命令/规格（WI-5）", () => {
     assert.ok(existsSync(join(ROOT, ".opencode/commands/review.md")), "review.md 应存在于 repo .opencode/commands/");
   });
 
+  it("evaluate.md 描述对齐：precision 免费常驻 + --arbitrate=裁决账本（防漂移）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/evaluate.md"), "utf8");
+    assert.doesNotMatch(c, /precision.*仅 --arbitrate|仅 --arbitrate.*precision/, "evaluate.md 不应再写「precision 仅 --arbitrate」");
+    assert.match(c, /免费只读/, "precision 应标免费只读（从账本读，不重新裁决）");
+    assert.match(c, /裁决账本/, "应说明 --arbitrate 是裁决账本（/fix 硬门槛）");
+  });
+
   it("audit.md 含基线检测 + 增量审查说明", () => {
     const c = readFileSync(join(ROOT, ".opencode/commands/audit.md"), "utf8");
     assert.match(c, /增量审查/, "audit.md 缺增量审查说明");

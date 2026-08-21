@@ -2,7 +2,7 @@ import { runProcess, RunnerError, TimeoutError, isMainModule } from "./runner-co
 import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry } from "./review-tools.mjs";
 import { collectProjectRules, collectImportContext, collectStackContext } from "./review-context.mjs";
-import { hashContent, confirmVerdict } from "./verdict-log.mjs";
+import { hashContent, confirmVerdict, modelsOf } from "./verdict-log.mjs";
 import { dirname } from "node:path";
 
 export function normalizeFinding(text) {
@@ -178,10 +178,9 @@ export async function adjudicate({ finding, code, line = null, contextLines = 40
 
 const MIN_SAMPLES = 5;
 
-export async function evaluateModels({ audits, arbitrate = false, adjudicateFn = adjudicate, resolveCode = null, resolveRules = null, resolveImportContext = null, resolveStackContext = null, retries = 0, adjudicateConcurrency = ADJUDICATE_CONCURRENCY, projectDir = null }) {
+export async function evaluateModels({ audits }) {
   const perModel = {};
   const allFindings = [];
-  let verdicts = [];
 
   for (const audit of audits) {
     const workers = audit.workers || [];
@@ -196,8 +195,6 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
           severity: {},
           consensusCount: 0,
           uniqueCount: 0,
-          trueCount: 0,
-          uniqueTrue: 0,
         };
       }
       const m = perModel[w.model];
@@ -215,13 +212,12 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
       for (const item of g.items) {
         const m = perModel[item.model];
         if (!m) continue;
-        const isConsensus = g.type === "consensus";
-        if (isConsensus) {
+        if (g.type === "consensus") {
           m.consensusCount += 1;
         } else {
           m.uniqueCount += 1;
         }
-        allFindings.push({ model: item.model, issue: item.issue, auditFile: audit.file || null, isConsensus, m });
+        allFindings.push({ model: item.model, issue: item.issue, auditFile: audit.file || null, isConsensus: g.type === "consensus", m });
       }
     }
   }
@@ -229,56 +225,40 @@ export async function evaluateModels({ audits, arbitrate = false, adjudicateFn =
   for (const m of Object.values(perModel)) {
     m.avgIssuesPerRun = m.runs === 0 ? 0 : m.totalIssues / m.runs;
     m.consensusRate = m.totalIssues === 0 ? 0 : m.consensusCount / m.totalIssues;
-  }
-
-  if (arbitrate) {
-    const unique = dedupFindings(allFindings);
-    const rules = resolveRules ? await resolveRules() : "";
-    const results = await mapLimit(unique, adjudicateConcurrency, async (f) => {
-      const file = f.auditFile || f.issue?.file || "";
-      const code = resolveCode ? await resolveCode(file) : "";
-      const relatedCode = resolveImportContext ? await resolveImportContext(file) : "";
-      const stackContext = resolveStackContext ? await resolveStackContext(file) : "";
-      const result = await adjudicateFn({ finding: f.issue?.finding || "", code: code || "", line: f.issue?.line, rules, relatedCode, stackContext, retries });
-      return {
-        f,
-        verdict: result && result.verdict,
-        evidence: result && result.evidence,
-        codeHash: hashContent(code),
-      };
-    });
-    for (const { f, verdict } of results) {
-      if (verdict === "true") {
-        for (const member of f.cluster ?? [f]) {
-          member.m.trueCount += 1;
-          if (!member.isConsensus) member.m.uniqueTrue += 1;
-        }
-      }
-    }
-    verdicts = results.map((r) => {
-      const cluster = r.f.cluster ?? [r.f];
-      const models = [...new Set(cluster.map((m) => m.model).filter(Boolean))];
-      return {
-        file: r.f.auditFile || r.f.issue?.file || "",
-        line: r.f.issue?.line ?? null,
-        finding: r.f.issue?.finding || "",
-        verdict: r.verdict,
-        evidence: r.evidence ?? "",
-        codeHash: r.codeHash,
-        timestamp: new Date().toISOString(),
-        projectDir: projectDir || process.cwd(),
-        model: r.f.model ?? null,
-        models,
-      };
-    });
-  }
-
-  for (const m of Object.values(perModel)) {
-    m.precision = m.totalIssues === 0 ? 0 : m.trueCount / m.totalIssues;
     m.sampleInsufficient = m.runs < MIN_SAMPLES;
   }
 
-  return { perModel, minSamples: MIN_SAMPLES, arbitrated: arbitrate, verdicts };
+  return { perModel, minSamples: MIN_SAMPLES };
+}
+
+// 从裁决账本算 per-model precision（免费只读，不重新裁决）。
+// 只统计 verdict∈{true,false} 且有模型归属的 finding；无归属的 finding 不参与。
+// 独有真 = verdict=true 且只有一个模型报它（别人都漏掉的真 bug）。
+export function computePrecision(log, { minSamples = 5 } = {}) {
+  const perModel = {};
+  for (const v of log ?? []) {
+    if (v?.verdict !== "true" && v?.verdict !== "false") continue;
+    const models = modelsOf(v);
+    if (models.length === 0) continue;
+    for (const m of models) {
+      if (!perModel[m]) perModel[m] = { total: 0, trueCount: 0, uniqueTrue: 0 };
+      perModel[m].total += 1;
+      if (v.verdict === "true") {
+        perModel[m].trueCount += 1;
+        if (models.length === 1) perModel[m].uniqueTrue += 1;
+      }
+    }
+  }
+  const out = {};
+  for (const [m, s] of Object.entries(perModel)) {
+    out[m] = {
+      precision: s.total === 0 ? null : s.trueCount / s.total,
+      uniqueTrue: s.uniqueTrue,
+      samples: s.total,
+      sampleInsufficient: s.total < minSamples,
+    };
+  }
+  return out;
 }
 
 export async function adjudicateLedger({
@@ -471,7 +451,7 @@ export async function confirmCli(args = process.argv.slice(2), { readFile = null
 }
 
 
-export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr, adjudicateLedgerFn = null } = {}) {
+export async function cli(args = process.argv.slice(2), { load = loadAudits, stdout = process.stdout, stderr = process.stderr, adjudicateLedgerFn = null, loadLedger = null } = {}) {
   try {
     const arbitrate = args.includes("--arbitrate");
     const files = parseFileFilterArgs(args);
@@ -511,56 +491,28 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
       return 0;
     }
 
-    const allowedFiles = audits.map((a) => a.file).filter(Boolean);
-    const resolveCode = makeResolveCode(allowedFiles);
-
-    const resolveImportContext = async (file) => {
-      if (!file || !allowedFiles.includes(file)) return "";
-      try {
-        return await collectImportContext(file);
-      } catch {
-        return "";
-      }
-    };
-
-    const resolveStackContext = async (file) => {
-      if (!file || !allowedFiles.includes(file)) return "";
-      try {
-        return await collectStackContext(dirname(file));
-      } catch {
-        return "";
-      }
-    };
-
-    const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
-
-    const { perModel, minSamples, arbitrated, verdicts } = await evaluateModels({ audits, arbitrate, resolveCode, resolveImportContext, resolveStackContext, resolveRules, retries: 2 });
-
-    if (arbitrated && verdicts.length) {
-      const { persistVerdicts } = await import("./verdict-log.mjs");
-      await persistVerdicts(verdicts);
-      stdout.write(`已落库 ${verdicts.length} 条裁决到 .cc-suite-cn/verdict-log.json\n`);
-    }
+    const { perModel, minSamples } = await evaluateModels({ audits });
+    const ledgerFn = loadLedger ?? (async () => (await import("./verdict-log.mjs")).loadVerdicts());
+    const precision = computePrecision(await ledgerFn());
 
     stdout.write("模型性能评估\n");
     stdout.write("=".repeat(60) + "\n");
-    const header = arbitrated
-      ? `模型                  run  avg/run  共识率  precision  独有真  样本\n`
-      : `模型                  run  avg/run  共识率  样本\n`;
-    stdout.write(header);
-    for (const [model, m] of Object.entries(perModel)) {
-      const flag = m.sampleInsufficient ? "⚠不足" : "OK";
-      if (arbitrated) {
-        stdout.write(
-          `${model.padEnd(20)}  ${String(m.runs).padStart(2)}  ${m.avgIssuesPerRun.toFixed(1).padStart(6)}  ${m.consensusRate.toFixed(2).padStart(6)}  ${m.precision.toFixed(2).padStart(8)}  ${String(m.uniqueTrue).padStart(6)}  ${flag}\n`
-        );
-      } else {
-        stdout.write(
-          `${model.padEnd(20)}  ${String(m.runs).padStart(2)}  ${m.avgIssuesPerRun.toFixed(1).padStart(6)}  ${m.consensusRate.toFixed(2).padStart(6)}  ${flag}\n`
-        );
-      }
+    stdout.write(`模型                  run  avg/run  共识率  precision  独有真  样本\n`);
+    const models = [...new Set([...Object.keys(perModel), ...Object.keys(precision)])].sort();
+    for (const model of models) {
+      const q = perModel[model];
+      const p = precision[model];
+      const runs = q ? String(q.runs) : "—";
+      const avg = q ? q.avgIssuesPerRun.toFixed(1) : "—";
+      const cons = q ? q.consensusRate.toFixed(2) : "—";
+      const prec = p && p.precision != null ? p.precision.toFixed(2) : "—";
+      const ut = p ? String(p.uniqueTrue) : "—";
+      const insufficient = (q?.sampleInsufficient || p?.sampleInsufficient) ? "⚠不足" : "OK";
+      stdout.write(
+        `${model.padEnd(20)}  ${runs.padStart(2)}  ${avg.padStart(6)}  ${cons.padStart(6)}  ${prec.padStart(8)}  ${ut.padStart(6)}  ${insufficient}\n`
+      );
     }
-    stdout.write(`\n(样本阈值 ${minSamples} run/模型；precision = 验证审计员 hy3 判定为真的比例)\n`);
+    stdout.write(`\n(样本阈值 ${minSamples} run/模型；precision = 账本中 hy3 判定为真的比例，仅统计有模型归属且已裁决的 finding)\n`);
     return 0;
   } catch (err) {
     stderr.write(err.message + "\n");

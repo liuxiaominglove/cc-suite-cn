@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, computePrecision, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-tools.mjs";
 
@@ -366,109 +366,6 @@ describe("evaluateModels", () => {
     assert.equal(r.perModel["glm-5.2"].sampleInsufficient, true);
   });
 
-  it("arbitrates unique findings into precision", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "unique bug x", file: "f.js" }] },
-      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "totally different y", file: "f.js" }] },
-    ]}];
-    const adjudicateFn = async () => ({ verdict: "true", evidence: "real" });
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
-    assert.equal(r.perModel["glm-5.2"].uniqueTrue, 1);
-    assert.equal(r.perModel["glm-5.2"].precision, 1);
-  });
-
-  it("returns verdicts with codeHash when arbitrating", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
-    ]}];
-    const adjudicateFn = async () => ({ verdict: "true", evidence: "real" });
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "const x = 1;" });
-    assert.equal(r.verdicts.length, 1);
-    assert.equal(r.verdicts[0].verdict, "true");
-    assert.equal(r.verdicts[0].evidence, "real");
-    assert.equal(r.verdicts[0].file, "f.js");
-    assert.match(r.verdicts[0].codeHash, /^[a-f0-9]{64}$/, "codeHash 应为 sha256");
-  });
-
-  it("落库 verdict 含 projectDir（显式传入时用传入值）", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
-    ]}];
-    const adjudicateFn = async () => ({ verdict: "true", evidence: "real" });
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", projectDir: "/proj/x" });
-    assert.equal(r.verdicts.length, 1);
-    assert.equal(r.verdicts[0].projectDir, "/proj/x");
-  });
-
-  it("落库 verdict 含 model 与 models（归属到具体工人）", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "same bug", file: "f.js" }] },
-      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "same bug variant", file: "f.js" }] },
-    ]}];
-    const adjudicateFn = async () => ({ verdict: "false", evidence: "already handled" });
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
-    assert.equal(r.verdicts.length, 1);
-    assert.equal(r.verdicts[0].model, "glm-5.2");
-    assert.deepEqual(r.verdicts[0].models.sort(), ["glm-5.2", "kimi-k2.7-code"], "共识 finding 应归属到所有报它的模型");
-  });
-
-  it("collects import context and passes it to the adjudicator", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
-    ]}];
-    let seenRelated = null;
-    const adjudicateFn = async ({ relatedCode }) => {
-      seenRelated = relatedCode;
-      return { verdict: "false" };
-    };
-    await evaluateModels({
-      audits,
-      arbitrate: true,
-      adjudicateFn,
-      resolveCode: () => "code",
-      resolveImportContext: async (file) => "module db.js source",
-    });
-    assert.equal(seenRelated, "module db.js source", "应把 import 上下文传给裁决员");
-  });
-
-  it("collects stack context and passes it to the adjudicator", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
-    ]}];
-    let seenStack = null;
-    const adjudicateFn = async ({ stackContext }) => {
-      seenStack = stackContext;
-      return { verdict: "false" };
-    };
-    await evaluateModels({
-      audits,
-      arbitrate: true,
-      adjudicateFn,
-      resolveCode: () => "code",
-      resolveStackContext: async (file) => "Node.js (node >=22)",
-    });
-    assert.equal(seenStack, "Node.js (node >=22)", "应把技术栈上下文传给裁决员");
-  });
-
-  it("omits stack context when resolveStackContext not provided", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "problem alpha", file: "f.js" }] },
-    ]}];
-    let seenStack = "UNSET";
-    const adjudicateFn = async ({ stackContext }) => {
-      seenStack = stackContext;
-      return { verdict: "false" };
-    };
-    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
-    assert.equal(seenStack, "", "不传 resolveStackContext 时 stackContext 应为空串");
-  });
-
-  it("returns empty verdicts without arbitration", async () => {
-    const audits = [{ workers: [{ model: "glm-5.2", success: true, issues: [] }] }];
-    const r = await evaluateModels({ audits });
-    assert.deepEqual(r.verdicts, []);
-  });
-
   it("counts consensus findings without arbitration", async () => {
     const audits = [{ workers: [
       { model: "glm-5.2", success: true, issues: [{ finding: "shared" }] },
@@ -478,57 +375,49 @@ describe("evaluateModels", () => {
     assert.equal(r.perModel["glm-5.2"].consensusCount, 1);
     assert.equal(r.perModel["glm-5.2"].consensusRate, 1);
   });
+});
 
-  it("caps adjudication concurrency", async () => {
-    const words = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo", "sierra", "tango"];
-    const issues = words.map((w) => ({ finding: `problem ${w}` }));
-    const audits = [{ workers: [{ model: "glm-5.2", success: true, issues }] }];
-    let running = 0;
-    let maxRunning = 0;
-    const adjudicateFn = async () => {
-      running += 1;
-      maxRunning = Math.max(maxRunning, running);
-      await new Promise((r) => setTimeout(r, 5));
-      running -= 1;
-      return { verdict: "true" };
-    };
-    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", adjudicateConcurrency: 4 });
-    assert.ok(maxRunning <= 4, `concurrency should cap at 4, saw ${maxRunning}`);
-    assert.ok(maxRunning > 1, "should still run in parallel");
+describe("computePrecision", () => {
+  it("computes per-model precision and uniqueTrue from ledger verdicts", () => {
+    const log = [
+      { models: ["glm-5.2", "kimi-k2.7-code"], verdict: "true", finding: "共识真" },
+      { models: ["glm-5.2"], verdict: "true", finding: "glm 独有真" },
+      { models: ["glm-5.2"], verdict: "false", finding: "glm 假" },
+      { models: ["kimi-k2.7-code"], verdict: "false", finding: "kimi 假" },
+    ];
+    const p = computePrecision(log);
+    assert.equal(p["glm-5.2"].precision, 2 / 3);
+    assert.equal(p["glm-5.2"].uniqueTrue, 1);
+    assert.equal(p["kimi-k2.7-code"].precision, 0.5);
+    assert.equal(p["kimi-k2.7-code"].uniqueTrue, 0);
   });
 
-  it("adjudicates consensus findings too (not default true)", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "shared but wrong finding" }] },
-      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "shared but wrong finding" }] },
-    ]}];
-    const adjudicateFn = async () => ({ verdict: "false" });
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "" });
-    assert.equal(r.perModel["glm-5.2"].trueCount, 0);
-    assert.equal(r.perModel["glm-5.2"].precision, 0);
+  it("ignores uncertain and unadjudicated findings", () => {
+    const log = [
+      { models: ["glm-5.2"], verdict: "uncertain", finding: "不确定" },
+      { models: ["glm-5.2"], finding: "未裁决" },
+      { models: ["glm-5.2"], verdict: "true", finding: "真" },
+    ];
+    const p = computePrecision(log);
+    assert.equal(p["glm-5.2"].precision, 1);
+    assert.equal(p["glm-5.2"].samples, 1);
   });
 
-  it("adjudicates deduplicated findings only (one call per unique bug)", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "same bug in a", file: "a.js" }, { finding: "same bug in a 2", file: "a.js" }] },
-      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "same bug in a variant", file: "a.js" }] },
-    ]}];
-    let calls = 0;
-    const adjudicateFn = async () => { calls += 1; return { verdict: "true" }; };
-    const r = await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
-    assert.equal(calls, 1, "near-identical findings should be adjudicated once");
-    assert.equal(r.perModel["glm-5.2"].trueCount, 2);
-    assert.equal(r.perModel["kimi-k2.7-code"].trueCount, 1);
+  it("falls back to single model field when models array missing", () => {
+    const log = [{ model: "glm-5.2", verdict: "true", finding: "用 model 字段" }];
+    const p = computePrecision(log);
+    assert.equal(p["glm-5.2"].precision, 1);
   });
 
-  it("passes resolved project rules to the adjudicator", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "unique bug", file: "f.js" }] },
-    ]}];
-    let seenRules = null;
-    const adjudicateFn = async ({ rules }) => { seenRules = rules; return { verdict: "false" }; };
-    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code", resolveRules: async () => "禁止 X" });
-    assert.equal(seenRules, "禁止 X");
+  it("flags insufficient sample size for precision", () => {
+    const log = [{ models: ["glm-5.2"], verdict: "true", finding: "只 1 条" }];
+    const p = computePrecision(log);
+    assert.equal(p["glm-5.2"].sampleInsufficient, true);
+  });
+
+  it("returns empty object for empty or verdict-less log", () => {
+    assert.deepEqual(computePrecision([]), {});
+    assert.deepEqual(computePrecision([{ models: ["glm-5.2"], finding: "no verdict" }]), {});
   });
 });
 
@@ -599,19 +488,6 @@ describe("adjudicate context extraction", () => {
     });
     await adjudicate({ finding: "x", code });
     assert.ok((proc.stdinWritten || "").includes("const b = 2;"));
-  });
-});
-
-describe("evaluateModels passes line to adjudicator", () => {
-  it("passes each finding's line number", async () => {
-    const audits = [{ workers: [
-      { model: "glm-5.2", success: true, issues: [{ finding: "unique x", file: "f.js", line: 42 }] },
-      { model: "kimi-k2.7-code", success: true, issues: [{ finding: "different y", file: "f.js", line: 7 }] },
-    ]}];
-    const seen = [];
-    const adjudicateFn = async ({ line }) => { seen.push(line); return { verdict: "false" }; };
-    await evaluateModels({ audits, arbitrate: true, adjudicateFn, resolveCode: () => "code" });
-    assert.deepEqual(seen.sort((a, b) => a - b), [7, 42]);
   });
 });
 
@@ -954,6 +830,26 @@ describe("cli --arbitrate --project-dir", () => {
     const adjudicateLedgerFn = async (opts) => { captured = opts.projectDir ?? "none"; return []; };
     await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
     assert.equal(captured, "none");
+  });
+});
+
+describe("cli 非 arbitrate 输出 precision", () => {
+  it("合并数量/共识与账本 precision 到一张表", async () => {
+    const load = async () => [
+      { file: "a.js", workers: [
+        { model: "glm-5.2", success: true, issues: [{ finding: "a" }] },
+        { model: "kimi-k2.7-code", success: true, issues: [{ finding: "a" }] },
+      ]},
+    ];
+    const loadLedger = async () => [
+      { models: ["glm-5.2"], verdict: "true", finding: "真" },
+      { models: ["kimi-k2.7-code"], verdict: "false", finding: "假" },
+    ];
+    let out = "";
+    await cli([], { load, loadLedger, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.ok(out.includes("precision"), "表头应含 precision 列");
+    assert.ok(out.includes("glm-5.2"), "应含 glm 行");
+    assert.ok(out.includes("kimi-k2.7-code"), "应含 kimi 行");
   });
 });
 
