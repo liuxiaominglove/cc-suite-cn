@@ -91,6 +91,20 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 
 After the review, you'll see a comparison report showing what each model found, where they agree, and where they differ.
 
+## 决策纪律（decision-discipline）
+
+全局规则 `~/.config/opencode/rules/decision-discipline.md` applies everywhere。项目侧 instantiation：
+
+遇到以下任一情况（技术选型 / 二选一取舍 / 有损操作 / 不可逆操作），**禁止直接给 A/B 方案**，必须先显式输出「强制三段」，缺一段 = 违规：
+
+1. **本质**：一句话定义决策本质（分类：安全/信任/流程/数据？可逆/不可逆？无损/有损？）。
+2. **最佳实践**：基于本质，业界 / 项目先例怎么处理同类问题。
+3. **方案**：从「本质+最佳实践」推导——可能 A/B、可能 C/D、可能「伪决策：证据不足，暂不做」。
+
+证据不足时，直接说「这是伪决策，现在不该做」+ 缺什么证据，不许硬给选项凑数。区分「确定 / 推断 / 不知道」，不许把推断说成确定。
+
+> 教训（2026-08-22）：opencode 曾把「判断题」框成「选择题」——先给直觉 A/B，被用户追问「本质/最佳实践」才补深度分析，导致 A/B 常偏离本质。已把全局规则从「三问（自问）」升级为「三段（强制输出，可审计）」。
+
 ## TDD Discipline
 
 This project follows test-driven development (RED → GREEN → REFACTOR).
