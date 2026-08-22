@@ -338,6 +338,15 @@ export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chun
   };
 }
 
+export async function runCritic({ file, findingsFile, backend = "qwen", model = CRITIC_MODEL, readFile, collectLessons = collectWorkerLessons }) {
+  const read = readFile ?? (async (p) => (await import("node:fs/promises")).readFile(p, "utf-8"));
+  const code = await read(file, "utf-8");
+  const findings = JSON.parse(await read(findingsFile, "utf-8"));
+  const lessons = await collectLessons();
+  const result = await criticize({ findings, code, model, backend, retries: 2, lessons });
+  return { result, findings };
+}
+
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   const criticIdx = args.indexOf("--critic");
@@ -350,11 +359,10 @@ if (isMainModule(import.meta.url)) {
       process.exit(1);
     }
     const { readFile } = await import("node:fs/promises");
-    const code = await readFile(file, "utf-8");
-    const findings = JSON.parse(await readFile(findingsFile, "utf-8"));
     let result;
+    let findings = [];
     try {
-      result = await criticize({ findings, code, model, backend, retries: 2 });
+      ({ result, findings } = await runCritic({ file, findingsFile, backend, model, readFile }));
     } catch (err) {
       if (err instanceof AuthError) throw err;
       result = { verdicts: [], missed: [], error: err?.message ?? String(err) };

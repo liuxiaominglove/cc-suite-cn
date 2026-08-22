@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { splitByBatch, fpRate, computeProgress, progressCli } from "./progress.mjs";
+import { splitByBatch, fpRate, computeProgress, progressCli, computeMistakeBreakdown } from "./progress.mjs";
 
 describe("splitByBatch", () => {
   it("空账本返回两个空数组", () => {
@@ -147,5 +147,45 @@ describe("progressCli", () => {
     await progressCli({ load: async () => log, stdout: { write: (s) => { out += s; } } });
     assert.ok(out.includes("glm-5.2"), out);
     assert.ok(out.includes("↑"), out);
+  });
+});
+
+describe("computeMistakeBreakdown", () => {
+  it("空账本/null 返回零结构", () => {
+    assert.deepEqual(computeMistakeBreakdown([]), { byType: {}, total: 0, unlabeled: 0 });
+    assert.deepEqual(computeMistakeBreakdown(null), { byType: {}, total: 0, unlabeled: 0 });
+  });
+
+  it("混合：有类型 + 无类型 + final=true 计数正确", () => {
+    const log = [
+      { file: "a.js", confirmed: { final: "false", mistakeType: "path-normalized" } },
+      { file: "b.js", confirmed: { final: "false", mistakeType: "by-design" } },
+      { file: "c.js", confirmed: { final: "false" } },                              // 旧记录无类型 → unlabeled
+      { file: "d.js", confirmed: { final: "true", mistakeType: "by-design" } },      // final=true → 不计
+    ];
+    const b = computeMistakeBreakdown(log);
+    assert.equal(b.total, 2);
+    assert.equal(b.unlabeled, 1);
+    assert.deepEqual(b.byType, { "path-normalized": 1, "by-design": 1 });
+  });
+
+  it("单类型全量", () => {
+    const log = [
+      { file: "a.js", confirmed: { final: "false", mistakeType: "unknown" } },
+      { file: "b.js", confirmed: { final: "false", mistakeType: "unknown" } },
+    ];
+    const b = computeMistakeBreakdown(log);
+    assert.deepEqual(b, { byType: { unknown: 2 }, total: 2, unlabeled: 0 });
+  });
+
+  it("非法 mistakeType 脏数据计入 unlabeled（不进 byType）", () => {
+    const log = [
+      { file: "a.js", confirmed: { final: "false", mistakeType: "not-a-real-type" } },
+      { file: "b.js", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    const b = computeMistakeBreakdown(log);
+    assert.deepEqual(b.byType, { "by-design": 1 });
+    assert.equal(b.unlabeled, 1, "非法类型应计入 unlabeled（fail-closed）");
+    assert.equal(b.total, 1);
   });
 });

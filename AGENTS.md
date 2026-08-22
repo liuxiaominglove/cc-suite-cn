@@ -138,7 +138,7 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 - **验证台账**: `docs/verification.md` —— 汇报"已验证"的结论必须能在台账里找到对应行。
 - **负向必测**: 任何"能拦住/能禁止"的结论（如锁写、防踢皮球），必须实测"确实拦住了"。
 - **验证脚本**: `scripts/verify/` + `pnpm verify:e2e`（不进 `pnpm test`，因要起外部 CLI）。固化真实往返/锁写/负向三个验证。
-- **阶段完成定义**: 每阶段开工前先写一行"本阶段完成 = 哪些验证必须 🟢"，跑完对照，未全绿不算完成。
+- **阶段完成定义**: 每阶段开工前先写一行"本阶段要防的教训 X/Y/Z + 完成验证 A/B/C"（防坑清单可跑 `node scripts/evaluate-models.mjs --preflight` 生成），跑完对照，未全绿不算完成。
 
 ### 复审 vs 门禁（易混命令对照，单一数据源）
 

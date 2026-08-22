@@ -22,6 +22,8 @@ import {
   upsertFindings,
   appendCritic,
   appendVerdicts,
+  MISTAKE_TYPES,
+  isValidMistakeType,
 } from "./verdict-log.mjs";
 
 describe("modelsOf", () => {
@@ -451,6 +453,72 @@ describe("confirmVerdict", () => {
     assert.equal(r, null);
   });
 
+  it("final=false 传合法 mistakeType 落库", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    const r = await confirmVerdict("a.js", 1, "f", {
+      final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: "path-normalized",
+    }, p);
+    assert.equal(r.confirmed.mistakeType, "path-normalized");
+    const log = await loadVerdicts(p);
+    assert.equal(log[0].confirmed.mistakeType, "path-normalized", "持久化后 mistakeType 应存在");
+  });
+
+  it("final=false 不传/null/undefined mistakeType 不存该字段", async () => {
+    for (const mt of [undefined, null]) {
+      const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+      const p = join(dir, "log.json");
+      await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+      const r = await confirmVerdict("a.js", 1, "f", {
+        final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: mt,
+      }, p);
+      assert.ok(!("mistakeType" in r.confirmed), "mistakeType 为 null/undefined 不应落字段");
+    }
+  });
+
+  it("final=false 非法 mistakeType 抛错", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await assert.rejects(
+      confirmVerdict("a.js", 1, "f", { final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: "foo" }, p),
+      /mistakeType/
+    );
+  });
+
+  it("final=false 非字符串 mistakeType 抛错", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+    await assert.rejects(
+      confirmVerdict("a.js", 1, "f", { final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: 123 }, p),
+      /mistakeType/
+    );
+  });
+
+  it("final=false 空串/带空白 mistakeType 抛错", async () => {
+    for (const mt of ["", " path-normalized "]) {
+      const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+      const p = join(dir, "log.json");
+      await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "false" }], p);
+      await assert.rejects(
+        confirmVerdict("a.js", 1, "f", { final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: mt }, p),
+        /mistakeType/
+      );
+    }
+  });
+
+  it("final=true 传 mistakeType 忽略（不落字段）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await persistVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true" }], p);
+    const r = await confirmVerdict("a.js", 1, "f", {
+      final: "true", reason: "r", independent: { final: "true", reason: "i" }, comparison: "c", mistakeType: "by-design",
+    }, p);
+    assert.ok(!("mistakeType" in r.confirmed), "final=true 不应落 mistakeType");
+  });
+
   it("getTrace 透传 confirmed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "verdict-"));
     const p = join(dir, "log.json");
@@ -666,5 +734,36 @@ describe("appendVerdicts", () => {
     const log = await loadVerdicts(p);
     assert.equal(log[0].verdict, "false", "重跑应覆盖 verdict");
     assert.equal(log[0].evidence, "new");
+  });
+});
+
+describe("isValidMistakeType", () => {
+  it("合法枚举返回 true", () => {
+    for (const t of MISTAKE_TYPES) {
+      assert.equal(isValidMistakeType(t), true, `${t} 应合法`);
+    }
+  });
+
+  it("prompt-injection-misattributed 是合法枚举", () => {
+    assert.equal(isValidMistakeType("prompt-injection-misattributed"), true);
+    assert.ok(MISTAKE_TYPES.includes("prompt-injection-misattributed"));
+  });
+
+  it("非法字符串返回 false", () => {
+    assert.equal(isValidMistakeType("foo"), false);
+    assert.equal(isValidMistakeType(""), false);
+    assert.equal(isValidMistakeType("path-normalized "), false);
+  });
+
+  it("null/undefined/非字符串返回 false", () => {
+    assert.equal(isValidMistakeType(null), false);
+    assert.equal(isValidMistakeType(undefined), false);
+    assert.equal(isValidMistakeType(123), false);
+    assert.equal(isValidMistakeType({}), false);
+  });
+
+  it("大小写变体不合法（严格 kebab-case）", () => {
+    assert.equal(isValidMistakeType("Path-Normalized"), false);
+    assert.equal(isValidMistakeType("BY_DESIGN"), false);
   });
 });

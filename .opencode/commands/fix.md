@@ -12,6 +12,10 @@ agent: build
 
 > **项目根目录（`--project-dir`）**：落账时按项目根隔离，否则外部项目审计的 finding 会记错归属。先取项目根：目录 → `git -C "<目录>" rev-parse --show-toplevel`；文件 → `git -C "$(dirname "<文件>")" rev-parse --show-toplevel`；非 git 仓库则省略 `--project-dir`。下面所有 `--run-audit` / `--arbitrate` 都带 `--project-dir "<项目根>"`。
 
+## Step 0: 防坑声明（开工前）
+
+跑 `node scripts/evaluate-models.mjs --preflight --project-dir "<项目根>"` 拿防坑清单，写一行「本阶段要防的教训 X/Y/Z + 完成验证 A/B/C」（见 AGENTS.md「阶段完成定义」），收尾对照。
+
 ## Step 1: 找 bug（glm + kimi）
 
 ```

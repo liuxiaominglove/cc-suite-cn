@@ -2,16 +2,18 @@ import { buildCommand } from "./backends.mjs";
 import { CRITIC_MODEL } from "./models.mjs";
 import { CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
 import { frameCode, runModel, extractJson, DEFAULT_TIMEOUT } from "./review-tools.mjs";
+import { buildLessonsSection } from "./review-context.mjs";
 
-export function buildCriticPrompt(findings, code) {
+export function buildCriticPrompt(findings, code, lessons = "") {
   const list = (findings ?? [])
     .map((f, i) => `[${i}] ${f.file ?? ""}:${f.line ?? ""} — ${f.finding ?? ""}`)
     .join("\n");
-  return `${CRITIC_PROMPT}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
+  const lessonsSection = buildLessonsSection(lessons);
+  return `${CRITIC_PROMPT}${lessonsSection}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
 }
 
-export async function criticize({ findings, code, model = CRITIC_MODEL, backend = "qwen", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0 }) {
-  const prompt = buildCriticPrompt(findings, code);
+export async function criticize({ findings, code, model = CRITIC_MODEL, backend = "qwen", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0, lessons = "" }) {
+  const prompt = buildCriticPrompt(findings, code, lessons);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
 
   const stdout = await runModel({ command, args, stdin, timeout, spawn, backend, retries });
@@ -58,15 +60,16 @@ export function buildMissedFindings(missed, file, { projectDir = process.cwd(), 
 }
 
 
-export function buildSelfCheckPrompt(findings, code) {
+export function buildSelfCheckPrompt(findings, code, lessons = "") {
   const list = (findings ?? [])
     .map((f, i) => `[${i}] ${f.file ?? ""}:${f.line ?? ""} — ${f.finding ?? ""}`)
     .join("\n");
-  return `${SELF_CHECK_PROMPT}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
+  const lessonsSection = buildLessonsSection(lessons);
+  return `${SELF_CHECK_PROMPT}${lessonsSection}\n\nFINDINGS:\n${list || "（空清单）"}\n\nCODE:\n${frameCode(code ?? "")}`;
 }
 
-export async function selfCheck({ findings, code, model, backend = "codebuddy", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0 }) {
-  const prompt = buildSelfCheckPrompt(findings, code);
+export async function selfCheck({ findings, code, model, backend = "codebuddy", timeout = DEFAULT_TIMEOUT, spawn = null, retries = 0, lessons = "" }) {
+  const prompt = buildSelfCheckPrompt(findings, code, lessons);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
 
   const stdout = await runModel({ command, args, stdin, timeout, spawn, backend, retries });

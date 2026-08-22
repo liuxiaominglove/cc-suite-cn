@@ -1,8 +1,9 @@
 import { runProcess, RunnerError, TimeoutError, isMainModule } from "./runner-core.mjs";
 import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry } from "./review-tools.mjs";
-import { collectProjectRules, collectImportContext, collectStackContext } from "./review-context.mjs";
+import { collectProjectRules, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection } from "./review-context.mjs";
 import { hashContent, confirmVerdict, modelsOf } from "./verdict-log.mjs";
+import { buildOrchestratorPreflight } from "./feedback.mjs";
 import { dirname } from "node:path";
 
 export function normalizeFinding(text) {
@@ -109,11 +110,12 @@ export function classifyConsensus(results) {
   return { groups, perModel };
 }
 
-export function buildAdjudicatorPrompt(finding, code, rules = "", relatedCode = "", stackContext = "") {
+export function buildAdjudicatorPrompt(finding, code, rules = "", relatedCode = "", stackContext = "", lessons = "") {
   const rulesSection = (rules ?? "").trim() ? `\n\n[项目规则]\n${rules}` : "";
   const relatedSection = (relatedCode ?? "").trim() ? `\n\n[相关模块源码]（本文件 import 的本地模块，判断 finding 时请查阅其中函数的真实实现）\n${relatedCode}` : "";
   const stackSection = (stackContext ?? "").trim() ? `\n\n[技术栈] ${stackContext}` : "";
-  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。盲评纪律：上游批判员和评审员的结论与理由均未附给你，你必须只凭代码本身独立判断。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${stackSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
+  const lessonsSection = buildLessonsSection(lessons);
+  return `你是独立代码审计裁决员（验证审计员）。你的唯一职责：判断下面这条 finding 是不是真的 bug。只读代码，不修代码、不另找新 bug、不给修复建议。盲评纪律：上游批判员和评审员的结论与理由均未附给你，你必须只凭代码本身独立判断。下方 CODE 就是完整的被审内容，若附有相关模块源码段，请核对被调用函数的真实实现——若该函数已处理了 finding 所说的问题（如 ~ 展开、路径归一化、null 守卫），则判 false。不要声称搜索了仓库或文件系统（你无权访问它们）。输出 JSON：{"verdict":"true|false|uncertain","evidence":"一句证据"}\n\nFINDING: ${finding}${rulesSection}${lessonsSection}${stackSection}${relatedSection}\n\nCODE:\n${frameCode(code)}`;
 }
 
 export function parseVerdict(text) {
@@ -154,10 +156,10 @@ async function mapLimit(items, limit, fn) {
 
 export const ADJUDICATE_MAX_CTX_LINES = 800;
 
-export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", stackContext = "", retries = 0 }) {
+export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", stackContext = "", retries = 0, lessons = "" }) {
   const lineCount = code ? String(code).split("\n").length : 0;
   const ctx = line && lineCount > ADJUDICATE_MAX_CTX_LINES ? extractContext(code, line, { contextLines }) : code;
-  const prompt = buildAdjudicatorPrompt(finding, ctx, rules, relatedCode, stackContext);
+  const prompt = buildAdjudicatorPrompt(finding, ctx, rules, relatedCode, stackContext, lessons);
   const { command, args, stdin } = buildCommand(backend, { model, prompt });
 
   let stdout;
@@ -267,6 +269,7 @@ export async function adjudicateLedger({
   resolveRules = null,
   resolveImportContext = null,
   resolveStackContext = null,
+  resolveLessons = null,
   adjudicateFn = adjudicate,
   persist = null,
   retries = 0,
@@ -283,12 +286,13 @@ export async function adjudicateLedger({
   }
   if (pending.length === 0) return [];
   const rules = resolveRules ? await resolveRules() : "";
+  const lessons = resolveLessons ? await resolveLessons() : "";
   const results = await mapLimit(pending, adjudicateConcurrency, async (f) => {
     const file = f.file ?? "";
     const code = resolveCode ? await resolveCode(file) : "";
     const relatedCode = resolveImportContext ? await resolveImportContext(file) : "";
     const stackContext = resolveStackContext ? await resolveStackContext(file) : "";
-    const result = await adjudicateFn({ finding: f.finding ?? "", code: code || "", line: f.line ?? null, rules, relatedCode, stackContext, retries });
+    const result = await adjudicateFn({ finding: f.finding ?? "", code: code || "", line: f.line ?? null, rules, lessons, relatedCode, stackContext, retries });
     return {
       file,
       line: f.line ?? null,
@@ -417,7 +421,7 @@ export async function confirmFindings(entries, { confirmFn = null, now = () => n
       results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: false, error: "missing comparison: 两步终审步骤 2 对比必须落实" });
       continue;
     }
-    const matched = await confirm(e.file, e.line, e.finding, { final, reason, independent, comparison, confirmedAt: batchAt });
+    const matched = await confirm(e.file, e.line, e.finding, { final, reason, independent, comparison, confirmedAt: batchAt, mistakeType: e?.mistakeType });
     results.push({ file: e?.file, line: e?.line, finding: e?.finding, ok: matched != null, matched: matched != null });
   }
   return { batchAt, results };
@@ -457,6 +461,19 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
     const files = parseFileFilterArgs(args);
     const projectDir = parseProjectDirArg(args);
 
+    if (args.includes("--preflight")) {
+      const ledgerFn = loadLedger ?? (async () => (await import("./verdict-log.mjs")).loadVerdicts());
+      let ledger = [];
+      try {
+        ledger = await ledgerFn();
+      } catch (err) {
+        stderr.write(`Warning: 账本读取失败（${err?.message ?? String(err)}），防坑清单跳过\n`);
+      }
+      const text = buildOrchestratorPreflight(ledger, { projectDir });
+      stdout.write(text ? `${text}\n` : "（无历史教训，先跑 /fix 积累）\n");
+      return 0;
+    }
+
     if (arbitrate) {
       const { loadVerdicts } = await import("./verdict-log.mjs");
       const log = await loadVerdicts();
@@ -471,8 +488,9 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
         try { return await collectStackContext(dirname(file)); } catch { return ""; }
       };
       const resolveRules = async () => collectProjectRules({ cwd: process.cwd() });
+      const resolveLessons = async () => collectWorkerLessons();
       const fn = adjudicateLedgerFn ?? adjudicateLedger;
-      const results = await fn({ resolveCode, resolveRules, resolveImportContext, resolveStackContext, files, retries: 2, projectDir });
+      const results = await fn({ resolveCode, resolveRules, resolveImportContext, resolveStackContext, resolveLessons, files, retries: 2, projectDir });
       if (results.length === 0) {
         stdout.write("(暂无待裁决的 finding)\n");
         return 0;

@@ -13,6 +13,9 @@ import {
   buildMissedPreamble,
   filterMissedForFeedback,
   createFeedbackResolver,
+  groupByMistakeType,
+  buildWorkerLessonCandidates,
+  buildOrchestratorPreflight,
 } from "./feedback.mjs";
 
 describe("pickCounterExamples", () => {
@@ -235,6 +238,177 @@ describe("filterMissedForFeedback", () => {
     ];
     const out = filterMissedForFeedback(log);
     assert.deepEqual(out.map((v) => v.finding), ["真补漏", "终审真"]);
+  });
+});
+
+describe("groupByMistakeType", () => {
+  it("空账本/null 返回空对象", () => {
+    assert.deepEqual(groupByMistakeType([]), {});
+    assert.deepEqual(groupByMistakeType(null), {});
+  });
+
+  it("多类型正确分组", () => {
+    const log = [
+      { file: "a.js", finding: "f1", confirmed: { final: "false", mistakeType: "path-normalized" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "by-design" } },
+      { file: "c.js", finding: "f3", confirmed: { final: "false", mistakeType: "path-normalized" } },
+    ];
+    const out = groupByMistakeType(log);
+    assert.equal(out["path-normalized"].length, 2);
+    assert.equal(out["by-design"].length, 1);
+  });
+
+  it("final=false 无 mistakeType（旧记录）不计入", () => {
+    const log = [
+      { file: "a.js", finding: "f1", confirmed: { final: "false" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    const out = groupByMistakeType(log);
+    assert.deepEqual(Object.keys(out), ["by-design"]);
+  });
+
+  it("final=true（即使有 mistakeType）不计入", () => {
+    const log = [
+      { file: "a.js", finding: "f1", confirmed: { final: "true", mistakeType: "by-design" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    const out = groupByMistakeType(log);
+    assert.equal(out["by-design"].length, 1, "final=true 不计入");
+  });
+
+  it("同类型多条聚合完整（保留条目引用）", () => {
+    const a = { file: "a.js", finding: "f1", confirmed: { final: "false", mistakeType: "unknown" } };
+    const b = { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "unknown" } };
+    const out = groupByMistakeType([a, b]);
+    assert.deepEqual(out["unknown"], [a, b]);
+  });
+
+  it("非法 mistakeType 脏数据不入组", () => {
+    const log = [
+      { file: "a.js", finding: "f1", confirmed: { final: "false", mistakeType: "not-a-real-type" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    const out = groupByMistakeType(log);
+    assert.deepEqual(Object.keys(out), ["by-design"], "非法类型不入组");
+  });
+});
+
+describe("buildWorkerLessonCandidates", () => {
+  it("空账本/null 返回空数组", () => {
+    assert.deepEqual(buildWorkerLessonCandidates([]), []);
+    assert.deepEqual(buildWorkerLessonCandidates(null), []);
+  });
+
+  it("带 mistakeType 的假阳生成三段候选", () => {
+    const log = [
+      { file: "a.js", line: 112, finding: "lessons 未 sanitize", confirmed: { final: "false", mistakeType: "prompt-injection-misattributed" } },
+    ];
+    const out = buildWorkerLessonCandidates(log);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].mistakeType, "prompt-injection-misattributed");
+    assert.ok(out[0].rule.includes("prompt injection"), "规则文本应含关键词");
+    assert.equal(out[0].instance, "a.js:112");
+    assert.equal(out[0].source, "lessons 未 sanitize");
+  });
+
+  it("final=true 或无 mistakeType 不生成", () => {
+    const log = [
+      { file: "a.js", finding: "f1", confirmed: { final: "true", mistakeType: "by-design" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false" } },
+    ];
+    assert.deepEqual(buildWorkerLessonCandidates(log), []);
+  });
+
+  it("非法 mistakeType 不生成", () => {
+    const log = [{ file: "a.js", finding: "f", confirmed: { final: "false", mistakeType: "not-a-real-type" } }];
+    assert.deepEqual(buildWorkerLessonCandidates(log), []);
+  });
+
+  it("unknown 类型用 fallback 规则", () => {
+    const log = [{ file: "a.js", finding: "f", confirmed: { final: "false", mistakeType: "unknown" } }];
+    const out = buildWorkerLessonCandidates(log);
+    assert.equal(out.length, 1);
+    assert.ok(out[0].rule.includes("待 opencode"), "unknown 应用 fallback 规则");
+  });
+});
+
+describe("buildOrchestratorPreflight", () => {
+  it("两源都有时产出两段", () => {
+    const log = [
+      { file: "a.js", line: 1, finding: "f1", projectDir: "/p", fixed: { rootCause: "边界", fixedAt: "2026-01-01T00:00:00Z" } },
+      { file: "b.js", line: 2, finding: "f2", projectDir: "/p", confirmed: { final: "false", mistakeType: "path-normalized" } },
+    ];
+    const out = buildOrchestratorPreflight(log, { projectDir: "/p" });
+    assert.ok(out.includes("修 bug 时警惕同类"), "应含根因段头");
+    assert.ok(out.includes("终审时警惕同类假阳"), "应含误报段头");
+    assert.ok(out.includes("边界"), "应含根因内容");
+    assert.ok(out.includes("path-normalized"), "应含误报类型");
+  });
+
+  it("空账本/null 返回空串", () => {
+    assert.equal(buildOrchestratorPreflight([]), "");
+    assert.equal(buildOrchestratorPreflight(null), "");
+  });
+
+  it("只有 rootCause 时只出根因段", () => {
+    const log = [{ file: "a.js", finding: "f1", fixed: { rootCause: "边界" } }];
+    const out = buildOrchestratorPreflight(log);
+    assert.ok(out.includes("修 bug 时警惕同类"));
+    assert.ok(!out.includes("终审时警惕同类假阳"), "无误报段");
+  });
+
+  it("只有 mistakeType 时只出误报段", () => {
+    const log = [{ file: "a.js", finding: "f1", confirmed: { final: "false", mistakeType: "by-design" } }];
+    const out = buildOrchestratorPreflight(log);
+    assert.ok(out.includes("终审时警惕同类假阳"));
+    assert.ok(!out.includes("修 bug 时警惕同类"), "无根因段");
+  });
+
+  it("漏报（source=qwen-critic 的真 bug）不进清单", () => {
+    const log = [{ file: "a.js", source: "qwen-critic", finding: "漏报真 bug", verdict: "true", confirmed: { final: "true" } }];
+    assert.equal(buildOrchestratorPreflight(log), "");
+  });
+
+  it("projectDir 过滤只匹配本项目根因", () => {
+    const log = [
+      { file: "a.js", finding: "f1", projectDir: "/p", fixed: { rootCause: "边界" } },
+      { file: "b.js", finding: "f2", projectDir: "/other", fixed: { rootCause: "时序" } },
+    ];
+    const out = buildOrchestratorPreflight(log, { projectDir: "/p" });
+    assert.ok(out.includes("边界"));
+    assert.ok(!out.includes("时序"), "其他项目根因不进");
+  });
+
+  it("非法 mistakeType 不纳入", () => {
+    const log = [{ file: "a.js", finding: "f1", confirmed: { final: "false", mistakeType: "garbage" } }];
+    assert.equal(buildOrchestratorPreflight(log), "");
+  });
+
+  it("final=true 带 mistakeType 不计入误报段", () => {
+    const log = [{ file: "a.js", finding: "f1", confirmed: { final: "true", mistakeType: "by-design" } }];
+    assert.equal(buildOrchestratorPreflight(log), "");
+  });
+
+  it("topN 截断", () => {
+    const log = Array.from({ length: 5 }, (_, i) => ({ file: `f${i}.js`, finding: `f${i}`, fixed: { rootCause: `r${i}` } }));
+    const out = buildOrchestratorPreflight(log, { rootCauseTopN: 3 });
+    const lines = out.split("\n").filter((l) => l.startsWith("- "));
+    assert.equal(lines.length, 3, "只出 3 条根因");
+  });
+
+  it("mistakeTopN 按频率降序取前 N（高频后出现也要保留）", () => {
+    const log = [
+      { file: "a1.js", confirmed: { final: "false", mistakeType: "unknown" } },
+      { file: "b1.js", confirmed: { final: "false", mistakeType: "path-normalized" } },
+      { file: "b2.js", confirmed: { final: "false", mistakeType: "path-normalized" } },
+      { file: "c1.js", confirmed: { final: "false", mistakeType: "by-design" } },
+      { file: "c2.js", confirmed: { final: "false", mistakeType: "by-design" } },
+      { file: "c3.js", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    const out = buildOrchestratorPreflight(log, { mistakeTopN: 2 });
+    assert.ok(out.includes("by-design"), "高频 by-design 应保留");
+    assert.ok(out.includes("path-normalized"), "次高频 path-normalized 应保留");
+    assert.ok(!out.includes("unknown"), "低频 unknown 应被丢弃（即使先出现）");
   });
 });
 

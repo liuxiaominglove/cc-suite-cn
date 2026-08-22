@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { mkdtemp, writeFile, rm, mkdir } from "node:fs/promises";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { review, RunnerError, TimeoutError, setSpawn, reviewFile, reviewDir, SourceTamperedError } from "./review-runner.mjs";
+import { review, RunnerError, TimeoutError, setSpawn, reviewFile, reviewDir, SourceTamperedError, runCritic } from "./review-runner.mjs";
 import { AuthError, extractJson, DEFAULT_TIMEOUT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, withRetry, setRetryBackoffMs, isAuthError, isNLArtifact } from "./review-tools.mjs";
 import { VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
 import { collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection, stripMarkdownComments } from "./review-context.mjs";
@@ -1823,6 +1823,41 @@ describe("criticize", () => {
     assert.ok(p.includes("const x = 1;"), "应含 code");
   });
 
+  it("buildCriticPrompt 注入 lessons 到 [评审教训] 段", () => {
+    const p = buildCriticPrompt(
+      [{ file: "a.js", line: 3, finding: "bug one" }],
+      "const x = 1;",
+      "- 规则：先 trace 再报"
+    );
+    assert.ok(p.includes("[评审教训]"), "应含 [评审教训] 段头");
+    assert.ok(p.includes("先 trace 再报"), "应含 lessons 内容");
+  });
+
+  it("buildCriticPrompt 不传 lessons 不注入段（向后兼容）", () => {
+    const p = buildCriticPrompt([{ file: "a.js", line: 3, finding: "bug one" }], "const x = 1;");
+    assert.ok(!p.includes("[评审教训]"), "默认不注入");
+  });
+
+  it("buildCriticPrompt lessons 为空串/null/undefined/纯空白不注入段", () => {
+    assert.ok(!buildCriticPrompt([], "code", "").includes("[评审教训]"));
+    assert.ok(!buildCriticPrompt([], "code", null).includes("[评审教训]"));
+    assert.ok(!buildCriticPrompt([], "code", undefined).includes("[评审教训]"));
+    assert.ok(!buildCriticPrompt([], "code", "  \n\t ").includes("[评审教训]"));
+  });
+
+  it("buildCriticPrompt lessons 含特殊字符原样保留", () => {
+    const weird = "- 规则：用 $ 和 ` 反引号 ` 与 <tag>&";
+    const p = buildCriticPrompt([], "code", weird);
+    assert.ok(p.includes(weird), "特殊字符应原样保留");
+  });
+
+  it("buildCriticPrompt lessons 段在 FINDINGS 与 CODE 之前", () => {
+    const p = buildCriticPrompt([{ file: "a.js", line: 1, finding: "x" }], "code", "- 规则：先 trace");
+    assert.ok(p.includes("[评审教训]"), "教训段应存在");
+    assert.ok(p.indexOf("[评审教训]") < p.indexOf("FINDINGS:"), "教训段应在 FINDINGS 之前");
+    assert.ok(p.indexOf("[评审教训]") < p.indexOf("CODE:"), "教训段应在 CODE 之前");
+  });
+
   it("criticize 转发 spawn 参数（不回落全局 spawn）", async () => {
     let globalCalled = false;
     setSpawn(() => { globalCalled = true; return createMockProcess({ stdout: MOCK_OUTPUT_VALID }); });
@@ -1850,6 +1885,46 @@ describe("criticize", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await criticize({ findings: [], code: "x" });
     assert.deepEqual(r, { verdicts: [], missed: [] });
+  });
+
+  it("criticize 传 lessons 注入到 prompt", async () => {
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      capturedArgs = args;
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    await criticize({ findings: [], code: "x", lessons: "- 规则：先 trace 再报" });
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(prompt, "应捕获到 prompt arg");
+    assert.ok(prompt.includes("[评审教训]"), "应注入段头");
+    assert.ok(prompt.includes("先 trace 再报"), "应注入内容");
+  });
+
+  it("criticize 不传 lessons 不注入（向后兼容）", async () => {
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      capturedArgs = args;
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    await criticize({ findings: [], code: "x" });
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(!prompt.includes("[评审教训]"), "默认不注入");
+  });
+
+  it("criticize lessons 为 null 时重试路径也不注入段", async () => {
+    setRetryBackoffMs([0, 0]);
+    let calls = 0;
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      calls++;
+      capturedArgs = args;
+      return createMockProcess({ stdout: calls === 1 ? "" : JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    await criticize({ findings: [], code: "x", lessons: null, retries: 2 });
+    assert.equal(calls, 2, "应重试后成功");
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(!prompt.includes("[评审教训]"), "null lessons 不注入");
+    setRetryBackoffMs(null);
   });
 
   it("mapCriticVerdicts 按 index 映射回 findings（越界跳过）", () => {
@@ -1942,6 +2017,33 @@ describe("selfCheck", () => {
     assert.ok(p.includes("const x = 1;"), "应含 code");
   });
 
+  it("buildSelfCheckPrompt 注入 lessons 到 [评审教训] 段", () => {
+    const p = buildSelfCheckPrompt([{ file: "a.js", line: 3, finding: "bug one" }], "const x = 1;", "- 规则：先 trace 再报");
+    assert.ok(p.includes("[评审教训]"), "应含段头");
+    assert.ok(p.includes("先 trace 再报"), "应含内容");
+  });
+
+  it("buildSelfCheckPrompt 不传/空/null/纯空白不注入段", () => {
+    const f = [{ file: "a.js", line: 3, finding: "bug one" }];
+    assert.ok(!buildSelfCheckPrompt(f, "code").includes("[评审教训]"));
+    assert.ok(!buildSelfCheckPrompt(f, "code", "").includes("[评审教训]"));
+    assert.ok(!buildSelfCheckPrompt(f, "code", null).includes("[评审教训]"));
+    assert.ok(!buildSelfCheckPrompt(f, "code", undefined).includes("[评审教训]"));
+    assert.ok(!buildSelfCheckPrompt(f, "code", "  \n ").includes("[评审教训]"));
+  });
+
+  it("buildSelfCheckPrompt lessons 含特殊字符原样保留", () => {
+    const weird = "- 规则：用 $ 与 ` 反引号 ` 与 <tag>";
+    assert.ok(buildSelfCheckPrompt([], "code", weird).includes(weird));
+  });
+
+  it("buildSelfCheckPrompt lessons 段在 FINDINGS 与 CODE 之前", () => {
+    const p = buildSelfCheckPrompt([{ file: "a.js", line: 1, finding: "x" }], "code", "- 规则：先 trace");
+    assert.ok(p.includes("[评审教训]"), "教训段应存在");
+    assert.ok(p.indexOf("[评审教训]") < p.indexOf("FINDINGS:"), "教训段应在 FINDINGS 之前");
+    assert.ok(p.indexOf("[评审教训]") < p.indexOf("CODE:"), "教训段应在 CODE 之前");
+  });
+
   it("selfCheck 解析 survivors", async () => {
     const out = JSON.stringify({ survivors: [{ index: 0, keep: false, reason: "已展开 ~" }] });
     setSpawn(() => createMockProcess({ stdout: out }));
@@ -1954,6 +2056,29 @@ describe("selfCheck", () => {
     setSpawn(() => createMockProcess({ stdout: "not json" }));
     const r = await selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy" });
     assert.deepEqual(r, { survivors: [] });
+  });
+
+  it("selfCheck 传 lessons 注入到 prompt", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: JSON.stringify({ survivors: [] }) });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy", lessons: "- 规则：先 trace 再报" });
+    assert.ok(stdinWritten.includes("[评审教训]"), "应注入段头");
+    assert.ok(stdinWritten.includes("先 trace 再报"), "应注入内容");
+  });
+
+  it("selfCheck 不传 lessons 不注入（向后兼容）", async () => {
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: JSON.stringify({ survivors: [] }) });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await selfCheck({ findings: [], code: "x", model: "glm-5.2", backend: "codebuddy" });
+    assert.ok(!stdinWritten.includes("[评审教训]"), "默认不注入");
   });
 
   it("selfCheck 空输出重试后成功", async () => {
@@ -2002,6 +2127,72 @@ describe("selfCheck", () => {
   it("applySelfCheck 空 survivors 返回空", () => {
     assert.deepEqual(applySelfCheck([{ finding: "a" }], []), []);
     assert.deepEqual(applySelfCheck([], null), []);
+  });
+});
+
+describe("runCritic", () => {
+  afterEach(() => setSpawn(null));
+
+  it("runCritic 把 collectLessons 结果传给 criticize（注入 prompt）", async () => {
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      capturedArgs = args;
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    const readFile = async (p) => (p === "a.js" ? "const x = 1;" : JSON.stringify([]));
+    const collectLessons = async () => "- 规则：先 trace 再报";
+    const { result, findings } = await runCritic({ file: "a.js", findingsFile: "f.json", backend: "qwen", model: "qwen3-coder-plus", readFile, collectLessons });
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(prompt.includes("[评审教训]"), "应注入段头");
+    assert.ok(prompt.includes("先 trace 再报"), "应注入内容");
+    assert.deepEqual(result, { verdicts: [], missed: [] });
+    assert.deepEqual(findings, []);
+  });
+
+  it("runCritic 返回 findings 且 findingsFile 只读一次", async () => {
+    let findingsReads = 0;
+    setSpawn((cmd, args) => createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) }));
+    const readFile = async (p) => {
+      if (p === "f.json") { findingsReads += 1; return JSON.stringify([{ file: "a.js", line: 1, finding: "f1" }]); }
+      return "const x = 1;";
+    };
+    const { result, findings } = await runCritic({ file: "a.js", findingsFile: "f.json", backend: "qwen", model: "qwen3-coder-plus", readFile, collectLessons: async () => "" });
+    assert.equal(findingsReads, 1, "findingsFile 只读一次");
+    assert.deepEqual(findings, [{ file: "a.js", line: 1, finding: "f1" }]);
+    assert.deepEqual(result, { verdicts: [], missed: [] });
+  });
+
+  it("runCritic 读 findingsFile 失败时 reject", async () => {
+    const readFile = async (p) => { if (p === "f.json") throw new Error("ENOENT"); return "const x = 1;"; };
+    await assert.rejects(
+      () => runCritic({ file: "a.js", findingsFile: "f.json", backend: "qwen", model: "qwen3-coder-plus", readFile, collectLessons: async () => "" }),
+      /ENOENT/
+    );
+  });
+
+  it("runCritic 不传 collectLessons 时用默认 collectWorkerLessons", async () => {
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      capturedArgs = args;
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    const readFile = async (p) => (p === "a.js" ? "const x = 1;" : JSON.stringify([]));
+    await runCritic({ file: "a.js", findingsFile: "f.json", backend: "qwen", model: "qwen3-coder-plus", readFile });
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(prompt.includes("[评审教训]"), "默认也应注入 worker-lessons 段");
+  });
+
+  it("runCritic collectLessons 返回空串时不注入段", async () => {
+    let capturedArgs = null;
+    setSpawn((cmd, args) => {
+      capturedArgs = args;
+      return createMockProcess({ stdout: JSON.stringify({ verdicts: [], missed: [] }) });
+    });
+    const readFile = async (p) => (p === "a.js" ? "const x = 1;" : JSON.stringify([]));
+    const collectLessons = async () => "";
+    await runCritic({ file: "a.js", findingsFile: "f.json", backend: "qwen", model: "qwen3-coder-plus", readFile, collectLessons });
+    const prompt = capturedArgs.find((a) => typeof a === "string" && a.includes("FINDINGS:"));
+    assert.ok(!prompt.includes("[评审教训]"), "空 lessons 不注入");
   });
 });
 

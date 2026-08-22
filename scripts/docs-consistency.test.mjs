@@ -62,6 +62,12 @@ describe("AGENTS.md 文档（WI-3）", () => {
     const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
     assert.match(c, /glm-5\.2\/hy3 走 codebuddy 平台/, "models.json 描述未澄清 glm-5.2/hy3 走平台");
   });
+
+  it("阶段完成定义含「本阶段要防的教训」+ 指向 --preflight", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /本阶段要防的教训/, "阶段完成定义未扩展为「防教训 + 验证」");
+    assert.match(c, /--preflight/, "阶段完成定义未指向防坑清单入口 --preflight");
+  });
 });
 
 describe("命令/规格（WI-5）", () => {
@@ -123,6 +129,17 @@ describe("命令/规格（WI-5）", () => {
   it("SKILL.md 含审计前置两道闸门", () => {
     const c = readFileSync(join(ROOT, ".opencode/skills/cc-review/SKILL.md"), "utf8");
     assert.match(c, /审计前置两道闸门/, "SKILL.md 缺审计前置闸门声明");
+  });
+
+  it("fix.md 含防坑声明（--preflight 指针，见阶段完成定义）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/commands/fix.md"), "utf8");
+    assert.match(c, /--preflight/, "fix.md 缺 --preflight 防坑声明步骤");
+    assert.match(c, /阶段完成定义/, "fix.md 缺指向阶段完成定义的指针");
+  });
+
+  it("SKILL.md 含阶段完成定义指针（防坑声明回检）", () => {
+    const c = readFileSync(join(ROOT, ".opencode/skills/cc-review/SKILL.md"), "utf8");
+    assert.match(c, /阶段完成定义/, "SKILL.md 缺阶段完成定义指针");
   });
 
   it("trace.md 命令存在（变更追溯）", () => {

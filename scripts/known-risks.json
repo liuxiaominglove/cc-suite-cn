@@ -45,7 +45,7 @@
       "status": "open",
       "title": "prompt injection（buildAdjudicatorPrompt 里 finding/code 直接插值）",
       "riskLevel": "低",
-      "whyDeferred": "攻击者 = 代码作者自己，收益 = 骗过自己的裁决；本地工具无「攻击者→受害者」信任边界",
+      "whyDeferred": "攻击者 = 代码作者自己，收益 = 骗过自己的裁决；本地工具无「攻击者→受害者」信任边界；qwen 会对此反复误报 prompt injection（已三次复现，含对受控文件 worker-lessons.md 的归因假阳），属已知噪音，靠归档去重吸收，非升级等级的理由",
       "reassessWhen": "当 cc-suite-cn 开始审「不受信任的第三方代码」时，升级为必修（加 delimiter/转义）"
     },
     {

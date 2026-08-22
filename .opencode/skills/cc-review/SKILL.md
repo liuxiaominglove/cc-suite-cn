@@ -77,6 +77,7 @@ Load this skill when the user:
 - If all models return empty, state that clearly. Do not fabricate issues.
 - 汇报「已验证」必须能在 `docs/verification.md` 找到对应行（三色置信度 🟢🟡🔴）。
 - 错误路径：文件不存在/空输入 → 提示用户给路径；缺 CLI/API key → 先跑 `pnpm preflight` 自检，别硬跑。
+- **阶段完成定义**：开工前写「本阶段要防的教训 X/Y/Z + 完成验证 A/B/C」（见 AGENTS.md），收尾对照；防坑清单跑 `node scripts/evaluate-models.mjs --preflight` 生成。
 
 ## Report Template (每次工作完总结必带：总体结论 + 行动项 + 三节)
 

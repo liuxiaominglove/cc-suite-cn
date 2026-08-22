@@ -1,5 +1,5 @@
 import { isMainModule } from "./runner-core.mjs";
-import { loadVerdicts, isConfirmed, modelsOf } from "./verdict-log.mjs";
+import { loadVerdicts, isConfirmed, modelsOf, isValidMistakeType } from "./verdict-log.mjs";
 
 export function splitByBatch(log) {
   const confirmed = (log ?? []).filter((v) => isConfirmed(v));
@@ -62,6 +62,23 @@ export function computeProgress(log) {
     };
   }
   return perModel;
+}
+
+export function computeMistakeBreakdown(log) {
+  const byType = {};
+  let total = 0;
+  let unlabeled = 0;
+  for (const v of log ?? []) {
+    if (!v || v.confirmed?.final !== "false") continue;
+    const t = v.confirmed?.mistakeType;
+    if (isValidMistakeType(t)) {
+      byType[t] = (byType[t] ?? 0) + 1;
+      total += 1;
+    } else {
+      unlabeled += 1;
+    }
+  }
+  return { byType, total, unlabeled };
 }
 
 function pct(x) {

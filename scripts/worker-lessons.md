@@ -36,3 +36,7 @@
 - 规则：报告"删 export 无 re-export alias 会破外部 importer"前，先确认项目是否采用「单一真值彻底迁移」——若 import 已全部重连且测试全绿，删 export 是有意设计，不是 bug
 - 实例：scripts/review-runner.mjs 拆 6 模块后仅剩 review/reviewFile + 错误类门面 re-export，evaluate-models 已改从 review-tools/review-context import，无残留 importer
 - 来源：glm/kimi 在 /verify 三轮反复报 re-export 假阳，opencode 实测 grep 全仓无残留 importer + 727 测试全绿
+
+- 规则：报告 prompt injection 前，先核对注入内容来源——仓库内受控文件（如 worker-lessons.md）不是攻击面；真攻击面是「来自不受信源码的 finding」和「来自外部项目文件的 rules」（见 known-risks KR-01）
+- 实例：scripts/evaluate-models.mjs buildAdjudicatorPrompt 注入 lessons 段，collectWorkerLessons 读仓库 worker-lessons.md（编辑权只归 opencode/hy3）
+- 来源：qwen 误报「lessons 未 sanitize 可能 prompt injection」，opencode 终审判假阳（confirmed=false，mistakeType=prompt-injection-misattributed），真风险是 KR-01 的 finding/rules

@@ -217,6 +217,36 @@ describe("buildAdjudicatorPrompt", () => {
     const p = buildAdjudicatorPrompt("x", "code");
     assert.ok(!p.includes("[相关模块源码]"), p);
   });
+
+  it("injects lessons into [评审教训] section when provided", () => {
+    const p = buildAdjudicatorPrompt("x", "code", "", "", "", "- 规则：先 trace 再报");
+    assert.ok(p.includes("[评审教训]"), p);
+    assert.ok(p.includes("先 trace 再报"), p);
+  });
+
+  it("omits lessons section when not provided (backward compat)", () => {
+    const p = buildAdjudicatorPrompt("x", "code");
+    assert.ok(!p.includes("[评审教训]"), p);
+  });
+
+  it("omits lessons for empty/null/whitespace", () => {
+    assert.ok(!buildAdjudicatorPrompt("x", "code", "", "", "", "").includes("[评审教训]"));
+    assert.ok(!buildAdjudicatorPrompt("x", "code", "", "", "", null).includes("[评审教训]"));
+    assert.ok(!buildAdjudicatorPrompt("x", "code", "", "", "", undefined).includes("[评审教训]"));
+    assert.ok(!buildAdjudicatorPrompt("x", "code", "", "", "", "  \n ").includes("[评审教训]"));
+  });
+
+  it("keeps lessons special chars verbatim", () => {
+    const weird = "- 规则：用 $ 与 ` 反引号 ` 与 <tag>";
+    const p = buildAdjudicatorPrompt("x", "code", "", "", "", weird);
+    assert.ok(p.includes(weird), p);
+  });
+
+  it("places lessons before CODE", () => {
+    const p = buildAdjudicatorPrompt("x", "code", "", "", "", "- 规则：先 trace");
+    assert.ok(p.includes("[评审教训]"), "教训段应存在");
+    assert.ok(p.indexOf("[评审教训]") < p.indexOf("CODE:"), p);
+  });
 });
 
 describe("parseVerdict", () => {
@@ -335,6 +365,27 @@ describe("adjudicate", () => {
     await adjudicate({ finding: "~ not expanded", code: "openDb(dbPath)", relatedCode: "export function openDb(p){ return new DatabaseSync(resolveDbPath(p)) }" });
     assert.ok(captured.stdinWritten.includes("[相关模块源码]"), "prompt 应含相关模块段");
     assert.ok(captured.stdinWritten.includes("resolveDbPath"), "prompt 应含相关模块源码");
+  });
+
+  it("passes lessons into the prompt", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"true","evidence":"e"}');
+      return captured;
+    });
+    await adjudicate({ finding: "x", code: "y", lessons: "- 规则：先 trace 再报" });
+    assert.ok(captured.stdinWritten.includes("[评审教训]"), "应注入段头");
+    assert.ok(captured.stdinWritten.includes("先 trace 再报"), "应注入内容");
+  });
+
+  it("omits lessons section when not provided (backward compat)", async () => {
+    let captured = null;
+    setSpawn((cmd, args) => {
+      captured = mockProc('{"verdict":"true","evidence":"e"}');
+      return captured;
+    });
+    await adjudicate({ finding: "x", code: "y" });
+    assert.ok(!captured.stdinWritten.includes("[评审教训]"), "默认不注入");
   });
 });
 
@@ -750,6 +801,23 @@ describe("confirmFindings", () => {
     );
     assert.equal(results[0].ok, false);
   });
+
+  it("透传 mistakeType 给 confirmFn（不传则不透传）", async () => {
+    const seen = [];
+    const confirmFn = async (file, line, finding, opts) => {
+      seen.push(opts);
+      return { confirmed: opts };
+    };
+    await confirmFindings(
+      [
+        { file: "a.js", line: 1, finding: "f1", final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c", mistakeType: "prompt-injection-misattributed" },
+        { file: "b.js", line: 2, finding: "f2", final: "false", reason: "r", independent: { final: "false", reason: "i" }, comparison: "c" },
+      ],
+      { confirmFn }
+    );
+    assert.equal(seen[0].mistakeType, "prompt-injection-misattributed", "应透传 mistakeType");
+    assert.equal(seen[1].mistakeType, undefined, "不传 mistakeType 时不应透传");
+  });
 });
 
 describe("confirmCli", () => {
@@ -830,6 +898,49 @@ describe("cli --arbitrate --project-dir", () => {
     const adjudicateLedgerFn = async (opts) => { captured = opts.projectDir ?? "none"; return []; };
     await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
     assert.equal(captured, "none");
+  });
+});
+
+describe("cli --arbitrate resolveLessons", () => {
+  it("把 resolveLessons 函数传给 adjudicateLedgerFn", async () => {
+    let captured = null;
+    const adjudicateLedgerFn = async (opts) => { captured = opts.resolveLessons; return []; };
+    await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.equal(typeof captured, "function", "resolveLessons 应是函数");
+  });
+
+  it("resolveLessons 调用返回字符串（接 collectWorkerLessons）", async () => {
+    let captured = null;
+    const adjudicateLedgerFn = async (opts) => { captured = await opts.resolveLessons(); return []; };
+    await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: () => {} }, stderr: { write: () => {} } });
+    assert.equal(typeof captured, "string", "resolveLessons 返回字符串");
+  });
+});
+
+describe("cli --preflight", () => {
+  it("打印防坑清单", async () => {
+    const loadLedger = async () => [
+      { file: "a.js", finding: "f1", fixed: { rootCause: "边界" } },
+      { file: "b.js", finding: "f2", confirmed: { final: "false", mistakeType: "by-design" } },
+    ];
+    let out = "";
+    await cli(["--preflight"], { loadLedger, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.ok(out.includes("修 bug 时警惕同类"), out);
+    assert.ok(out.includes("终审时警惕同类假阳"), out);
+    assert.ok(out.endsWith("\n"), "非空输出应以换行结尾");
+  });
+
+  it("空账本打印无历史教训提示", async () => {
+    let out = "";
+    await cli(["--preflight"], { loadLedger: async () => [], stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.ok(out.includes("无历史教训"), out);
+  });
+
+  it("账本读取失败打 stderr 警告不崩", async () => {
+    let err = "";
+    let out = "";
+    await cli(["--preflight"], { loadLedger: async () => { throw new Error("boom"); }, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } } });
+    assert.ok(err.includes("账本读取失败"), err);
   });
 });
 
@@ -941,5 +1052,39 @@ describe("adjudicateLedger", () => {
     const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, projectDir: "/p" });
     assert.equal(results.find((r) => r.finding === "f1").projectDir, "/external/project", "有自身 projectDir 的保留原值");
     assert.equal(results.find((r) => r.finding === "f2").projectDir, "/p", "无自身 projectDir 的用传入值");
+  });
+
+  it("resolveLessons 提供给每条 finding 的 adjudicateFn", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f1" }, { file: "b.js", line: 2, finding: "f2" }];
+    const resolveCode = async () => "code";
+    const seen = [];
+    const adjudicateFn = async (opts) => { seen.push(opts.lessons); return { verdict: "false", evidence: "e" }; };
+    await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, resolveLessons: async () => "- 规则：先 trace" });
+    assert.deepEqual(seen, ["- 规则：先 trace", "- 规则：先 trace"], "每条 finding 都收到 lessons");
+  });
+
+  it("不传 resolveLessons 时 lessons 为空串（向后兼容）", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f1" }];
+    let captured = null;
+    const adjudicateFn = async (opts) => { captured = opts.lessons; return { verdict: "false", evidence: "e" }; };
+    await adjudicateLedger({ load: async () => log, resolveCode: async () => "code", adjudicateFn, persist: async () => {} });
+    assert.equal(captured, "", "默认空串不注入");
+  });
+
+  it("resolveLessons 返回 null 不抛、透传 null", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f1" }];
+    let captured = "sentinel";
+    const adjudicateFn = async (opts) => { captured = opts.lessons; return { verdict: "false", evidence: "e" }; };
+    await adjudicateLedger({ load: async () => log, resolveCode: async () => "code", adjudicateFn, persist: async () => {}, resolveLessons: async () => null });
+    assert.equal(captured, null);
+  });
+
+  it("resolveLessons 返回含换行/特殊字符原样透传", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f1" }];
+    let captured = null;
+    const weird = "- 规则：多行\n第二行 $ 与 ` 反引号";
+    const adjudicateFn = async (opts) => { captured = opts.lessons; return { verdict: "false", evidence: "e" }; };
+    await adjudicateLedger({ load: async () => log, resolveCode: async () => "code", adjudicateFn, persist: async () => {}, resolveLessons: async () => weird });
+    assert.equal(captured, weird);
   });
 });

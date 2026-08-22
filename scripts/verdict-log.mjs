@@ -5,6 +5,22 @@ import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 
 export const VERDICT_LOG_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "../.cc-suite-cn/verdict-log.json");
 
+export const MISTAKE_TYPES = [
+  "trigger-not-reproducible",
+  "by-design",
+  "param-assembled-elsewhere",
+  "path-normalized",
+  "re-export-by-design",
+  "regex-quantifier-too-narrow",
+  "callback-index-pollution",
+  "prompt-injection-misattributed",
+  "unknown",
+];
+
+export function isValidMistakeType(v) {
+  return typeof v === "string" && MISTAKE_TYPES.includes(v);
+}
+
 export function hashContent(content) {
   return createHash("sha256").update(String(content ?? "")).digest("hex");
 }
@@ -184,9 +200,12 @@ export async function markFixed(file, line, finding, { commit, testEvidence, roo
   });
 }
 
-export async function confirmVerdict(file, line, finding, { final, reason, independent = null, comparison = "", confirmedAt = new Date().toISOString() }, filePath = VERDICT_LOG_PATH) {
+export async function confirmVerdict(file, line, finding, { final, reason, independent = null, comparison = "", confirmedAt = new Date().toISOString(), mistakeType = null }, filePath = VERDICT_LOG_PATH) {
   if (final !== "true" && final !== "false") {
     throw new Error(`confirmVerdict final must be "true" or "false", got: ${final}`);
+  }
+  if (final === "false" && mistakeType != null && !isValidMistakeType(mistakeType)) {
+    throw new Error(`mistakeType 非法，应在 [${MISTAKE_TYPES.join("|")}] 中，got: ${JSON.stringify(mistakeType)}`);
   }
   if (typeof reason !== "string" || !reason.trim()) {
     throw new Error("confirmVerdict reason must be a non-empty string (终审依据不能为空)");
@@ -215,6 +234,7 @@ export async function confirmVerdict(file, line, finding, { final, reason, indep
         independent: { final: independent.final, reason: independent.reason },
         comparison,
         confirmedAt,
+        ...(final === "false" && mistakeType != null ? { mistakeType } : {}),
       };
       await writeVerdictFile(log, filePath);
       return target;
