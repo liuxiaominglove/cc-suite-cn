@@ -61,6 +61,35 @@ export function verdictFromFindings(workers) {
   return "clean";
 }
 
+// KR-01：prompt injection（buildAdjudicatorPrompt/buildCriticPrompt/buildSelfCheckPrompt 直接插值），
+// 低风险（攻击者=自己，无信任边界），已登记 known-risks 搁置；qwen 对此反复误报（见 KR-01 whyDeferred）。
+// 降级规则硬编码在此，将来规则变多再迁 known-risks 字段（单一数据源）。
+export const LOW_RISK_RULE_REF = "KR-01";
+
+const LOW_RISK_FINDING_RULES = [
+  {
+    files: ["scripts/evaluate-models.mjs", "scripts/review-critic.mjs"],
+    findingPattern: /prompt injection|sanitiz/i,
+  },
+];
+
+export function isKnownLowRiskFinding(issue) {
+  if (!issue || typeof issue !== "object") return false;
+  const file = issue.file ?? "";
+  const finding = issue.finding ?? "";
+  return LOW_RISK_FINDING_RULES.some((r) => r.files.includes(file) && r.findingPattern.test(finding));
+}
+
+// fail-closed：只降 medium；仅当 worker 的所有 issues 都是已知低风险才降，混报/high/low/unknown 一律不碰。
+export function downgradeKnownLowRisk(workers) {
+  return (workers ?? []).map((w) => {
+    if (!w || w.severity !== "medium") return w;
+    const issues = w.issues ?? [];
+    if (issues.length === 0) return w;
+    return issues.every(isKnownLowRiskFinding) ? { ...w, severity: "low", downgraded: true } : w;
+  });
+}
+
 // 判断当前 diff 的代码文件 hash 是否与上次复审标记一致（一致 = 改动未变，拒绝重复审）。
 export function isDiffUnchanged(gate, currentHashes) {
   if (!gate) return false;

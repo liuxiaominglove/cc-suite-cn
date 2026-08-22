@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { decide, isCodeFile, markReviewed, stageHashes, loadGate, verdictFromFindings, isDiffUnchanged } from "./review-gate.mjs";
+import { decide, isCodeFile, markReviewed, stageHashes, loadGate, verdictFromFindings, isDiffUnchanged, downgradeKnownLowRisk, isKnownLowRiskFinding } from "./review-gate.mjs";
 import { hashContent } from "./verdict-log.mjs";
 
 const GATE = fileURLToPath(new URL("./review-gate.mjs", import.meta.url));
@@ -286,5 +286,76 @@ describe("CLI --check-stale 集成", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("downgradeKnownLowRisk", () => {
+  const pi = (file = "scripts/evaluate-models.mjs") => ({ file, line: 1, finding: "lessons parameter not sanitized for prompt injection" });
+
+  it("全低风险 medium 降为 low", () => {
+    const out = downgradeKnownLowRisk([{ severity: "medium", issues: [pi(), pi()] }]);
+    assert.equal(out[0].severity, "low");
+    assert.equal(out[0].downgraded, true, "降级应带 downgraded 标记");
+  });
+
+  it("不降级不带 downgraded 字段", () => {
+    const out = downgradeKnownLowRisk([
+      { severity: "medium", issues: [pi(), { file: "a.js", line: 2, finding: "null deref crash" }] },
+    ]);
+    assert.equal(out[0].severity, "medium");
+    assert.ok(!("downgraded" in out[0]), "不降级不应带 downgraded 字段");
+  });
+
+  it("high 绝不降且不带 downgraded", () => {
+    const out = downgradeKnownLowRisk([{ severity: "high", issues: [pi()] }]);
+    assert.equal(out[0].severity, "high");
+    assert.ok(!("downgraded" in out[0]), "high 不降级不应带 downgraded");
+  });
+
+  it("low 不碰", () => {
+    const out = downgradeKnownLowRisk([{ severity: "low", issues: [pi()] }]);
+    assert.equal(out[0].severity, "low");
+  });
+
+  it("unknown/缺 severity 不碰", () => {
+    assert.equal(downgradeKnownLowRisk([{ severity: "unknown", issues: [pi()] }])[0].severity, "unknown");
+    assert.equal(downgradeKnownLowRisk([{ issues: [pi()] }])[0].severity, undefined);
+  });
+
+  it("无 issues 不降", () => {
+    const out = downgradeKnownLowRisk([{ severity: "medium", issues: [] }]);
+    assert.equal(out[0].severity, "medium");
+  });
+
+  it("file 不匹配不降", () => {
+    const out = downgradeKnownLowRisk([{ severity: "medium", issues: [{ file: "scripts/other.mjs", finding: "prompt injection" }] }]);
+    assert.equal(out[0].severity, "medium");
+  });
+
+  it("workers null/空 不崩", () => {
+    assert.deepEqual(downgradeKnownLowRisk(null), []);
+    assert.deepEqual(downgradeKnownLowRisk([]), []);
+  });
+});
+
+describe("isKnownLowRiskFinding", () => {
+  it("file + prompt injection 关键词 → true", () => {
+    assert.equal(isKnownLowRiskFinding({ file: "scripts/evaluate-models.mjs", finding: "prompt injection" }), true);
+    assert.equal(isKnownLowRiskFinding({ file: "scripts/review-critic.mjs", finding: "not sanitized" }), true);
+  });
+
+  it("dependency injection 不误匹配", () => {
+    assert.equal(isKnownLowRiskFinding({ file: "scripts/evaluate-models.mjs", finding: "dependency injection" }), false);
+  });
+
+  it("file 不匹配 → false", () => {
+    assert.equal(isKnownLowRiskFinding({ file: "scripts/other.mjs", finding: "prompt injection" }), false);
+  });
+
+  it("null/缺字段 → false 不崩", () => {
+    assert.equal(isKnownLowRiskFinding(null), false);
+    assert.equal(isKnownLowRiskFinding(undefined), false);
+    assert.equal(isKnownLowRiskFinding({}), false);
+    assert.equal(isKnownLowRiskFinding({ file: "scripts/evaluate-models.mjs" }), false);
   });
 });

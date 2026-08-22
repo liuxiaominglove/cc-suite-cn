@@ -510,6 +510,42 @@ describe("runAudit", () => {
     );
   });
 
+  it("verdict 消费已知低风险：result.workers 降级 + verdict clean + 落库保持原始", async () => {
+    const review = async ({ model }) => {
+      if (model === "qwen3-coder-plus") {
+        return { success: true, severity: "medium", issues: [{ file: "scripts/evaluate-models.mjs", line: 1, finding: "lessons not sanitized for prompt injection" }], summary: "x" };
+      }
+      return { success: true, severity: "low", issues: [], summary: "x" };
+    };
+    let persistedWorkers = null;
+    const result = await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: (workers) => { persistedWorkers = workers; return []; } });
+    assert.equal(result.verdict, "clean");
+    const qwenResult = result.workers.find((w) => w.model === "qwen3-coder-plus");
+    assert.equal(qwenResult.severity, "low", "result.workers 应降级");
+    assert.equal(qwenResult.downgraded, true, "result.workers 应带 downgraded 标记");
+    const qwenPersisted = persistedWorkers.find((w) => w.model === "qwen3-coder-plus");
+    assert.equal(qwenPersisted.severity, "medium", "落库应保持原始 severity");
+    assert.ok(!("downgraded" in qwenPersisted), "落库不应带 downgraded 标记");
+  });
+
+  it("混报不降：qwen 报真 bug 时 verdict 保持 medium", async () => {
+    const review = async ({ model }) => {
+      if (model === "qwen3-coder-plus") {
+        return {
+          success: true, severity: "medium",
+          issues: [
+            { file: "scripts/evaluate-models.mjs", line: 1, finding: "lessons not sanitized for prompt injection" },
+            { file: "a.js", line: 2, finding: "null deref crash" },
+          ],
+          summary: "x",
+        };
+      }
+      return { success: true, severity: "low", issues: [], summary: "x" };
+    };
+    const result = await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: () => [] });
+    assert.equal(result.verdict, "medium");
+  });
+
   it("captures a failing worker without rejecting", async () => {
     const review = async ({ model }) => {
       if (model === "kimi-k2.7-code") throw new Error("kimi down");

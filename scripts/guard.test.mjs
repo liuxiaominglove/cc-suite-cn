@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, findInlineMainModule, findUnlistedCanonical, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
+import { findDuplicateCopies, findMissingCanonical, findStaleReferences, runGuard, findDeadReferences, findOrphanBaselineKeys, findOrphanGlobalRules, findKnownRiskDrift, findInlineMainModule, findUnlistedCanonical, findDowngradeRuleDrift, COPY_LOCATIONS, CANONICAL_FILES, STALE_GLOBAL_PATHS } from "./guard.mjs";
 import { homedir } from "node:os";
 
 function fakeExists(present) {
@@ -357,6 +357,48 @@ describe("findKnownRiskDrift", () => {
     const problems = findKnownRiskDrift({ knownRisksPath: "/nonexistent.json", verificationPath: "/nonexistent.md", read: throwing });
     assert.ok(problems.length >= 1, "缺失应报问题而非静默 []");
   });
+
+  it("检测 open 缺 riskLevel", () => {
+    const data = { risks: [{ id: "KR-01", status: "open", title: "a", reassessWhen: "x", whyDeferred: "y" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data), "verification.md": verification });
+    const problems = findKnownRiskDrift({ knownRisksPath: "known-risks.json", verificationPath: "verification.md", read });
+    assert.ok(problems.some((p) => p.includes("riskLevel") || p.includes("KR-01")));
+  });
+
+describe("findDowngradeRuleDrift", () => {
+  it("KR-01 open 低风险 → 无 drift", () => {
+    const data = { risks: [{ id: "KR-01", status: "open", title: "prompt injection", riskLevel: "低", reassessWhen: "x", whyDeferred: "y" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data) });
+    assert.deepEqual(findDowngradeRuleDrift({ knownRisksPath: "known-risks.json", read }), []);
+  });
+
+  it("KR-01 缺失 → drift", () => {
+    const data = { risks: [{ id: "TR-01", status: "resolved", title: "a" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data) });
+    const problems = findDowngradeRuleDrift({ knownRisksPath: "known-risks.json", read });
+    assert.ok(problems.some((p) => p.includes("不存在")), problems.join(";"));
+  });
+
+  it("KR-01 已 resolved → drift", () => {
+    const data = { risks: [{ id: "KR-01", status: "resolved", title: "prompt injection", anchor: "M-1" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data) });
+    const problems = findDowngradeRuleDrift({ knownRisksPath: "known-risks.json", read });
+    assert.ok(problems.some((p) => p.includes("resolved") || p.includes("非 open")), problems.join(";"));
+  });
+
+  it("KR-01 风险升级（高）→ drift", () => {
+    const data = { risks: [{ id: "KR-01", status: "open", title: "prompt injection", riskLevel: "高", reassessWhen: "x", whyDeferred: "y" }] };
+    const read = fakeRead({ "known-risks.json": JSON.stringify(data) });
+    const problems = findDowngradeRuleDrift({ knownRisksPath: "known-risks.json", read });
+    assert.ok(problems.some((p) => p.includes("风险等级") || p.includes("高")), problems.join(";"));
+  });
+
+  it("known-risks 缺失 → drift", () => {
+    const throwing = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
+    const problems = findDowngradeRuleDrift({ knownRisksPath: "/nonexistent.json", read: throwing });
+    assert.ok(problems.length >= 1, "缺失应报 drift 而非静默 []");
+  });
+});
 
   it("文件损坏返回问题", () => {
     const read = fakeRead({ "known-risks.json": "{ bad json", "verification.md": "" });

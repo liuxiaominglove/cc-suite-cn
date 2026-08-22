@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { FIND_BUG_WORKERS, VERIFY_WORKERS } from "./models.mjs";
 import { isMainModule } from "./runner-core.mjs";
-import { verdictFromFindings } from "./review-gate.mjs";
+import { verdictFromFindings, downgradeKnownLowRisk } from "./review-gate.mjs";
 import { acquireLock, releaseLock } from "./verdict-log.mjs";
 import { findProjectRoot } from "./audit-baseline.mjs";
 
@@ -406,7 +406,8 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
     entries = await persistFindings(workers, { projectDir: resolvedProjectDir, upsert, dedup });
   }
 
-  return { workers, entries, verdict: verdictFromFindings(workers) };
+  const downgraded = downgradeKnownLowRisk(workers);
+  return { workers: downgraded, entries, verdict: verdictFromFindings(downgraded) };
 }
 
 export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd() } = {}) {

@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve, dirname, basename, isAbsolute, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMainModule } from "./runner-core.mjs";
+import { LOW_RISK_RULE_REF } from "./review-gate.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = homedir();
@@ -172,6 +173,7 @@ export function runGuard({ copies = COPY_LOCATIONS, canonicals = CANONICAL_FILES
     orphanBaselineKeys: findOrphanBaselineKeys({ baselinePath: join(root, ".cc-suite-cn/audit-baseline.json"), read, exists }),
     orphanGlobalRules: findOrphanGlobalRules({ read }),
     knownRiskDrift: findKnownRiskDrift({ read, root }),
+    downgradeRuleDrift: findDowngradeRuleDrift({ knownRisksPath: join(root, "scripts/known-risks.json"), read }),
     inlineMainModule: findInlineMainModule({ root, read }),
     unlistedCanonical: findUnlistedCanonical({ root, listFiles, canonicals }),
   };
@@ -305,6 +307,35 @@ function anchorInVerification(text, anchor) {
   return re.test(text);
 }
 
+// 降级规则守门员：校验 review-gate.mjs 的降级规则引用的 KR 项仍存在、仍 open、仍低风险。
+// 防 fail-open 漂移——KR-01 一旦被关闭/升级，降级规则还傻傻降级就会漏拦真风险。
+export function findDowngradeRuleDrift({ knownRisksPath = join(REPO_ROOT, "scripts/known-risks.json"), read = readFileSync, ruleRef = LOW_RISK_RULE_REF } = {}) {
+  let raw;
+  try {
+    raw = read(knownRisksPath);
+  } catch {
+    return [`known-risks.json 缺失或不可读，无法校验降级规则（${ruleRef}）`];
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [`known-risks.json 不是合法 JSON，无法校验降级规则（${ruleRef}）`];
+  }
+  const risks = Array.isArray(parsed?.risks) ? parsed.risks : [];
+  const target = risks.find((r) => r?.id === ruleRef);
+  if (!target) {
+    return [`降级规则引用的 ${ruleRef} 在 known-risks 中不存在（规则漂移）`];
+  }
+  if (target.status !== "open") {
+    return [`降级规则引用的 ${ruleRef} 状态为 ${target.status}（非 open），降级规则可能已失效`];
+  }
+  if (target.riskLevel !== "低") {
+    return [`降级规则引用的 ${ruleRef} 风险等级为 ${target.riskLevel}（非低），不该再降级`];
+  }
+  return [];
+}
+
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -336,7 +367,7 @@ export function findOrphanBaselineKeys({ baselinePath = join(REPO_ROOT, ".cc-sui
 }
 
 if (isMainModule(import.meta.url)) {
-  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift, inlineMainModule, unlistedCanonical } = runGuard();
+  const { dupes, missing, staleRefs, deadRefs, orphanBaselineKeys, orphanGlobalRules, knownRiskDrift, downgradeRuleDrift, inlineMainModule, unlistedCanonical } = runGuard();
   const problems = [
     ...dupes.map((p) => `duplicate copy: ${p}`),
     ...missing.map((rel) => `missing canonical: ${rel}`),
@@ -345,6 +376,7 @@ if (isMainModule(import.meta.url)) {
     ...orphanBaselineKeys,
     ...orphanGlobalRules.map((name) => `orphan global rule (未挂载到 opencode.jsonc instructions): ${name}`),
     ...knownRiskDrift,
+    ...downgradeRuleDrift.map((p) => `downgrade rule drift: ${p}`),
     ...inlineMainModule.map((p) => `inline isMainModule drift (应改用 runner-core.isMainModule): ${p}`),
     ...unlistedCanonical.map((p) => `unlisted canonical script (漏登记，请加入 CANONICAL_FILES): ${p}`),
   ];
