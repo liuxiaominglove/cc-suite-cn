@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { REPORT_REQUIRED_SECTIONS, REPORT_MARKER, findMissingReportSections } from "./report-sections.mjs";
@@ -263,5 +263,19 @@ describe("报告必带项（report-sections 单一数据源）", () => {
     assert.ok(c.includes(REPORT_MARKER), "verification.md 应有 report-required 标记");
     const problems = findMissingReportSections(c);
     assert.deepEqual(problems, [], `落账报告缺必带项：${JSON.stringify(problems)}`);
+  });
+});
+
+describe("ADR 三段校验（决策纪律落地）", () => {
+  it("docs/adr 下每个 ADR 含「本质/最佳实践/方案」三段", () => {
+    const adrDir = join(ROOT, "docs", "adr");
+    if (!existsSync(adrDir)) return; // 无 ADR 目录 = 无决策，通过
+    const files = readdirSync(adrDir).filter((f) => f.endsWith(".md"));
+    for (const f of files) {
+      const c = readFileSync(join(adrDir, f), "utf8");
+      assert.ok(c.includes("### 本质"), `${f} 缺「### 本质」段`);
+      assert.ok(c.includes("### 最佳实践"), `${f} 缺「### 最佳实践」段`);
+      assert.ok(c.includes("### 方案"), `${f} 缺「### 方案」段`);
+    }
   });
 });

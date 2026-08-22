@@ -103,6 +103,8 @@ After the review, you'll see a comparison report showing what each model found, 
 
 证据不足时，直接说「这是伪决策，现在不该做」+ 缺什么证据，不许硬给选项凑数。区分「确定 / 推断 / 不知道」，不许把推断说成确定。
 
+关键决策做出后，落盘成 ADR（`docs/adr/000N-英文-slug.md`），「## 决策」段内必须含「### 本质 / ### 最佳实践 / ### 方案」三个子标题；`docs-consistency.test.mjs` 校验缺段 fail。
+
 > 教训（2026-08-22）：opencode 曾把「判断题」框成「选择题」——先给直觉 A/B，被用户追问「本质/最佳实践」才补深度分析，导致 A/B 常偏离本质。已把全局规则从「三问（自问）」升级为「三段（强制输出，可审计）」。
 
 ## TDD Discipline
