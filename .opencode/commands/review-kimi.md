@@ -15,6 +15,7 @@ agent: build
 | (empty) | "请指定文件或目录，例如 `/review-kimi src/file.ts`" |
 | file path | Target = 该文件（相对 cwd 或绝对） |
 | directory path | 用 `--dir` 模式批量评审目录下所有源文件 |
+| 路径不存在/不可读 | 提示用户路径无效，不继续 |
 
 ## Step 2: Run Review
 
@@ -38,5 +39,5 @@ node scripts/review-runner.mjs --backend kimi --model kimi-k2.7-code --dir "<tar
 
 ## Critical Rules
 
-- Kimi 是**只读评审**，代码走 stdin，评审员碰不到真实文件；不要让它修改任何文件
-- 不伪造问题——评审员返回空就如实说
+- Kimi 是**只读评审**，代码走 stdin，施工队（kimi）碰不到真实文件；不要让它修改任何文件
+- 不伪造问题——kimi 返回空就如实说

@@ -38,15 +38,10 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 完整安装步骤见 `README.md` 的 Installation 一节。速查：
 
 ```bash
-# Install worker CLIs
-npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code
-
-# Set API keys (add to ~/.zshrc for persistence)
-export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼）
+npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code  # worker CLIs
+export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼），写入 ~/.zshrc 持久化
 export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
-
-# codebuddy CLI 走平台账号登录态（GLM-5.2 + Hy3 网关），无需单独 key
-# 自检：pnpm preflight
+# codebuddy 走平台账号登录态（GLM-5.2 + Hy3），无需单独 key；自检：pnpm preflight
 ```
 
 ## Commands
@@ -56,12 +51,12 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 | `pnpm test` | Run full test suite (loads env from `~/.zshrc`) |
 | `pnpm test:unit` | Run unit tests only (no env needed) |
 | `pnpm test:e2e` | Run end-to-end tests |
-| `pnpm verify:e2e` | 一键重跑 4 评审员只读 + 真后台真取消 |
+| `pnpm verify:e2e` | 一键重跑 4 施工队只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
 | `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
 | `/fix <path>` | 修复闭环五步：找 → 批判 → 裁 → 修 bug(TDD) → 验证（含 /verify 只审 diff） |
 | `/fix-incremental <project-dir>` | 增量修复闭环：只对自基线以来变更的文件跑五步，修完自动更新基线 |
-| `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审（分机 / 批判员） |
+| `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审 / 批判员（必须先 /audit，只判 finding） |
 | `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
 | `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
@@ -80,17 +75,6 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 
 > 教训（2026-08-20）：`/verify`（修 bug 后唯一复审）曾与 `pnpm verify`（release 门禁）因同名被混淆——opencode 拿「门禁不进编辑循环」当借口，该跑 `/verify` 的没跑、还标了 ⏸️。已改名 `pnpm verify:e2e` + 上文「复审 vs 门禁」对照表 + ⏸️ 只许三种理由，三重防再犯。别再串。
 
-## Usage
-
-```
-/audit src/file.ts          →  Run multi-model review on a file
-/audit src/                 →  Review all changed files in a directory
-/audit                      →  Dialog mode — specify which files
-/review <path>              →  Same as /audit
-```
-
-After the review, you'll see a comparison report showing what each model found, where they agree, and where they differ.
-
 ## 决策纪律（decision-discipline）
 
 全局规则 `~/.config/opencode/rules/decision-discipline.md` applies everywhere。项目侧 instantiation：
@@ -103,13 +87,9 @@ After the review, you'll see a comparison report showing what each model found, 
 
 证据不足时，直接说「这是伪决策，现在不该做」+ 缺什么证据，不许硬给选项凑数。区分「确定 / 推断 / 不知道」，不许把推断说成确定。
 
-关键决策做出后，落盘成 ADR（`docs/adr/000N-英文-slug.md`），「## 决策」段内必须含「### 本质 / ### 最佳实践 / ### 方案」三个子标题；`docs-consistency.test.mjs` 校验缺段 fail。
-
-> 教训（2026-08-22）：opencode 曾把「判断题」框成「选择题」——先给直觉 A/B，被用户追问「本质/最佳实践」才补深度分析，导致 A/B 常偏离本质。已把全局规则从「三问（自问）」升级为「三段（强制输出，可审计）」。
+关键决策做出后，落盘成 ADR（`docs/adr/000N-英文-slug.md`），「## 决策」段内必须含「### 本质 / ### 最佳实践 / ### 方案」三个子标题；`docs-consistency.test.mjs` 校验缺段 fail。（教训：曾把「判断题」框成「选择题」致 A/B 偏离本质，故升级为强制三段。）
 
 ## TDD Discipline
-
-This project follows test-driven development (RED → GREEN → REFACTOR).
 
 - Test files: `*.test.mjs` alongside source files
 - Only mock external boundaries (network, filesystem, child_process) — never mock business logic
@@ -141,7 +121,7 @@ This project follows test-driven development (RED → GREEN → REFACTOR).
 
 ### 施工队调用纪律（外部 CLI 并发）
 
-- **默认串行**：多文件/多任务批量审（`/audit` 一次审多个文件）时，`--run-audit` 逐个跑；不要一口气并行拉起十几个 codebuddy/kimi 进程（会撞 CLI 限流/超时）。
+- **默认串行**：多文件/多任务批量审（`/audit` 一次审多个文件）时，`--run-audit` 逐个跑；禁止并行拉起多个 codebuddy/kimi 进程（会撞 CLI 限流/超时）。
 - **单文件内并行保留**：一个文件内 glm+kimi 双施工队并行是设计内行为，保留。
 - **超时后核对真实进程**：超时或账本显示「running」后，用 `ps` 核对真实进程是否还在；「running」可能是超时残留的僵尸记录，不要轻信。
 
@@ -161,59 +141,17 @@ The global rule `~/.config/opencode/rules/verification-discipline.md` applies ev
 | 命令 | 是什么 | 何时跑 | 谁发起 | 跑几次 |
 |------|--------|--------|--------|--------|
 | `/verify` | 修 bug 后唯一复审（只审 diff） | 每次改完代码必跑 | opencode 自动 | 1 次 |
-| `pnpm verify:e2e` | release 门禁（重跑 4 评审员 + 真后台） | 仅 release / 推前 | 用户手动 | 1 次 |
+| `pnpm verify:e2e` | release 门禁（重跑 4 施工队 + 真后台） | 仅 release / 推前 | 用户手动 | 1 次 |
 | `pnpm test:unit` | 内循环单测 | 改代码随手跑 | 任意 | 不限 |
 
 ## 汇报惯例（每次 cc-suite-cn 工作完的总结必带：总体结论 + 行动项 + 三节）
 
-所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/fix-incremental` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/fix-incremental` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」（三节 = 本次各 AI 表现 / 本次触达功能 / 本次各 AI 进步；纯查询命令 `/jobs` `/result` `/cancel` `/trace` 不强制）。节名单一数据源：`scripts/report-sections.mjs`；**完整模板与写法详见 `.opencode/skills/cc-review/SKILL.md`「Report Template」段**（触发评审的命令都会加载该 skill）。红线（常驻生效）：
 
-### 总体结论（必带）
-
-按 actionable findings 的严重度给一句中文结论：
-- high > 0 → **需整改**（high = 崩溃/安全/数据损坏）
-- medium > 0 → **需关注**
-- 否则 → **健康**
-
-无 findings 也写「健康」，不许省略。
-
-### 行动项（必带）
-
-列 verdict=true 的 actionable findings，按 high→medium→low 排序，每条 `[严重度] file:line — finding`。无 actionable 写「无」。
-
-### 第一节：本次各 AI 表现
-
-- **底线（每次必加）**：客观计数——各模型 `success` / `issue 数`（从 `jobs.mjs --get` 的 `result.workers` 读，不编）。
-- **加码（仅当本次实际做了 triage 或裁决时）**：升级为「真 bug / 假阳 / 噪音 / 共识」+ `/evaluate` 的 precision。**没做 triage 就写"未 triage，仅计数"，不许编"谁表现好"。**
-
-### 第二节：本次触达功能
-
-对照 `docs/features.md` 基线清单，逐项标三色：🟢 实测通过 / 🟡 机制或部分 / 🔴 失败；**本次没用的功能标"未触达"，不算 🟢**。
-
-### 第三节：本次各 AI 进步（误报率，基于错题本）
-
-跑 `node scripts/progress.mjs` 取数，每模型一行「历史误报率 X% → 本次 Y%」+ 方向（↑进步/↓退步/—持平/无历史/无本次）。**数据源 = opencode 终审写回的 `confirmed.final` 标签**（`/fix` 全量打标），不是编的。**没跑 `/fix` 终审写回就写"无终审数据，不算进步"**。误报率越低越好，↓=退步。
-
-### 必带：复审状态（修 bug 类任务的总结）
-
-凡**修了代码**的任务，总结里必须显式声明复审状态，两种：
-
-- 🟢 **已复审**：/verify 只审 diff（唯一复审）跑过、结论如何。
-- ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**。⏸️ 只允许以下三种客观理由，此外一律违规：
-  1. `git diff` 空（无改动可审）
-  2. 真机/UI 验证需用户授权/输密码/在场
-  3. 评审员空输出且重试耗尽
-  > 「门禁不进编辑循环」**不是** ⏸️ 的合法理由——那条管 `pnpm verify:e2e`（release 门禁），与 `/verify`（修 bug 后唯一复审）无关，两者别混。
-
-**只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/verify` 只审 diff 是唯一复审，没做成必须标 ⏸️。）
-
-**评审员空输出/超时/error = 复审门没关上，不是"部分通过"**：必须重试到拿到非空结论（`review`/`criticize`/`adjudicate` 已内置空输出重试；仍空就重跑一次 job），重试耗尽才允许标 ⏸️。**非 🟢 一律不 commit**，不得拿"一个评审员过了、另一个失败了"当半审放行（教训：synthai 那次 glm 空输出——当时复审评审员还是 glm+kimi——若直接标 🟡 就漏了它事后抓到的 3 个回归）。
-
-### 铁律（防惯例退化成空话）
-
-1. **结论 ≤ 证据**：每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出；查不到就标 🔴 或"未触达"。
-2. **负向必测**：凡写"能拦住/能禁止"，必须实测"确实拦住了"。
-3. 三节 + 复审状态只是追加，不替代原有的评审/修复内容汇报。
+1. **总体结论**按严重度分级（high>0 需整改 / medium>0 需关注 / 否则健康）；**行动项**列 verdict=true 的 findings。
+2. **复审状态**：修了代码的任务必须声明 🟢 已复审 或 ⏸️ 尚未复审；⏸️ 只许三种理由——git diff 空 / 真机需用户在场 / 施工队空输出且重试耗尽。**非 🟢 一律不 commit**，禁止用「已修复」掩盖。
+3. **施工队空输出/超时/error = 复审门没关上**，重试到非空结论，重试耗尽才许标 ⏸️。
+4. **结论 ≤ 证据**：每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出；**负向必测**。
 
 ## Single Source of Truth
 

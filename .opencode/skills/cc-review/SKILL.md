@@ -47,7 +47,8 @@ Load this skill when the user:
 **命令 → 步骤映射**（不是所有命令都跑全五步）：
 - `/audit` / `/review`：步骤 1（找 bug）
 - `/audit-full`：步骤 1 + 2 + 3（找 bug + 批判 + 裁决，不修）
-- `/review-kimi` / `/review-qwen`：单壳评审（只一个模型，非双施工队）
+- `/review-kimi`：单壳评审（kimi 直接扫代码，只一个模型，非双施工队）
+- `/review-qwen`：批判员（必须先 `/audit`，只判 finding 清单，不重新扫代码）
 - `/evaluate --arbitrate`：步骤 3（裁决）
 - `/fix`：步骤 1-5（完整五步闭环）
 - `/fix-incremental`：步骤 1-5 + 基线检测（只对自基线以来变更的文件，修完自动更新基线）
@@ -81,7 +82,7 @@ Load this skill when the user:
 
 ## Report Template (每次工作完总结必带：总体结论 + 行动项 + 三节)
 
-每条 cc-suite-cn 命令的总结，末尾固定附「总体结论 + 行动项 + 三节」（详见 `AGENTS.md`「汇报惯例」）：
+所有**触发评审的命令**（`/audit` `/review` `/review-kimi` `/review-qwen` `/evaluate` `/verify` `/fix` `/fix-incremental` `/audit-full` `pnpm self-audit`）的总结，末尾固定附「总体结论 + 行动项 + 三节」。**纯查询命令**（`/jobs` `/result` `/cancel` `/trace`）不触发评审，不强制。节名单一数据源：`scripts/report-sections.mjs`。
 
 ```
 ## 总体结论
@@ -103,9 +104,28 @@ verdict=true 的 actionable findings，按 high→medium→low 排序，每条 [
 没跑 /fix 终审写回就写"无终审数据，不算进步"。
 ```
 
-- 每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出。
-- 总体结论 + 行动项 + 三节只是追加，不替代原有评审/修复内容汇报。
 - **终审两步判真**（凡做了 `/fix` 终审的任务必带）：逐条写「步骤 1 独立判 X / 步骤 2 对比上游后终判 Y / 与上游一致或分歧」，两步都不能糊弄。
+
+### 必带：复审状态（修 bug 类任务的总结）
+
+凡**修了代码**的任务，总结里必须显式声明复审状态，两种：
+
+- 🟢 **已复审**：/verify 只审 diff（唯一复审）跑过、结论如何。
+- ⏸️ **尚未复审**：**卡在哪 + 需要用户做什么**。⏸️ 只允许以下三种客观理由，此外一律违规：
+  1. `git diff` 空（无改动可审）
+  2. 真机/UI 验证需用户授权/输密码/在场
+  3. 施工队空输出且重试耗尽
+  > 「门禁不进编辑循环」**不是** ⏸️ 的合法理由——那条管 `pnpm verify:e2e`（release 门禁），与 `/verify`（修 bug 后唯一复审）无关，两者别混。
+
+**只要不是 🟢，必须写「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**（`/verify` 只审 diff 是唯一复审，没做成必须标 ⏸️。）
+
+**施工队空输出/超时/error = 复审门没关上，不是"部分通过"**：必须重试到拿到非空结论（`review`/`criticize`/`adjudicate` 已内置空输出重试；仍空就重跑一次 job），重试耗尽才允许标 ⏸️。**非 🟢 一律不 commit**，不得拿"一个施工队过了、另一个失败了"当半审放行（教训：synthai 那次 glm 空输出——当时复审施工队还是 glm+kimi——若直接标 🟡 就漏了它事后抓到的 3 个回归）。
+
+### 铁律（防惯例退化成空话）
+
+1. **结论 ≤ 证据**：每个 🟢 必须能指向 `docs/verification.md` 对应行或本次命令输出；查不到就标 🔴 或"未触达"。
+2. **负向必测**：凡写"能拦住/能禁止"，必须实测"确实拦住了"。
+3. 三节 + 复审状态只是追加，不替代原有的评审/修复内容汇报。
 
 ## Key Scripts (single source of truth in this repo)
 

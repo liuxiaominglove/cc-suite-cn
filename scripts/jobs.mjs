@@ -240,6 +240,10 @@ export async function cancelJob(store, id, kill = (pid) => process.kill(pid, "SI
 
 export const DEFAULT_JOBS_DIR = ".cc-suite-cn/jobs";
 
+export function backgroundHint(id) {
+  return `${id}  [running]  (后台运行，用 /jobs 查、/result <id> 看结果)`;
+}
+
 export function defaultStore() {
   return createJobStore({ dir: DEFAULT_JOBS_DIR });
 }
@@ -512,7 +516,7 @@ if (isMainModule(import.meta.url)) {
     const meta = buildMeta(parsed);
     if (parsed.background) {
       const id = await runJobBackground(store, meta, { action: "worker-review", model: parsed.model, file: parsed.file, backend: parsed.backend, prompt: parsed.prompt, allowExternal: parsed.allowExternal }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
-      console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
+      console.log(backgroundHint(id));
     } else {
       const { review } = await import("./review-runner.mjs");
       const id = await runJob(store, meta, () => review({ model: parsed.model, file: parsed.file, backend: parsed.backend || "codebuddy", allowExternal: parsed.allowExternal, customPrompt: parsed.prompt }));
@@ -523,7 +527,7 @@ if (isMainModule(import.meta.url)) {
     const meta = buildMeta(parsed);
     if (parsed.background) {
       const id = await runJobBackground(store, meta, { action: "worker-audit", file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, prompt: parsed.prompt, allowExternal: parsed.allowExternal, projectDir: parsed.projectDir }, { logDir: DEFAULT_JOBS_DIR, maxConcurrent: parsed.maxConcurrent ?? 4 });
-      console.log(`${id}  [running]  (后台运行，用 /status 查、/result <id> 看结果)`);
+      console.log(backgroundHint(id));
     } else {
       const getFeedback = await resolveFeedback();
       const id = await runJob(store, meta, () => runAudit({ file: parsed.file, dir: parsed.dir, exts: parsed.exts, diff: parsed.diff, allowExternal: parsed.allowExternal, customPrompt: parsed.prompt, getFeedback, projectDir: parsed.projectDir }));

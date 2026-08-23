@@ -1,6 +1,6 @@
 // report-sections.mjs — 总结报告的必带项单一数据源。
 //
-// 触发评审命令（/audit /review /evaluate /verify /fix /audit-full /review-kimi /review-qwen）
+// 触发评审命令（/audit /review /evaluate /verify /fix /fix-incremental /audit-full /review-kimi /review-qwen / pnpm self-audit）
 // 的任务总结，末尾固定附「总体结论 + 行动项 + 三节」。这里把必带项的关键词定义一次，
 // docs-consistency.test.mjs 用它同时校验三处：
 //   - SKILL.md 的 Report Template（模板不漂移）

@@ -258,6 +258,12 @@ describe("报告必带项（report-sections 单一数据源）", () => {
     }
   });
 
+  it("AGENTS.md 汇报惯例指向 SKILL.md（详文单一数据源在 skill，AGENTS.md 只留红线）", () => {
+    const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
+    assert.match(c, /SKILL\.md/, "AGENTS.md 汇报惯例应指向 SKILL.md 详文");
+    assert.match(c, /⏸️ 只许三种理由|⏸️ 只允许/, "⏸️ 红线必须留在常驻层");
+  });
+
   it("verification.md 标记之后的报告段落无缺项", () => {
     const c = readFileSync(join(ROOT, "docs/verification.md"), "utf8");
     assert.ok(c.includes(REPORT_MARKER), "verification.md 应有 report-required 标记");

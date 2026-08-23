@@ -8,7 +8,7 @@ agent: build
 
 对 `$ARGUMENTS` 跑完整 4 角色流程（三个只读环节）：
 
-> `$ARGUMENTS` 是**路径**（文件或目录）。空参数 → 提示用户「请指定文件或目录，如 `/audit-full src/file.ts`」，不继续。
+> `$ARGUMENTS` 是**路径**（文件或目录）。空参数 → 提示用户「请指定文件或目录，如 `/audit-full src/file.ts`」，不继续。路径不存在/不可读 → 提示用户路径无效，不继续。
 
 > **项目根目录（`--project-dir`）**：先取项目根——目录 → `git -C "<目录>" rev-parse --show-toplevel`；文件 → `git -C "$(dirname "<文件>")" rev-parse --show-toplevel`；非 git 则省略。下面 `--run-audit` / `--arbitrate` 都带 `--project-dir "<项目根>"`。
 

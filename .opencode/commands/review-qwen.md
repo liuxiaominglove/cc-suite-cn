@@ -9,7 +9,7 @@ agent: build
 对最近一次 `/audit` 报的 finding 清单做独立批判：逐条判「同意/反对 + 理由」，并指出漏报。
 
 > **前置：必须先 `/audit`**。批判员吃的是 glm/kimi 报的 finding 清单，没有清单就无料可批。若还没 audit，先跑 `/audit <path>` 再回来。
-> `$ARGUMENTS` 是**路径**（被审文件）。空参数 → 提示用户给路径。
+> `$ARGUMENTS` 是**路径**（被审文件）。空参数 → 提示用户给路径。路径不存在/不可读 → 提示用户路径无效，不继续。
 
 ## Step 1: 读最近 audit 的 findings
 

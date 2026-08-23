@@ -1,11 +1,11 @@
 ---
-description: 验证修复/实现是否正确（只发 git diff，qwen+kimi 双施工队逐处审查，省 tokens，记入账本）
+description: 验证修复/实现（改没改对、有无回归）（只发 git diff，qwen+kimi 双施工队逐处审查，省 tokens，记入账本）
 agent: build
 ---
 
 # 验证（diff 审查）
 
-用 qwen+kimi 双施工队验证改动是否正确、有无回归。**只发 `git diff HEAD` 的改动区域（hunk + 上下文），不整个文件重发，省 tokens。** 记入任务账本。
+用 qwen+kimi 双施工队验证改动：改没改对、有无引入回归。**只发 `git diff HEAD` 的改动区域（hunk + 上下文），不整个文件重发，省 tokens。** 记入任务账本。
 
 > **硬规则：本命令只自动复审 1 次。** 复审后发现 high/medium，**只列现状（finding 清单 + verdict），不自动修复、不自动重新复审**；修复与再审必须由用户显式发起。跑完 Step 3 即停。
 
@@ -20,7 +20,7 @@ node scripts/review-gate.mjs --check-stale
 - `--check-stale` 输出 `stale=true` → 停止（改动未变，上次复审结论仍有效，别重复审）。
 - 输出 `stale=false` → 继续。
 
-## Step 1: Run（qwen+kimi 两评审员并行，diff 模式，记入账本）
+## Step 1: Run（qwen+kimi 两施工队并行，diff 模式，记入账本）
 
 用 Bash 工具运行（在项目目录）：
 
@@ -28,7 +28,7 @@ node scripts/review-gate.mjs --check-stale
 node scripts/jobs.mjs --run-audit --diff
 ```
 
-（`--diff` 内部跑 `git diff HEAD`，只发改动 hunk + 上下文给评审员，逐处验证"改得对不对 + 有无回归 + 有无遗漏"）
+（`--diff` 内部跑 `git diff HEAD`，只发改动 hunk + 上下文给施工队，逐处验证"改得对不对 + 有无回归 + 有无遗漏"）
 
 输出 `<job-id>  [completed]`。
 
@@ -60,6 +60,6 @@ node scripts/review-gate.mjs --mark --verdict <result.verdict>
 - **只自动复审 1 次**：Step 3 后停止，不自动修复、不自动再审
 - **untracked 新文件不在 `git diff HEAD` 里**——新建文件要先 `git add` 才进入评审；否则会漏审
 - 空 diff（无改动）时提示"没有待验证的改动"，不调 AI
-- **评审员空输出/超时/失败 → 先重试**（`--run-audit` 内部已对空输出/超时重试 2 次，10s/30s 退避；仍失败就重跑一次 job）——限流型空输出是瞬时故障，不能当"没有结论"直接放行
+- **施工队空输出/超时/失败 → 先重试**（`--run-audit` 内部已对空输出/超时重试 2 次，10s/30s 退避；仍失败就重跑一次 job）——限流型空输出是瞬时故障，不能当"没有结论"直接放行
 - 重试耗尽仍拿不到非空结论，才如实报告并标「⏸️ 尚未复审」，不得用"部分通过"掩盖
-- 不伪造问题——两评审员都拿到非空结论后，才出对比报告
+- 不伪造问题——两施工队都拿到非空结论后，才出对比报告

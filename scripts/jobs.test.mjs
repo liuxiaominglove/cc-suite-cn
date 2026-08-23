@@ -4,7 +4,8 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, backgroundHint } from "./jobs.mjs";
+import { readFileSync } from "node:fs";
 
 const cleanups = [];
 afterEach(async () => {
@@ -918,5 +919,31 @@ describe("buildFindingEntries", () => {
     const upsert = async (entries) => { upserted = entries; };
     await persistFindings(workers, { dedup, upsert, projectDir: null });
     assert.equal(upserted[0].projectDir, process.cwd());
+  });
+});
+
+describe("backgroundHint（后台任务提示语，F1：/status 悬空命令修复）", () => {
+  it("正常：含 job id、/jobs、/result <id>", () => {
+    const hint = backgroundHint("abc123");
+    assert.ok(hint.includes("abc123"), "提示语应含 job id");
+    assert.ok(hint.includes("/jobs"), "应指向 /jobs 查状态");
+    assert.ok(hint.includes("/result <id>"), "应指向 /result <id> 看结果");
+  });
+
+  it("负向：不再引用不存在的 /status 命令", () => {
+    assert.ok(!backgroundHint("abc123").includes("/status"), "提示语不得引用不存在的 /status");
+  });
+
+  it("边界：空 id 仍返回完整提示（不抛错）", () => {
+    const hint = backgroundHint("");
+    assert.equal(typeof hint, "string");
+    assert.ok(hint.includes("/jobs"));
+  });
+
+  it("调用点核查：jobs.mjs 源码无 /status 残留，两处后台分支都走 backgroundHint", () => {
+    const src = readFileSync(new URL("./jobs.mjs", import.meta.url), "utf8");
+    assert.ok(!src.includes("/status"), "jobs.mjs 不应再有 /status 悬空引用");
+    const callSites = src.match(/backgroundHint\(/g) ?? [];
+    assert.ok(callSites.length >= 3, "至少 3 处：1 处定义 + run-review/run-audit 两处后台分支调用");
   });
 });

@@ -8,7 +8,14 @@ agent: build
 
 取消 `$ARGUMENTS`（job id）对应的任务。
 
-## Run
+## Step 1: Determine Input
+
+| Input | Behavior |
+|-------|----------|
+| (empty) | **不要运行命令**——提示用户：先用 `/jobs` 查看任务列表拿到 job id，再运行 `/cancel <job-id>` |
+| job id | 进入 Step 2 |
+
+## Step 2: Run
 
 用 Bash 运行：
 

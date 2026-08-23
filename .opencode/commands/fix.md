@@ -112,7 +112,7 @@ TDD 五步：
 
 > 优先用**项目自身测试框架**。项目没测试框架时，Node 项目用 `node:test` 搭考场（零 npm）；抽纯逻辑再测，UI/网络类改动测不了就"语法+编译检查 + 手动验证"兜底，并在 `docs/verification.md` 标 🟡。
 
-修完每个 bug，**顺手写一句根因**（几个字，如「边界条件 / 信任边界 / 时序 / 职责」），`markFixed` 时带上 `rootCause`——让 `/trace` 能查到「报 → 裁 → 修 → 根因」四段完整链路。
+修完每个 bug，**顺手写一句根因**（一个短语，如「边界条件 / 信任边界 / 时序 / 职责」），`markFixed` 时带上 `rootCause`——让 `/trace` 能查到「报 → 裁 → 修 → 根因」四段完整链路。
 
 ## Step 5: 验证（编译测试 + /verify 只审 diff + 真机/UI）
 
@@ -121,7 +121,7 @@ TDD 五步：
    ```
    node scripts/jobs.mjs --run-audit --diff
    ```
-   （qwen+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给评审员。）
+   （qwen+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给施工队。）
 3. **真机/UI 手动点验**（UI 类改动必须）：
    > **UI 类改动（AppKit / SwiftUI / HTML / CSS）附加「真机手动验证清单」**：AI 审计只看代码、看不到渲染结果，「代码写了对、屏幕上没显示出来」这类问题（如控件 frame 容不下文案、负 y 子视图被裁剪、提示文字被裁掉）只有真机点开才抓得到。列出要人工点验的项（哪个界面 / 哪个控件 / 预期看到什么），让用户照着验一遍，结果标 🟡。
 
@@ -137,7 +137,7 @@ TDD 五步：
 - **修 bug 只由 opencode**（最了解项目 + TDD）
 - **审计前置两道闸门**：opencode 修代码前，必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。
 - **裁决前置**：只修 hy3 判 `true` 且 codeHash 未失效的 finding；跳过裁决 = 违规
-- **复审门控**：`/verify` 只审 diff 是**唯一复审**，修 bug 后必做；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**评审员空输出/超时/error = 门没关上，必须重试到非空结论（job 内已重试 2 次，仍空就重跑一次），重试耗尽才允许标 ⏸️；非 🟢 一律不 commit。**
+- **复审门控**：`/verify` 只审 diff 是**唯一复审**，修 bug 后必做；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**施工队空输出/超时/error = 门没关上，必须重试到非空结论（job 内已重试 2 次，仍空就重跑一次），重试耗尽才允许标 ⏸️；非 🟢 一律不 commit。**
 - **Override 出口（客观标准）**：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时，可跳过裁决直接修；必须满足两条——① 在 `docs/verification.md` 台账标"未经裁决" ② 附代码级证据 + 🟢 测试。不得以"紧急/小 bug"这类模糊理由跳过。
 - hy3 是 LLM 判断，只当**初筛**；opencode 的代码级核实 + 🟢 测试才是 ground truth
 - 写后不自动合并；**验证后问 commit，用户同意才 commit**（只审 diff 没做成就要求 commit 时，须显式标「⏸️ 尚未复审」）
