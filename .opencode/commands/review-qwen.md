@@ -25,7 +25,7 @@ node scripts/jobs.mjs --list
 node scripts/jobs.mjs --get <job-id>
 ```
 
-`result.workers` 是 glm+kimi 的评审结果，把每个 worker 的 `issues` 扁平成一个数组，写成 `/tmp/findings.json`（格式 `[{file, line, finding}, ...]`）。
+`result.entries` 是**去重后**的 findings（与 `/audit-full` `/fix` 的批判环节同一数据源，格式 `[{file, line, finding}, ...]`），直接写成 `/tmp/findings.json`。（不要用 `result.workers`——那是未去重的原始清单，批判员会看到重复 finding。）
 
 ## Step 2: 调 criticize 批判
 
