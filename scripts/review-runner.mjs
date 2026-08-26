@@ -192,7 +192,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   };
 }
 
-export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0, feedbackPreamble = null }) {
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0, feedbackPreamble = null, signal = null }) {
   const reviewFnUsed = reviewFn ?? review;
   const read = readFn ?? (async (f) => {
     const { readFile } = await import("node:fs/promises");
@@ -214,10 +214,12 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
+      if (signal?.aborted) return { startLine: chunk.startLine, result: { success: false, error: "cancelled by signal" } };
       try {
         const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
+        if (err instanceof AuthError) throw err;
         return { startLine: chunk.startLine, result: { success: false, error: err.message } };
       }
     })
@@ -255,7 +257,7 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 // 目录评审：逐文件串行审（每文件内部仍按 800 行分块），不再把所有文件拼成一个巨 payload。
 // 根因教训（2026-08-21）：--dir 模式曾把所有文件拼成单一 payload 一次性发给 codebuddy，
 // 项目一大（几十文件 / 几十万字符）就卡死超时；单文件模式有 800 行分块兜底，目录模式却没有。
-export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFileFn = null, collectFn = null, retries = 0, feedbackPreamble = null, cwd = process.cwd(), log = (msg) => process.stderr.write(msg) }) {
+export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFileFn = null, collectFn = null, retries = 0, feedbackPreamble = null, cwd = process.cwd(), log = (msg) => process.stderr.write(msg), signal = null }) {
   const collect = collectFn ?? collectSourceFiles;
   const reviewFileUsed = reviewFileFn ?? reviewFile;
 
@@ -284,23 +286,25 @@ export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chun
 
   const fileResults = [];
   for (let i = 0; i < total; i++) {
+    if (signal?.aborted) break;
     const f = srcFiles[i];
     const relPath = relative(resolvedDir, f);
     log(`[${model}] [${i + 1}/${total}] ${relPath}\n`);
     try {
-      const r = await reviewFileUsed({ model, backend, file: f, chunkSize, overlap, timeout, customPrompt, allowExternal, retries, feedbackPreamble });
-      fileResults.push({ file: relPath, result: r });
+      const r = await reviewFileUsed({ model, backend, file: f, chunkSize, overlap, timeout, customPrompt, allowExternal, retries, feedbackPreamble, signal });
+      fileResults.push({ file: relPath, absPath: f, result: r });
     } catch (err) {
-      fileResults.push({ file: relPath, result: { success: false, error: err?.message ?? String(err) } });
+      if (err instanceof AuthError) throw err;
+      fileResults.push({ file: relPath, absPath: f, result: { success: false, error: err?.message ?? String(err) } });
     }
   }
 
   const issues = [];
-  for (const { file, result } of fileResults) {
+  for (const { absPath, result } of fileResults) {
     if (!result || result.success === false) continue;
     for (const issue of result.issues ?? []) {
       if (!issue || typeof issue !== "object") continue;
-      issues.push({ ...issue, file });
+      issues.push({ ...issue, file: absPath });
     }
   }
 

@@ -978,4 +978,17 @@
 - **教训**：总结前先读一遍 `SKILL.md` Report Template 的必带项清单，写完逐项打勾；「总体结论 + 行动项 + 三节 + 复审状态」一个都不能少。
 - **证据锚点**：`e825c7e`（模板升级 commit）；本次会话总结（已补）。
 
+---
+
+# 外部项目 ios-elta /fix 闭环（2026-08-26）
+
+- **范围**：`/Users/liuxiaoming/project/ios-elta` 全量审 21 个 Swift 文件，五步闭环（找→批判→裁→修→验）。
+- **数据**：glm 5 + kimi 14 → 去重 19 条；hy3 裁决 24 真 / 1 假；opencode 两步终审 22 真 / 3 假；修 12 bug + 后置 3（saveBooks 静默吞错 / SentenceSplitter 两处启发式）+ 判假 3。
+- **已修 12 bug**：EPUBParser（parseNCX/parseNav 目录错位、extract zip-slip、decodeEntities 漏 hex、needsMetaCharset 误判、parseSpine 过宽）、Book.chapterFileURL 路径遍历+目录解析、ReaderView 翻译竞态+scrollTarget 残留、ChapterWebView 滚动竞态、LibraryView 批量删错位、TranslationError 429 误映射。
+- **验证**：
+  - 单测 `xcodebuild test`：**84 全绿**（73 原有 + 11 新增）🟢
+  - 真机点验（iPhone 16 侧载 `com.elta.reader`）：**第 2 项书签跨章跳转、第 3 项翻译在途改选 均正常** 🟢；第 1 项目录标题 / 第 4 项批量删书有单测覆盖，第 5 项 429 难触发
+  - /verify diff 复审 2 轮：第 1 轮 3 条、第 2 轮 7 条，代码级终审判定 7 条误报（qwen 把「正确拦截越界/正确配对原文」当 bug）+ 2 条轻微真实已修
+- **复审状态**：🟢 已复审（单测全绿 + 关键 UI 竞态真机确认 + diff 复审残留误报已澄清）
+
 <!-- report-required: begin -->

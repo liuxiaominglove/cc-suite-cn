@@ -1137,7 +1137,7 @@ describe("reviewDir", () => {
     assert.equal(maxActive, 1, "files must be reviewed one at a time (serial)");
   });
 
-  it("forces file field to the relative path on merged issues", async () => {
+  it("forces file field to the absolute path on merged issues", async () => {
     const reviewFileFn = async ({ file }) => {
       if (file.endsWith("main.swift")) return { success: true, severity: "low", issues: [{ line: 1, finding: "f1", file: "WRONG" }], summary: "ok" };
       return { success: true, severity: "low", issues: [{ line: 2, finding: "f2" }], summary: "ok" };
@@ -1145,7 +1145,9 @@ describe("reviewDir", () => {
     const r = await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn });
     assert.equal(r.issues.length, 2);
     const files = r.issues.map((i) => i.file).sort();
-    assert.deepEqual(files, ["main.swift", "subdir/utils.swift"]);
+    assert.ok(files[0].endsWith("main.swift"), "first (sorted) should be main.swift");
+    assert.ok(files[1].endsWith("utils.swift"), "second (sorted) should be utils.swift");
+    assert.ok(files.every((f) => f.startsWith("/")), "file field should be an absolute path");
   });
 
   it("returns empty result for directory with no matching files", async () => {
@@ -1190,6 +1192,26 @@ describe("reviewDir", () => {
       "[glm-5.2] [1/2] main.swift\n",
       "[glm-5.2] [2/2] subdir/utils.swift\n",
     ]);
+  });
+
+  it("stops reviewing when signal is aborted (cooperative cancel)", async () => {
+    const reviewed = [];
+    const reviewFileFn = async ({ file }) => {
+      reviewed.push(file);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const controller = new AbortController();
+    controller.abort();
+    await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn, signal: controller.signal });
+    assert.equal(reviewed.length, 0, "aborted signal must prevent reviewing any file");
+  });
+
+  it("re-throws AuthError instead of swallowing it (fail-fast)", async () => {
+    const reviewFileFn = async () => { throw new AuthError(); };
+    await assert.rejects(
+      () => reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn }),
+      AuthError
+    );
   });
 });
 

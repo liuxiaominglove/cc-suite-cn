@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, backgroundHint } from "./jobs.mjs";
+import { AuthError } from "./review-runner.mjs";
 import { readFileSync } from "node:fs";
 
 const cleanups = [];
@@ -557,6 +558,17 @@ describe("runAudit", () => {
     assert.equal(kimi.success, false);
     assert.ok(kimi.error.includes("kimi down"));
     assert.equal(result.workers.filter((w) => w.success).length, 1);
+  });
+
+  it("认证失败 fail-fast：AuthError 上抛不吞成 success:false", async () => {
+    const review = async ({ model }) => {
+      if (model === "kimi-k2.7-code") throw new AuthError();
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await assert.rejects(
+      () => runAudit({ file: "x.js", review, persistAuditLog: false }),
+      AuthError
+    );
   });
 
   it("完成后落账：worker 带 chainAnalysis 且 persistFindingsFn 被调", async () => {

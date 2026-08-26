@@ -370,25 +370,30 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
-  const { reviewFile, reviewDir } = await import("./review-runner.mjs");
+  const { reviewFile, reviewDir, AuthError } = await import("./review-runner.mjs");
   const rootFn = findRoot ?? findProjectRoot;
   const target = file ?? dir;
   const resolvedProjectDir = projectDir ?? (diff || !target ? process.cwd() : (rootFn(target) ?? process.cwd()));
   const workerList = diff ? VERIFY_WORKERS : AUDIT_WORKERS;
+  const controller = new AbortController();
   const workers = await Promise.all(
     workerList.map(async ({ backend, model }) => {
       try {
         const feedbackPreamble = getFeedback ? await getFeedback(model, file) : null;
         let r;
         if (file) {
-          r = await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble });
+          r = await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal });
         } else if (dir) {
-          r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble });
+          r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal });
         } else {
           r = await review({ model, backend, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
         }
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary, chainAnalysis: r.chainAnalysis ?? "", error: r.error ?? null };
       } catch (err) {
+        if (err instanceof AuthError) {
+          controller.abort();
+          throw err;
+        }
         return { backend, model, success: false, error: err?.message ?? String(err) };
       }
     })

@@ -40,3 +40,15 @@
 - 规则：报告 prompt injection 前，先核对注入内容来源——仓库内受控文件（如 worker-lessons.md）不是攻击面；真攻击面是「来自不受信源码的 finding」和「来自外部项目文件的 rules」（见 known-risks KR-01）
 - 实例：scripts/evaluate-models.mjs buildAdjudicatorPrompt 注入 lessons 段，collectWorkerLessons 读仓库 worker-lessons.md（编辑权只归 opencode/hy3）
 - 来源：qwen 误报「lessons 未 sanitize 可能 prompt injection」，opencode 终审判假阳（confirmed=false，mistakeType=prompt-injection-misattributed），真风险是 KR-01 的 finding/rules
+
+- 规则：报告路径遍历/zip-slip 前，先核对守卫是否真的允许越界——带斜杠的 `hasPrefix(base + "/")` 前缀检查已挡住兄弟目录（`/base` 不会匹配 `/base2`），别把「正确拦截越界」当 bug
+- 实例：ios-elta Elta/Models/Book.swift chapterFileURL 用 `resolvedPath.hasPrefix(basePath + "/")`；Elta/Services/EPUBParser.swift extract 用 `targetPath.hasPrefix(destPath + "/")`
+- 来源：qwen 两轮误报「hasPrefix 会误拒合法兄弟路径 / 仍允许兄弟目录访问」，opencode 终审用 swift 实测 URL 解析判假阳（confirmed=false）
+
+- 规则：报告并发竞态前，先核对代际守卫（generation guard）写法——「发起时自增 + 回调里比对代际号」是正确失效旧回调的标准模式，别把「自增在异步回调前」当竞态 bug
+- 实例：ios-elta Elta/Views/ChapterWebView.swift applyScroll 的 `scrollGeneration += 1` 配 `guard scrollGeneration == generation`
+- 来源：qwen 两轮误报「generation 自增在 JS eval 前致竞态 / 新回调被忽略」，opencode 终审判假阳（confirmed=false）
+
+- 规则：报告「加枚举 case 会破坏穷举 switch」前，先 grep 全仓有没有别处 switch 该枚举，没有就别报
+- 实例：ios-elta Elta/Services/TranslationError.swift 新增 `.rateLimited`，全项目仅 userMessage 一处 switch，已补 case
+- 来源：kimi 误报「加 .rateLimited 会破坏别处穷举 switch」，opencode 终审 grep 全仓 + 编译通过判假阳（confirmed=false）

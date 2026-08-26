@@ -284,6 +284,9 @@ export async function adjudicateLedger({
   if (Array.isArray(files) && files.length) {
     pending = pending.filter((v) => files.some((f) => matchesFileFilter(v.file, f)));
   }
+  if (projectDir) {
+    pending = pending.filter((v) => (v.projectDir ?? "") === projectDir);
+  }
   if (pending.length === 0) return [];
   const rules = resolveRules ? await resolveRules() : "";
   const lessons = resolveLessons ? await resolveLessons() : "";

@@ -1025,8 +1025,8 @@ describe("adjudicateLedger", () => {
     assert.deepEqual(results.map((r) => r.finding), ["f1"], "应只裁 a.js");
   });
 
-  it("传 projectDir 时落库结果用传入值（不 fallback cwd）", async () => {
-    const log = [{ file: "a.js", line: 1, finding: "f" }];
+  it("传 projectDir 时只裁命中项目且落库结果用传入值", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f", projectDir: "/p" }];
     const resolveCode = async () => "code";
     const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
     const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, projectDir: "/p" });
@@ -1042,16 +1042,24 @@ describe("adjudicateLedger", () => {
     assert.equal(results[0].projectDir, process.cwd());
   });
 
-  it("裁决时保留 finding 自身的 projectDir，不被 cwd/传入值覆盖", async () => {
+  it("projectDir 只裁命中项目的 finding，不裁别的项目", async () => {
     const log = [
-      { file: "a.js", line: 1, finding: "f1", projectDir: "/external/project" },
-      { file: "b.js", line: 2, finding: "f2" },
+      { file: "a.js", line: 1, finding: "f1", projectDir: "/p" },
+      { file: "b.js", line: 2, finding: "f2", projectDir: "/other" },
+      { file: "c.js", line: 3, finding: "f3" },
     ];
     const resolveCode = async () => "code";
     const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
     const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {}, projectDir: "/p" });
-    assert.equal(results.find((r) => r.finding === "f1").projectDir, "/external/project", "有自身 projectDir 的保留原值");
-    assert.equal(results.find((r) => r.finding === "f2").projectDir, "/p", "无自身 projectDir 的用传入值");
+    assert.deepEqual(results.map((r) => r.finding), ["f1"], "只裁 /p 项目的 finding");
+  });
+
+  it("不传 projectDir 时保留 finding 自身 projectDir（不被 cwd 覆盖）", async () => {
+    const log = [{ file: "a.js", line: 1, finding: "f1", projectDir: "/external/project" }];
+    const resolveCode = async () => "code";
+    const adjudicateFn = async ({ finding }) => ({ verdict: "true", evidence: finding });
+    const results = await adjudicateLedger({ load: async () => log, resolveCode, adjudicateFn, persist: async () => {} });
+    assert.equal(results[0].projectDir, "/external/project");
   });
 
   it("resolveLessons 提供给每条 finding 的 adjudicateFn", async () => {
