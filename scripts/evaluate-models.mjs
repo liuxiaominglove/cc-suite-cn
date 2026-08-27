@@ -502,6 +502,12 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
       const f = results.filter((r) => r.verdict === "false").length;
       const u = results.length - t - f;
       stdout.write(`已裁决 ${results.length} 条到统一账本（真 ${t} / 假 ${f} / 不确定 ${u}）\n`);
+      if (u > 0) {
+        stdout.write(`⚠️ 不确定 ${u} 条，需 opencode 代码级终审（别当没事）：\n`);
+        for (const r of results.filter((r) => r.verdict !== "true" && r.verdict !== "false")) {
+          stdout.write(`  ${r.file ?? ""}:${r.line ?? ""} — ${String(r.finding ?? "").slice(0, 60)}\n`);
+        }
+      }
       return 0;
     }
 

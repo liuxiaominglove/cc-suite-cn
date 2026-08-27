@@ -901,6 +901,26 @@ describe("cli --arbitrate --project-dir", () => {
   });
 });
 
+describe("cli --arbitrate uncertain 兜底出口", () => {
+  it("有 uncertain 时打印「需 opencode 代码级终审」并列出 file:line", async () => {
+    let out = "";
+    const adjudicateLedgerFn = async () => [
+      { file: "/p/a.js", line: 1, finding: "u1", verdict: "uncertain" },
+      { file: "/p/b.js", line: 2, finding: "real", verdict: "true" },
+    ];
+    await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.ok(out.includes("需 opencode 代码级终审"), out);
+    assert.ok(out.includes("/p/a.js:1"), out);
+  });
+
+  it("无 uncertain 时不打印终审提示", async () => {
+    let out = "";
+    const adjudicateLedgerFn = async () => [{ file: "/p/b.js", line: 2, finding: "real", verdict: "true" }];
+    await cli(["--arbitrate"], { adjudicateLedgerFn, stdout: { write: (s) => { out += s; } }, stderr: { write: () => {} } });
+    assert.ok(!out.includes("需 opencode 代码级终审"), out);
+  });
+});
+
 describe("cli --arbitrate resolveLessons", () => {
   it("把 resolveLessons 函数传给 adjudicateLedgerFn", async () => {
     let captured = null;

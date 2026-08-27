@@ -13,6 +13,7 @@ import {
   persistVerdicts,
   loadVerdicts,
   getActionableFindings,
+  getUncertainFindings,
   isVerdictStale,
   markFixed,
   confirmVerdict,
@@ -270,6 +271,38 @@ describe("getActionableFindings", () => {
     const log = [{ file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" }];
     const out = getActionableFindings(log, { projectDir: "/nonexist" });
     assert.equal(out.length, 0);
+  });
+});
+
+describe("getUncertainFindings", () => {
+  it("只返回 verdict 非 true/false 的条目（uncertain/undefined/未裁决）", () => {
+    const log = [
+      { file: "a.js", finding: "real", verdict: "true" },
+      { file: "b.js", finding: "false positive", verdict: "false" },
+      { file: "c.js", finding: "uncertain", verdict: "uncertain" },
+      { file: "d.js", finding: "undefined", verdict: "undefined" },
+      { file: "e.js", finding: "unadjudicated" },
+    ];
+    const out = getUncertainFindings(log);
+    assert.deepEqual(out.map((v) => v.finding).sort(), ["uncertain", "unadjudicated", "undefined"].sort());
+  });
+
+  it("按 projectDir 过滤", () => {
+    const log = [
+      { file: "a.js", finding: "uA", verdict: "uncertain", projectDir: "/proj/a" },
+      { file: "b.js", finding: "uB", verdict: "uncertain", projectDir: "/proj/b" },
+    ];
+    const out = getUncertainFindings(log, { projectDir: "/proj/a" });
+    assert.equal(out.length, 1);
+    assert.equal(out[0].finding, "uA");
+  });
+
+  it("全 true/false 时返回空", () => {
+    const log = [
+      { file: "a.js", finding: "t", verdict: "true" },
+      { file: "b.js", finding: "f", verdict: "false" },
+    ];
+    assert.deepEqual(getUncertainFindings(log), []);
   });
 });
 

@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, readdir, rename, unlink } from "node:fs/promises";
 import { openSync, closeSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, dirname, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -8,7 +8,7 @@ import { FIND_BUG_WORKERS, VERIFY_WORKERS } from "./models.mjs";
 import { isMainModule } from "./runner-core.mjs";
 import { verdictFromFindings, downgradeKnownLowRisk } from "./review-gate.mjs";
 import { acquireLock, releaseLock } from "./verdict-log.mjs";
-import { findProjectRoot } from "./audit-baseline.mjs";
+import { findProjectRoot, gitHead } from "./audit-baseline.mjs";
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -374,6 +374,8 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   const rootFn = findRoot ?? findProjectRoot;
   const target = file ?? dir;
   const resolvedProjectDir = projectDir ?? (diff || !target ? process.cwd() : (rootFn(target) ?? process.cwd()));
+  const auditFile = file ? resolve(process.cwd(), file) : null;
+  const auditCommit = gitHead(resolvedProjectDir);
   const workerList = diff ? VERIFY_WORKERS : AUDIT_WORKERS;
   const controller = new AbortController();
   const workers = await Promise.all(
@@ -410,22 +412,36 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
 
   let entries = [];
   if (persistFindingsFn) {
-    try { entries = await persistFindingsFn(workers, { projectDir: resolvedProjectDir }) ?? []; } catch {}
+    try { entries = await persistFindingsFn(workers, { projectDir: resolvedProjectDir, auditFile, auditCommit }) ?? []; } catch {}
   } else {
-    entries = await persistFindings(workers, { projectDir: resolvedProjectDir, upsert, dedup });
+    entries = await persistFindings(workers, { projectDir: resolvedProjectDir, auditFile, auditCommit, upsert, dedup });
   }
 
   const downgraded = downgradeKnownLowRisk(workers);
   return { workers: downgraded, entries, verdict: verdictFromFindings(downgraded) };
 }
 
-export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd() } = {}) {
+function clampWithin(base, candidate) {
+  const prefix = base.endsWith(sep) ? base : base + sep;
+  return candidate === base || candidate.startsWith(prefix) ? candidate : base;
+}
+
+export function normalizeFindingFile(issueFile, { auditFile = null, projectDir = process.cwd() } = {}) {
+  const f = (issueFile ?? "").trim();
+  if (!f) return auditFile ?? "";
+  if (f.startsWith("/")) return f;                      // 绝对路径
+  if (f.includes("/")) return clampWithin(projectDir, resolve(projectDir, f));  // 相对带目录 → 拼项目根（防 .. 逃逸）
+  if (auditFile) return clampWithin(dirname(auditFile), join(dirname(auditFile), f));  // 裸文件名 → 拼被审文件目录
+  return clampWithin(projectDir, resolve(projectDir, f));
+}
+
+export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd(), auditFile = null, auditCommit = null } = {}) {
   const flat = [];
   for (const w of workers ?? []) {
     if (!w || w.success === false) continue;
     for (const issue of w.issues ?? []) {
       flat.push({
-        file: issue.file ?? "",
+        file: normalizeFindingFile(issue.file, { auditFile, projectDir }),
         line: issue.line ?? null,
         finding: issue.finding ?? "",
         fix: issue.fix ?? "",
@@ -447,15 +463,16 @@ export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd
       models: [...new Set(members.map((m) => m.model).filter(Boolean))],
       source: "audit",
       projectDir,
+      auditCommit,
     };
   });
 }
 
-export async function persistFindings(workers, { dedup = null, upsert = null, projectDir = process.cwd() } = {}) {
+export async function persistFindings(workers, { dedup = null, upsert = null, projectDir = process.cwd(), auditFile = null, auditCommit = null } = {}) {
   let entries;
   try {
     const dedupFn = dedup ?? (await import("./evaluate-models.mjs")).dedupFindings;
-    entries = buildFindingEntries(workers, dedupFn, { projectDir: projectDir || process.cwd() });
+    entries = buildFindingEntries(workers, dedupFn, { projectDir: projectDir || process.cwd(), auditFile, auditCommit });
   } catch {
     return [];
   }

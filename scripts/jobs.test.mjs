@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, backgroundHint } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, normalizeFindingFile, backgroundHint } from "./jobs.mjs";
 import { AuthError } from "./review-runner.mjs";
 import { readFileSync } from "node:fs";
 
@@ -900,6 +900,37 @@ describe("buildFindingEntries", () => {
     assert.equal(entries[0].projectDir, process.cwd());
   });
 
+  it("buildFindingEntries 归一化 file：相对路径拼 projectDir，裸文件名拼被审文件目录", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "server/server.py", line: 1, finding: "rel" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ file: "server.py", line: 2, finding: "bare" }] },
+      { model: "kimi-k2.7-code", success: true, issues: [{ file: "/abs/dir/a.py", line: 3, finding: "abs" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup, { projectDir: "/p", auditFile: "/p/server/test_server.py" });
+    assert.equal(entries.find((e) => e.finding === "rel").file, "/p/server/server.py");
+    assert.equal(entries.find((e) => e.finding === "bare").file, "/p/server/server.py");
+    assert.equal(entries.find((e) => e.finding === "abs").file, "/abs/dir/a.py");
+  });
+
+  it("buildFindingEntries 传 auditCommit 时写入每条 entry", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup, { projectDir: "/p", auditCommit: "abc123" });
+    assert.equal(entries[0].auditCommit, "abc123");
+  });
+
+  it("buildFindingEntries 不传 auditCommit 时字段为 null", () => {
+    const workers = [
+      { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
+    ];
+    const dedup = (flat) => flat.map((f) => ({ ...f, cluster: [f] }));
+    const entries = buildFindingEntries(workers, dedup, { projectDir: "/p" });
+    assert.equal(entries[0].auditCommit, null);
+  });
+
   it("persistFindings 透传 projectDir 到落账 entries", async () => {
     const workers = [
       { model: "glm-5.2", success: true, issues: [{ file: "a.js", line: 1, finding: "f" }] },
@@ -931,6 +962,25 @@ describe("buildFindingEntries", () => {
     const upsert = async (entries) => { upserted = entries; };
     await persistFindings(workers, { dedup, upsert, projectDir: null });
     assert.equal(upserted[0].projectDir, process.cwd());
+  });
+});
+
+describe("normalizeFindingFile", () => {
+  it("绝对路径原样返回", () => {
+    assert.equal(normalizeFindingFile("/a/b.js", { projectDir: "/p" }), "/a/b.js");
+  });
+  it("相对带目录拼 projectDir", () => {
+    assert.equal(normalizeFindingFile("server/server.py", { projectDir: "/p" }), "/p/server/server.py");
+  });
+  it("裸文件名拼被审文件目录", () => {
+    assert.equal(normalizeFindingFile("server.py", { projectDir: "/p", auditFile: "/p/server/test_server.py" }), "/p/server/server.py");
+  });
+  it("空字符串回退 auditFile，无 auditFile 时回退空串", () => {
+    assert.equal(normalizeFindingFile("", { projectDir: "/p", auditFile: "/p/server/a.py" }), "/p/server/a.py");
+    assert.equal(normalizeFindingFile("", { projectDir: "/p" }), "");
+  });
+  it(".. 路径逃逸被夹回项目根（fail-closed）", () => {
+    assert.equal(normalizeFindingFile("../../etc/passwd", { projectDir: "/p" }), "/p");
   });
 });
 

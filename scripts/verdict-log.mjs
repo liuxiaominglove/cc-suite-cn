@@ -181,6 +181,12 @@ export function getActionableFindings(log, { projectDir = null } = {}) {
   );
 }
 
+export function getUncertainFindings(log, { projectDir = null } = {}) {
+  return (log ?? []).filter(
+    (v) => v.verdict !== "true" && v.verdict !== "false" && (projectDir == null || v.projectDir === projectDir)
+  );
+}
+
 export function isVerdictStale(verdict, currentContent) {
   if (!verdict?.codeHash) return true;
   return hashContent(currentContent) !== verdict.codeHash;
