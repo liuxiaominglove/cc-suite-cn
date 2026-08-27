@@ -67,6 +67,16 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 待修清单 = `verdict === "true"` 且 `projectDir === "<项目根>"` 的 finding。
 
+**不确定清单（别漏）**：`--arbitrate` 判 `uncertain`（及账本里 `verdict` 非 true/false 的）finding 也要逐条代码级终审，用：
+
+```
+node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(m.getUncertainFindings(await m.loadVerdicts(), { projectDir: \"<项目根>\" }), null, 2)))"
+```
+
+`uncertain` 不是"没事"——它是 hy3 拿不准（错误上下文/大文件截断），真 bug 常藏在这里，必须 opencode 亲自核实，判真就修、判假就落账 false。
+
+- **按轮次隔离（auditCommit）**：每条 finding 落库时带 `auditCommit`（审计时的 git HEAD）。想只看本轮 finding，读取账本后调用方手动 `.filter(v => v.auditCommit === "<本次 git HEAD>")`，避免历史残留混入（暂无内置 helper，需调用方自行过滤）。
+
 - **清单为空** → 报告"未发现真 bug"并**停止**，不进入修复。
 - 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy3 是 LLM 判断、会看走眼——既可能**假阴**（漏真 bug），也可能**假阳**（判 true 实为 by-design 或触发条件写错）。终审要同时兜住这两种。
 - **codeHash 校验**：修前确认该文件自裁决后没被改过；若 `isVerdictStale` 为 true（代码已变），须重新 `/evaluate --arbitrate` 再修。

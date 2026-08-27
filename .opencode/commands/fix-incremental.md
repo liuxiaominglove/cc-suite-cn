@@ -75,6 +75,12 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 ```
 
 - 清单为空 → 报告「未发现真 bug」并停（但仍走 Step 收尾更新基线）。
+- **不确定清单（别漏）**：`getUncertainFindings`（verdict 非 true/false，含 `uncertain`）也要按变更文件过滤后逐条代码级终审——`uncertain` 是 hy3 拿不准，真 bug 常藏在这里，判真就修、判假就落账 false。过滤方式同待修清单（调用方 `filter(v => changed.has(v.file))`）：
+
+```
+node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => { const changed = new Set(JSON.parse(process.argv[1])); const all = m.getUncertainFindings(await m.loadVerdicts(), { projectDir: \"<项目根目录>\" }); console.log(JSON.stringify(all.filter(v => changed.has(v.file)), null, 2)); })" '["<变更文件1绝对路径>","<变更文件2绝对路径>", ...]'
+```
+
 - 终审两步（盲判 → 对比）、codeHash 校验、修前分级、TDD 五步、根因写回——**全部同 `/fix` Step 4**（见 fix.md 4.1-4.3），逐条执行，不因「增量」而放宽。
 
 ## Step 5: 验证（编译测试 + /verify 只审 diff + 真机）
