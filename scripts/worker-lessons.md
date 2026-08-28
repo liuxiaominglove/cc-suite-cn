@@ -52,3 +52,7 @@
 - 规则：报告「加枚举 case 会破坏穷举 switch」前，先 grep 全仓有没有别处 switch 该枚举，没有就别报
 - 实例：ios-elta Elta/Services/TranslationError.swift 新增 `.rateLimited`，全项目仅 userMessage 一处 switch，已补 case
 - 来源：kimi 误报「加 .rateLimited 会破坏别处穷举 switch」，opencode 终审 grep 全仓 + 编译通过判假阳（confirmed=false）
+
+- 规则：报告「detectManualVerify 的泛 token（window/alert/dialog/menu 等）会误报非 UI finding」前，先看该 token 表注释与 ADR——这是召回优先的有意设计（误报=多标真机=误拦可逆；漏报=真 UI bug 没标才不可逆），不是 bug
+- 实例：scripts/evaluate-models.mjs MANUAL_VERIFY_TOKENS 尾部注释写明「召回优先 by-design」；docs/adr/0018 写明「宁多勿漏」
+- 来源：qwen 三轮 /verify 复审反复报泛 token 误报，opencode 终审判 by-design（不修，仅补注释）

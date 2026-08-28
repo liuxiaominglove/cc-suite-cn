@@ -34,6 +34,8 @@
 | 26 | 增量审查+修复 | `/fix-incremental` | `--detect` 变更文件 → 只审/修变更 → `--save` 更新基线 | "增量修复闭环" |
 | 27 | 项目根目录落账（projectDir 隔离） | `--project-dir` | 外部项目审计 finding 的 projectDir 记成被审项目根（非 cwd），`getActionableFindings(projectDir)` 能筛出 | "projectDir 写入修正" |
 | 28 | 目录评审逐文件分块 | `--dir` → `reviewDir()` | 审目录不再拼巨 payload，逐文件串行审（每文件按 800 行分块），issue 带相对路径 file，逐文件进度输出 | "目录评审逐文件分块" |
+| 29 | 真机必验打标 | `detectManualVerify` + `/evaluate --arbitrate` | 裁决后 UI/窗口/权限/快捷键 finding 带 `requiresManualVerify:true`，`appendVerdicts` 透传 | "P2/P3：真机打标 + /verify 注入修复背景" |
+| 30 | /verify 注入修复背景 | `/verify`、`--run-audit --diff` | 复审施工队拿到 `[修复背景]` 段（auditCommit===HEAD 且 file∈变更文件的 actionable finding），降低「建议改回会回归」误报 | "P2/P3：真机打标 + /verify 注入修复背景" |
 
 ## 三色判定
 
