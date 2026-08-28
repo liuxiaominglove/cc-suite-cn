@@ -72,6 +72,7 @@ Load this skill when the user:
 - **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。**终审既补假阴、也滤假阳**：hy3 判 false 的真 bug（假阴）和 hy3 判 true 实为 by-design 或触发条件错的 finding（假阳）都要靠 opencode 代码级核实兜住，不默认 hy3 结论或 finding 措辞准确。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
 - 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
 - **复审门控**: 修 bug 后必须跑 `/verify` 只审 diff（**唯一复审**，qwen+kimi 审改动行）；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。
+- **窗口/权限/快捷键真机必验**: 涉及 `NSWindow`/`NSPanel`/`NSScreen`/`NSView`、权限请求（`TCC`/辅助功能/屏幕录制/摄像头/输入监控）、`CGEvent`/`NSEvent`/`keyDown`/`addGlobalMonitor`/`CGEventTap` 的改动，单测覆盖不到，Step 5 必须真机点验，**非 🟢 不 commit**；编译/单测通过不能替代。
 - **复审 vs 门禁别混**: `/verify`（斜杠命令 = 修 bug 后唯一复审，每次改完必跑）与 `pnpm verify:e2e`（终端 = release 门禁，仅 release/推前跑）是两回事。别拿「门禁不进编辑循环」当不跑 `/verify` 的借口——那条只约束 `pnpm verify:e2e`。
 - 找 bug 的 finding 用英文（`REVIEW_PROMPT` 要求），跨语言共识才能对齐。
 - If one worker fails, still show the others' results + a failure note.

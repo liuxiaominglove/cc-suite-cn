@@ -6,6 +6,34 @@ import { hashContent, confirmVerdict, modelsOf } from "./verdict-log.mjs";
 import { buildOrchestratorPreflight } from "./feedback.mjs";
 import { dirname } from "node:path";
 
+// UI/窗口/权限/快捷键类 finding 需要真机点验（单测覆盖不到渲染与系统授权）。
+// 只扫 file/finding/fix 三个信号（模型自己的描述 + 文件路径），不扫整份 code——
+// 否则 AppKit 文件里处处是 NSWindow，会让标退化成一个「所有 Swift finding 都打」的无用噪音。
+export const MANUAL_VERIFY_TOKENS = [
+  // AppKit/UIKit 窗口与控件
+  "nswindow", "nspanel", "nsscreen", "nsview", "nsalert", "nsbutton", "nstextfield", "nstextview",
+  "nsapplication", "nsresponder", "nsworkspace", "nsopenpanel", "nssavepanel", "nsmenu", "nssplitview", "nstableview",
+  "uiwindow", "uiview", "uialert", "webview",
+  // UI 框架
+  "swiftui", "appkit", "uikit",
+  // 权限
+  "permission", "authorization", "authorize", "tcc", "accessibility",
+  "screen recording", "camera", "microphone", "input monitoring", "avcapture",
+  // 快捷键 / 全局事件
+  "cgevent", "nsevent", "keydown", "keyup", "keycode", "hotkey", "shortcut",
+  "addglobalmonitor", "cgeventtap", "eventtap", "globalmonitor",
+  // 通用窗口/界面
+  // 召回优先（by-design）：这些裸词可能误报（如算法语境的 "time window"），
+  // 但误报方向是「多标真机」= 误拦可逆（安全）；漏报（真 UI bug 没标）才不可逆。
+  // 对 AppKit/UIKit 应用，window/alert/menu/dialog 恰是正确高频信号，删掉会砍召回。
+  "window", "alert", "dialog", "popover", "toolbar", "menu",
+];
+
+export function detectManualVerify({ file = "", finding = "", fix = "" } = {}) {
+  const haystack = `${file}\n${finding}\n${fix}`.toLowerCase();
+  return MANUAL_VERIFY_TOKENS.some((t) => haystack.includes(t));
+}
+
 export function normalizeFinding(text) {
   if (typeof text !== "string" || text.trim() === "") {
     return [];
@@ -306,6 +334,7 @@ export async function adjudicateLedger({
       models: f.models ?? [],
       source: f.source ?? null,
       projectDir: f.projectDir ?? projectDir ?? process.cwd(),
+      requiresManualVerify: detectManualVerify({ file, finding: f.finding ?? "", fix: f.fix ?? "" }),
       timestamp: new Date().toISOString(),
     };
   });

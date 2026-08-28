@@ -7,7 +7,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { review, RunnerError, TimeoutError, setSpawn, reviewFile, reviewDir, SourceTamperedError, runCritic } from "./review-runner.mjs";
 import { AuthError, extractJson, DEFAULT_TIMEOUT, frameCode, resolveReviewCwd, chunkCode, offsetFindings, withRetry, setRetryBackoffMs, isAuthError, isNLArtifact } from "./review-tools.mjs";
-import { VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
+import { VERIFY_PROMPT, REVIEW_PROMPT, CRITIC_PROMPT, SELF_CHECK_PROMPT, buildFixContextSection, buildVerifyPrompt } from "./review-prompts.mjs";
 import { collectProjectRules, buildRulesSection, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection, stripMarkdownComments } from "./review-context.mjs";
 import { validateFilePath, collectSourceFiles, DEFAULT_EXTS, getDiff, setGitSpawn, snapshotSourceHashes, hashesDiffer } from "./review-source.mjs";
 import { buildCriticPrompt, criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings, buildSelfCheckPrompt, selfCheck, applySelfCheck } from "./review-critic.mjs";
@@ -908,6 +908,31 @@ describe("review diff mode", () => {
     await review({ model: "m", backend: "codebuddy", diff: true, cwd: "/custom/dir" });
     assert.equal(capturedCwd, "/custom/dir", "getDiff 应收到 review 的 cwd");
   });
+
+  it("diff 模式注入修复背景到 stdin", async () => {
+    setGitSpawn(() => createMockProcess({ stdout: "diff --git a/x b/x\n" }));
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await review({ model: "m", diff: true, fixContext: "[修复背景]\n本轮修 bug" });
+    assert.ok(stdinWritten.includes("[修复背景]"), "应注入修复背景段");
+    assert.ok(stdinWritten.includes("本轮修 bug"), "背景原文应出现");
+  });
+
+  it("diff 模式无 fixContext 时不注入修复背景", async () => {
+    setGitSpawn(() => createMockProcess({ stdout: "diff --git a/x b/x\n" }));
+    let stdinWritten = null;
+    setSpawn((cmd, args) => {
+      const p = createMockProcess({ stdout: MOCK_OUTPUT_VALID });
+      p.stdin = { write: (d) => { stdinWritten = d; }, end: () => {} };
+      return p;
+    });
+    await review({ model: "m", diff: true });
+    assert.ok(!stdinWritten.includes("[修复背景]"), "无 fixContext 不得注入背景段");
+  });
 });
 
 describe("VERIFY_PROMPT", () => {
@@ -916,6 +941,40 @@ describe("VERIFY_PROMPT", () => {
     assert.ok(VERIFY_PROMPT.includes("逐处"));
     assert.ok(VERIFY_PROMPT.includes("遗漏"));
     assert.ok(VERIFY_PROMPT.includes("chain_analysis"), "复审应要求 chain_analysis 依据字段");
+  });
+});
+
+describe("buildFixContextSection / buildVerifyPrompt", () => {
+  it("空/无 findings → 空段", () => {
+    assert.equal(buildFixContextSection([]), "");
+    assert.equal(buildFixContextSection(null), "");
+  });
+
+  it("含 file:line — finding / fix 原文", () => {
+    const sec = buildFixContextSection([
+      { file: "/proj/a.swift", line: 42, finding: "activate regression", fix: "do not re-add activate" },
+    ]);
+    assert.ok(sec.includes("[修复背景]"));
+    assert.ok(sec.includes("/proj/a.swift:42"));
+    assert.ok(sec.includes("activate regression"));
+    assert.ok(sec.includes("do not re-add activate"));
+  });
+
+  it("明确警告勿建议回归方案", () => {
+    const sec = buildFixContextSection([{ file: "a", line: 1, finding: "x", fix: "y" }]);
+    assert.ok(sec.includes("回归"), "应警告勿建议会回归的方案");
+  });
+
+  it("buildVerifyPrompt 空背景 → 返回原 VERIFY_PROMPT", () => {
+    assert.equal(buildVerifyPrompt(""), VERIFY_PROMPT);
+    assert.equal(buildVerifyPrompt(null), VERIFY_PROMPT);
+  });
+
+  it("buildVerifyPrompt 非空背景 → 背景段前置 + 保留 VERIFY_PROMPT", () => {
+    const out = buildVerifyPrompt(buildFixContextSection([{ file: "a", line: 1, finding: "f", fix: "x" }]));
+    assert.ok(out.startsWith("[修复背景]"), "背景段应在前");
+    assert.ok(out.includes("回归"));
+    assert.ok(out.includes(VERIFY_PROMPT), "必须保留原 VERIFY_PROMPT");
   });
 });
 

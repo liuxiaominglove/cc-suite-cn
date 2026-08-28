@@ -83,6 +83,16 @@ export function gitChangedFiles(baseCommit, cwd = process.cwd(), exec = execSync
   return [...new Set(files)];
 }
 
+/// 当前未提交改动（工作区相对 HEAD）的文件名列表；失败返回空（fail-closed，不抛）。
+/// 供 /verify 注入修复背景时，把 finding 关联到本次 diff 实际触及的文件。
+export function gitDiffNames(cwd = process.cwd(), exec = execSync) {
+  try {
+    return collectNames(exec("git diff HEAD --name-only", { cwd, encoding: "utf8" }));
+  } catch {
+    return [];
+  }
+}
+
 export async function loadBaseline(path = BASELINE_PATH) {
   try {
     const raw = await readFile(path, "utf-8");

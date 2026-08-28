@@ -15,7 +15,7 @@ import {
 import {
   REVIEW_PROMPT,
   NL_REVIEW_PROMPT,
-  VERIFY_PROMPT,
+  buildVerifyPrompt,
 } from "./review-prompts.mjs";
 import {
   collectProjectRules,
@@ -46,7 +46,7 @@ const MAX_FILES_WARN = 50;
 
 
 
-export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null, feedbackPreamble = null, workerLessons = null }) {
+export async function review({ model, code, customPrompt, timeout = DEFAULT_TIMEOUT, file, dir, exts, allowExternal = false, backend = "codebuddy", diff = false, retries = 0, cwd = process.cwd(), projectRules = null, fileName = null, feedbackPreamble = null, workerLessons = null, fixContext = null }) {
 
   let ruleCwd = cwd;
   let importContext = "";
@@ -147,7 +147,7 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
     }
   }
 
-  const prompt = customPrompt ?? (diff ? VERIFY_PROMPT : (isNLArtifact(fileName ?? file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
+  const prompt = customPrompt ?? (diff ? buildVerifyPrompt(fixContext) : (isNLArtifact(fileName ?? file) ? NL_REVIEW_PROMPT : REVIEW_PROMPT));
 
   const readOnlyPrefix = `${READ_ONLY_DECLARATION}\n\n`;
   const feedbackSection = feedbackPreamble ? `${feedbackPreamble}\n\n` : "";

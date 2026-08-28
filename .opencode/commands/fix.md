@@ -69,6 +69,8 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 待修清单 = `verdict === "true"` 且 `projectDir === "<项目根>"` 的 finding。
 
+> **真机打标（requiresManualVerify）**：裁决时 hy3 对 UI/窗口/权限/快捷键类 finding 自动打 `requiresManualVerify: true`（扫描 finding/fix/file 的 token：`NSWindow`/`NSAlert`/`NSScreen`/`NSView`、`permission`/`authorization`/`TCC`/`accessibility`、`CGEvent`/`NSEvent`/`keyDown`/`hotkey`/`shortcut`/`addGlobalMonitor`、`SwiftUI`/`AppKit`/`UIKit` 等）。带此标记的 finding，修完 Step 5 必须真机点验（🟢），非 🟢 不 commit。
+
 **不确定清单（别漏）**：`--arbitrate` 判 `uncertain`（及账本里 `verdict` 非 true/false 的）finding 也要逐条代码级终审，用：
 
 ```
@@ -134,9 +136,10 @@ TDD 五步：
    ```
    node scripts/jobs.mjs --run-audit --diff
    ```
-   （qwen+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给施工队。）
+   （qwen+kimi 只审 `git diff HEAD` 的改动行，逐处验证「改对 / 回归 / 遗漏」。若已 commit、`git diff HEAD` 为空，用 `git diff <base> HEAD` 抽 diff 再喂给施工队。**外部项目带 `--project-dir "<项目根>"`**，否则审的是 cc-suite-cn 自己的 diff；复审施工队会自动拿到「本轮正在修的 bug」修复背景。）
 3. **真机/UI 手动点验**（UI 类改动必须）：
-   > **UI 类改动（AppKit / SwiftUI / HTML / CSS）附加「真机手动验证清单」**：AI 审计只看代码、看不到渲染结果，「代码写了对、屏幕上没显示出来」这类问题（如控件 frame 容不下文案、负 y 子视图被裁剪、提示文字被裁掉）只有真机点开才抓得到。列出要人工点验的项（哪个界面 / 哪个控件 / 预期看到什么），让用户照着验一遍，结果标 🟡。
+   > **UI 类改动（AppKit / SwiftUI / HTML / CSS）附加「真机手动验证清单」**：AI 审计只看代码、看不到渲染结果，「代码写对了、屏幕上没显示出来」这类问题（如控件 frame 容不下文案、负 y 子视图被裁剪、提示文字被裁掉）只有真机点开才抓得到。列出要人工点验的项（哪个界面 / 哪个控件 / 预期看到什么），让用户照着验一遍，结果标 🟡。
+   > **铁律（窗口 / 权限 / 快捷键）**：凡改动涉及**窗口**（`NSWindow`/`NSPanel`/`NSScreen`/`NSView`/窗口层级）、**权限**（权限请求 / `TCC` / 辅助功能 / 屏幕录制 / 摄像头 / 输入监控）、**快捷键 / 全局事件**（`CGEvent`/`NSEvent`/`keyDown`/`addGlobalMonitor`/`CGEventTap`）的，单测覆盖不到、只能真机点验。**Step 5 必须真机点验通过（🟢），非 🟢 一律不 commit**——编译/单测通过不能替代，只能标「⏸️ 尚未复审」并写明卡点。
 
 ## ★ 验证后：问 commit
 
@@ -155,3 +158,4 @@ TDD 五步：
 - hy3 是 LLM 判断，只当**初筛**；opencode 的代码级核实 + 🟢 测试才是 ground truth
 - 写后不自动合并；**验证后问 commit，用户同意才 commit**（只审 diff 没做成就要求 commit 时，须显式标「⏸️ 尚未复审」）
 - 能力动词逐个测：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 证据
+- **窗口/权限/快捷键改动真机必验**：涉及 `NSWindow`/`NSPanel`/`NSScreen`/`NSView`、权限请求（`TCC`/辅助功能/屏幕录制/摄像头/输入监控）、`CGEvent`/`NSEvent`/`keyDown`/`addGlobalMonitor`/`CGEventTap` 的改动，单测覆盖不到，Step 5 必须真机点验（🟢），非 🟢 不 commit；编译/单测通过不算数。

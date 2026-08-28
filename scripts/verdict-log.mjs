@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { resolve, dirname, join } from "node:path";
+import { resolve, dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 
@@ -165,6 +165,7 @@ export async function appendVerdicts(verdicts, filePath = VERDICT_LOG_PATH) {
           target.evidence = v.evidence ?? "";
           if (v.codeHash != null) target.codeHash = v.codeHash;
           if (Array.isArray(v.models) && v.models.length) target.models = v.models;
+          if (v.requiresManualVerify != null) target.requiresManualVerify = v.requiresManualVerify;
         } else {
           log.push({ ...v });
         }
@@ -185,6 +186,20 @@ export function getUncertainFindings(log, { projectDir = null } = {}) {
   return (log ?? []).filter(
     (v) => v.verdict !== "true" && v.verdict !== "false" && (projectDir == null || v.projectDir === projectDir)
   );
+}
+
+// 修复背景（/verify 注入）：只返回「本轮（auditCommit===headCommit）仍在修」的 actionable finding。
+// 关联逻辑（finding→diff）：headCommit 是硬门槛（无法定位 HEAD 就 fail-closed 返回空，不硬凑）；
+// changedFiles 是可选精筛。两侧路径都按 projectDir 对称归一（相对 → 绝对），避免任一侧存相对路径时静默漏配。
+export function getFixContext(log, { projectDir = null, headCommit = null, changedFiles = null } = {}) {
+  if (headCommit == null) return [];
+  const norm = (f) => (projectDir && f && !isAbsolute(f) ? resolve(projectDir, f) : f);
+  const changed = Array.isArray(changedFiles) ? new Set(changedFiles.map(norm)) : null;
+  return getActionableFindings(log, { projectDir }).filter((v) => {
+    if (v.auditCommit !== headCommit) return false;
+    if (changed && !changed.has(norm(v.file ?? ""))) return false;
+    return true;
+  });
 }
 
 export function isVerdictStale(verdict, currentContent) {

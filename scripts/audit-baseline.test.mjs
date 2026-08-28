@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitHead, gitLatestTag, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs, findProjectRoot } from "./audit-baseline.mjs";
+import { gitHead, gitLatestTag, gitChangedFiles, gitDirty, gitDiffNames, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs, findProjectRoot } from "./audit-baseline.mjs";
 
 function fakeExec(handler) {
   return (cmd, opts) => {
@@ -43,6 +43,23 @@ describe("gitLatestTag", () => {
       throw new Error("fatal: no names found, cannot describe anything");
     };
     assert.equal(gitLatestTag("/repo", exec), null);
+  });
+});
+
+describe("gitDiffNames", () => {
+  it("返回 git diff HEAD --name-only 的文件列表", () => {
+    const exec = fakeExec((cmd) => (cmd.includes("diff HEAD --name-only") ? "src/a.js\nsrc/b.swift\n" : undefined));
+    assert.deepEqual(gitDiffNames("/repo", exec), ["src/a.js", "src/b.swift"]);
+  });
+
+  it("无改动返回空数组", () => {
+    const exec = fakeExec(() => "");
+    assert.deepEqual(gitDiffNames("/repo", exec), []);
+  });
+
+  it("git 失败返回空数组（fail-closed，不抛）", () => {
+    const exec = () => { throw new Error("git failed"); };
+    assert.deepEqual(gitDiffNames("/repo", exec), []);
   });
 });
 

@@ -1,7 +1,7 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, computePrecision, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger } from "./evaluate-models.mjs";
+import { normalizeFinding, dice, findingMatches, classifyConsensus, buildAdjudicatorPrompt, parseVerdict, adjudicate, evaluateModels, computePrecision, ADJUDICATE_TIMEOUT, extractContext, dedupJobsByTask, dedupFindings, makeResolveCode, filterAuditsByFiles, matchesFileFilter, cli, confirmFindings, confirmCli, adjudicateLedger, detectManualVerify, MANUAL_VERIFY_TOKENS } from "./evaluate-models.mjs";
 import { setSpawn } from "./runner-core.mjs";
 import { setRetryBackoffMs } from "./review-tools.mjs";
 
@@ -33,6 +33,60 @@ function mockProc(stdout = "", { exitCode = 0, stderr = "" } = {}) {
   setImmediate(close);
   return proc;
 }
+
+describe("detectManualVerify", () => {
+  it("命中窗口类 token（NSWindow/NSAlert/NSScreen/NSView）", () => {
+    assert.equal(detectManualVerify({ finding: "NSWindow frame is miscomputed" }), true);
+    assert.equal(detectManualVerify({ finding: "NSAlert is presented off-screen" }), true);
+    assert.equal(detectManualVerify({ fix: "Set NSView layer z-order correctly" }), true);
+  });
+
+  it("命中权限类 token（permission/authorization/TCC/accessibility/camera/screen recording）", () => {
+    assert.equal(detectManualVerify({ finding: "permission request never shown" }), true);
+    assert.equal(detectManualVerify({ finding: "TCC authorization denied silently" }), true);
+    assert.equal(detectManualVerify({ finding: "screen recording permission check missing" }), true);
+  });
+
+  it("命中快捷键/全局事件 token（CGEvent/NSEvent/keyDown/hotkey/shortcut/addGlobalMonitor）", () => {
+    assert.equal(detectManualVerify({ finding: "CGEvent tap leaks monitor" }), true);
+    assert.equal(detectManualVerify({ fix: "add keyDown handler for hotkey" }), true);
+    assert.equal(detectManualVerify({ finding: "shortcut conflicts with system" }), true);
+  });
+
+  it("命中 UI 框架 token（SwiftUI/AppKit/UIKit/webview）", () => {
+    assert.equal(detectManualVerify({ finding: "SwiftUI view does not refresh" }), true);
+    assert.equal(detectManualVerify({ file: "ResultWebView.swift", finding: "render logic wrong" }), true);
+  });
+
+  it("命中通用 window/alert/dialog token", () => {
+    assert.equal(detectManualVerify({ finding: "window closes but handle leaks" }), true);
+    assert.equal(detectManualVerify({ finding: "dialog button not clickable" }), true);
+  });
+
+  it("纯逻辑 finding 无 token → false", () => {
+    assert.equal(detectManualVerify({ finding: "null dereference in parser" }), false);
+    assert.equal(detectManualVerify({ finding: "integer overflow on array index" }), false);
+    assert.equal(detectManualVerify({ file: "parser.swift", finding: "loop bound off by one" }), false);
+  });
+
+  it("空/缺参 → false", () => {
+    assert.equal(detectManualVerify(), false);
+    assert.equal(detectManualVerify({}), false);
+    assert.equal(detectManualVerify({ finding: "" }), false);
+  });
+
+  it("大小写不敏感（NSWindow 与 nswindow 等价）", () => {
+    assert.equal(detectManualVerify({ finding: "NSWINDOW broken" }), true);
+    assert.equal(detectManualVerify({ finding: "nswindow broken" }), true);
+  });
+
+  it("token 表非空且含关键锚点", () => {
+    assert.ok(Array.isArray(MANUAL_VERIFY_TOKENS) && MANUAL_VERIFY_TOKENS.length > 0);
+    for (const t of ["nswindow", "nspanel", "nsscreen", "permission", "authorization", "tcc", "cgevent", "keydown", "hotkey", "shortcut", "swiftui", "appkit", "window", "alert"]) {
+      assert.ok(MANUAL_VERIFY_TOKENS.includes(t), `token 表应含 ${t}`);
+    }
+  });
+});
 
 describe("normalizeFinding", () => {
   it("lowercases and extracts ascii word tokens", () => {

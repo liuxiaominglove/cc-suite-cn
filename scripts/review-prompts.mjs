@@ -4,3 +4,23 @@ export const NL_REVIEW_PROMPT = "Review the following natural-language prompt ar
 export const CRITIC_PROMPT = "你是独立代码批判员（第二意见）。下方是其他评审员（glm/kimi）报的 finding 清单 + 完整代码。你的职责不是重新扫描代码，而是批判这份清单：1) 对每条 finding 判断「同意」(真 bug) 或「反对」(假阳)，并给一句理由（核查代码对应位置与被调用函数的真实实现，若该函数已处理了 finding 所说的问题，如 ~ 展开/路径归一化/null 守卫，则判反对）；2) 指出清单遗漏的真 bug（补漏）。盲评纪律：上游评审员的理由和依据均未附给你，你必须只凭代码本身独立判断，禁止猜测上游意图。输出 JSON：{\"verdicts\":[{\"index\":数字,\"agree\":true/false,\"reason\":\"一句理由\"}],\"missed\":[{\"file\":\"路径\",\"line\":数字,\"finding\":\"描述\",\"reason\":\"为什么是漏报的一句理由\"}]}";
 export const SELF_CHECK_PROMPT = "下面是你自己刚报的 finding 清单 + 完整代码。请逐条自检：对每条 finding，找到它涉及的函数，核对该函数的真实实现（在 CODE 或 [项目上下文] 里）——若该函数已处理了所说的问题（如 ~ 展开、路径归一化、null 守卫），就把这条判 keep=false。只保留经自检仍成立的 finding。输出 JSON：{\"survivors\":[{\"index\":数字,\"keep\":true/false,\"reason\":\"一句理由\"}]}";
 export const VERIFY_PROMPT = "以下是本次代码改动（git diff 输出，`-` 行是删除/改前，`+` 行是新增/改后，每个 `@@` 是一处改动区域）。请逐处（每个 @@）验证：① 改动是否正确实现目标；② 有无引入回归或新 bug；③ 有无遗漏。输出 JSON：{ \"severity\": \"high/medium/low\", \"issues\": [{ \"file\": \"路径\", \"line\": 行号, \"finding\": \"描述\", \"fix\": \"建议\" }], \"chain_analysis\": \"对每条 issue 说明涉及的函数及其真实实现、为什么构成 bug\", \"summary\": \"总体结论\" }，finding 和 fix 字段请用英文输出，line 指改动后文件的行号。";
+
+// 修复背景段：把「本轮 diff 正在修哪些已裁决为真的 bug」告诉复审施工队，降低「建议改回会回归」的误报。
+export function buildFixContextSection(findings) {
+  const list = (findings ?? []).filter(Boolean);
+  if (list.length === 0) return "";
+  const lines = list.map((v) => {
+    const loc = [v.file ?? "", v.line ?? ""].filter((p) => p !== "").join(":");
+    return `- ${loc} — ${v.finding ?? ""}${v.fix ? `\n    fix: ${v.fix}` : ""}`;
+  });
+  return [
+    "[修复背景]",
+    "本次改动是在修复以下已裁决为真的 bug（来自裁决账本：auditCommit 命中当前 HEAD 且尚未修完）。你仍须逐处验证 diff 本身是否改对、有无回归/遗漏；特别注意：不要建议把改动改回会重新引入这些 bug 的方案（例如「加回 activate」这类会回归的建议）。",
+    ...lines,
+  ].join("\n");
+}
+
+export function buildVerifyPrompt(fixContext) {
+  const section = (fixContext ?? "").trim();
+  return section ? `${section}\n\n${VERIFY_PROMPT}` : VERIFY_PROMPT;
+}

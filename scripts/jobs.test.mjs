@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, normalizeFindingFile, backgroundHint } from "./jobs.mjs";
+import { createJobStore, runJob, parseArgs, defaultStore, buildMeta, DEFAULT_JOBS_DIR, updateJobWithResult, spawnWorker, runJobBackground, cancelJob, runAudit, summarizeWorkers, acquireSlot, __resetSlotsForTest, AUDIT_WORKERS, isValidJobId, buildFindingEntries, persistFindings, normalizeFindingFile, backgroundHint, resolveFixContextSection } from "./jobs.mjs";
 import { AuthError } from "./review-runner.mjs";
 import { readFileSync } from "node:fs";
 
@@ -512,6 +512,23 @@ describe("runAudit", () => {
     );
   });
 
+  it("resolveFixContext 是函数时被调用并透传 projectDir/headCommit/changedFiles", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    let captured = null;
+    const resolveFixContext = async (opts) => { captured = opts; return ""; };
+    await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: () => [], resolveFixContext });
+    assert.ok(captured, "应调用注入的 resolveFixContext");
+    assert.ok("projectDir" in captured, "应透传 projectDir");
+    assert.ok("headCommit" in captured, "应透传 headCommit");
+    assert.ok("changedFiles" in captured, "应透传 changedFiles");
+  });
+
+  it("resolveFixContext 非函数（字符串）时回退默认解析器、不抛错", async () => {
+    const review = async () => ({ success: true, severity: "low", issues: [], summary: "ok" });
+    const result = await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: () => [], resolveFixContext: "not-a-function" });
+    assert.equal(result.workers.every((w) => w.success), true, "非函数 resolveFixContext 不得抛运行时错");
+  });
+
   it("verdict 消费已知低风险：result.workers 降级 + verdict clean + 落库保持原始", async () => {
     const review = async ({ model }) => {
       if (model === "qwen3-coder-plus") {
@@ -824,6 +841,32 @@ describe("runJobBackground concurrency", () => {
     const id2 = await p2;
     assert.equal(secondSpawned, true, "释放后第二个应启动");
     assert.ok(id2);
+  });
+});
+
+describe("resolveFixContextSection", () => {
+  it("headCommit 为 null → 空串（fail-closed）", async () => {
+    assert.equal(await resolveFixContextSection({ projectDir: "/p", headCommit: null, load: async () => [] }), "");
+  });
+
+  it("load 抛错 → 空串（不阻断复审）", async () => {
+    const out = await resolveFixContextSection({ projectDir: "/p", headCommit: "H", load: async () => { throw new Error("boom"); } });
+    assert.equal(out, "");
+  });
+
+  it("命中本轮 finding → 组段并含 finding/fix 原文", async () => {
+    const load = async () => [
+      { file: "/p/a.swift", line: 1, finding: "activate regression", fix: "do not re-add activate", verdict: "true", auditCommit: "H", projectDir: "/p" },
+    ];
+    const out = await resolveFixContextSection({ projectDir: "/p", headCommit: "H", changedFiles: ["a.swift"], load });
+    assert.ok(out.includes("[修复背景]"));
+    assert.ok(out.includes("activate regression"));
+    assert.ok(out.includes("do not re-add activate"));
+  });
+
+  it("无命中 → 空串", async () => {
+    const out = await resolveFixContextSection({ projectDir: "/p", headCommit: "H", changedFiles: ["x.swift"], load: async () => [] });
+    assert.equal(out, "");
   });
 });
 

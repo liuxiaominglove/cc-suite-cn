@@ -14,6 +14,7 @@ import {
   loadVerdicts,
   getActionableFindings,
   getUncertainFindings,
+  getFixContext,
   isVerdictStale,
   markFixed,
   confirmVerdict,
@@ -271,6 +272,60 @@ describe("getActionableFindings", () => {
     const log = [{ file: "a.js", finding: "in A", verdict: "true", projectDir: "/proj/a" }];
     const out = getActionableFindings(log, { projectDir: "/nonexist" });
     assert.equal(out.length, 0);
+  });
+});
+
+describe("getFixContext", () => {
+  const base = [
+    { file: "/proj/a.js", line: 1, finding: "本轮真", verdict: "true", auditCommit: "HEAD1", projectDir: "/proj" },
+    { file: "/proj/b.js", line: 1, finding: "上一轮", verdict: "true", auditCommit: "HEAD0", projectDir: "/proj" },
+    { file: "/proj/c.js", line: 1, finding: "已修", verdict: "true", auditCommit: "HEAD1", projectDir: "/proj", fixed: { commit: "c1" } },
+    { file: "/proj/d.js", line: 1, finding: "判假", verdict: "false", auditCommit: "HEAD1", projectDir: "/proj" },
+    { file: "/proj/e.js", line: 1, finding: "终审判假", verdict: "true", auditCommit: "HEAD1", projectDir: "/proj", confirmed: { final: "false" } },
+    { file: "/proj/f.js", line: 1, finding: "无commit旧数据", verdict: "true", projectDir: "/proj" },
+    { file: "/proj/g.js", line: 1, finding: "别项目", verdict: "true", auditCommit: "HEAD1", projectDir: "/other" },
+  ];
+
+  it("只返回本轮(actionable)的 finding", () => {
+    const out = getFixContext(base, { projectDir: "/proj", headCommit: "HEAD1" });
+    assert.deepEqual(out.map((v) => v.finding), ["本轮真"]);
+  });
+
+  it("headCommit 为 null → 全排除（fail-closed，无法关联轮次）", () => {
+    assert.deepEqual(getFixContext(base, { projectDir: "/proj", headCommit: null }), []);
+  });
+
+  it("旧数据无 auditCommit → 排除（undefined !== headCommit）", () => {
+    const out = getFixContext(base, { projectDir: "/proj", headCommit: "HEAD1" });
+    assert.ok(!out.some((v) => v.finding === "无commit旧数据"));
+  });
+
+  it("changedFiles 相对路径按 projectDir 归一后匹配绝对 file", () => {
+    const out = getFixContext(base, { projectDir: "/proj", headCommit: "HEAD1", changedFiles: ["a.js", "b.js"] });
+    assert.deepEqual(out.map((v) => v.finding), ["本轮真"]);
+  });
+
+  it("changedFiles 不含某 file → 排除（即便 auditCommit 命中）", () => {
+    const out = getFixContext(base, { projectDir: "/proj", headCommit: "HEAD1", changedFiles: ["zzz.js"] });
+    assert.deepEqual(out, []);
+  });
+
+  it("changedFiles 为 null/undefined → 不过滤 file（仅 commit 隔离）", () => {
+    const out = getFixContext(base, { projectDir: "/proj", headCommit: "HEAD1", changedFiles: null });
+    assert.deepEqual(out.map((v) => v.finding), ["本轮真"]);
+  });
+
+  it("v.file 为相对路径时按 projectDir 对称归一后仍能匹配", () => {
+    const log = [
+      { file: "a.js", line: 1, finding: "相对file", verdict: "true", auditCommit: "HEAD1", projectDir: "/proj" },
+    ];
+    const out = getFixContext(log, { projectDir: "/proj", headCommit: "HEAD1", changedFiles: ["a.js"] });
+    assert.deepEqual(out.map((v) => v.finding), ["相对file"]);
+  });
+
+  it("空账本 / projectDir 无匹配 → 空", () => {
+    assert.deepEqual(getFixContext([], { projectDir: "/proj", headCommit: "HEAD1" }), []);
+    assert.deepEqual(getFixContext(base, { projectDir: "/none", headCommit: "HEAD1" }), []);
   });
 });
 
@@ -767,6 +822,20 @@ describe("appendVerdicts", () => {
     const log = await loadVerdicts(p);
     assert.equal(log[0].verdict, "false", "重跑应覆盖 verdict");
     assert.equal(log[0].evidence, "new");
+  });
+
+  it("透传 requiresManualVerify（新条目 + 已有条目）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "verdict-"));
+    const p = join(dir, "log.json");
+    await upsertFindings([{ file: "a.js", line: 1, finding: "f" }], p);
+    await appendVerdicts([{ file: "a.js", line: 1, finding: "f", verdict: "true", requiresManualVerify: true }], p);
+    let log = await loadVerdicts(p);
+    assert.equal(log[0].requiresManualVerify, true, "已有条目应写入 requiresManualVerify");
+
+    await appendVerdicts([{ file: "b.js", line: 1, finding: "g", verdict: "false", requiresManualVerify: false }], p);
+    log = await loadVerdicts(p);
+    const b = log.find((v) => v.file === "b.js");
+    assert.equal(b.requiresManualVerify, false, "新条目应透传 requiresManualVerify=false");
   });
 });
 

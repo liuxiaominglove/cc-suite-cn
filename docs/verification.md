@@ -991,4 +991,14 @@
   - /verify diff 复审 2 轮：第 1 轮 3 条、第 2 轮 7 条，代码级终审判定 7 条误报（qwen 把「正确拦截越界/正确配对原文」当 bug）+ 2 条轻微真实已修
 - **复审状态**：🟢 已复审（单测全绿 + 关键 UI 竞态真机确认 + diff 复审残留误报已澄清）
 
+---
+
+# P2/P3：真机打标 + /verify 注入修复背景（2026-08-28）
+
+- **P2 最小**：`fix.md` Step 5 + Critical Rules + `SKILL.md` 复审门控，铁律「窗口/权限/快捷键改动 Step 5 必须真机点验，非 🟢 不 commit」。验证：`commands.test.mjs` + 全文核对（无单测，属规则文本）🟡。
+- **P2 进阶**：`detectManualVerify` 纯函数（token 命中窗口/权限/快捷键）+ `adjudicateLedger` 打 `requiresManualVerify` + `appendVerdicts` 透传。验证：`evaluate-models.test.mjs` 9 用例 + `verdict-log.test.mjs`「透传 requiresManualVerify」全绿 🟢。
+- **P3 关联逻辑**：`getFixContext`（`auditCommit===HEAD` 且 `file∈变更文件`，headCommit 缺失 fail-closed）验证：`verdict-log.test.mjs` 7 用例全绿（不同轮/已 fixed/判假/终审判假/无 commit 旧数据/相对路径归一/空账本）🟢。
+- **P3 注入链路**：`buildFixContextSection`/`buildVerifyPrompt`（背景段前置 + 警告勿回归）+ `review()` `fixContext` 参数（diff 模式）+ `gitDiffNames` + `runAudit` diff 分支同源注入（`cwd=resolvedProjectDir`）。验证：`review-runner.test.mjs` 3 用例（注入/不注入/背景原文）+ `jobs.test.mjs` 4 用例（`resolveFixContextSection`）+ `audit-baseline.test.mjs` 3 用例（`gitDiffNames`）全绿 🟢。
+- **门禁**：`pnpm test:unit` 958 全绿 + drift guard pass 🟢。未做：`pnpm verify:e2e`/`self-audit`（release 门禁，不进编辑循环）。
+
 <!-- report-required: begin -->

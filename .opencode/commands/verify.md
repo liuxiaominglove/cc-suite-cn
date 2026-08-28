@@ -30,6 +30,13 @@ node scripts/jobs.mjs --run-audit --diff
 
 （`--diff` 内部跑 `git diff HEAD`，只发改动 hunk + 上下文给施工队，逐处验证"改得对不对 + 有无回归 + 有无遗漏"）
 
+> **外部项目**（被审项目 ≠ 当前目录）：必须带 `--project-dir "<项目根>"`——diff 与「修复背景」都用它定位仓库，否则审的是 cc-suite-cn 自己的 diff、背景也会查错仓库：
+> ```
+> node scripts/jobs.mjs --run-audit --diff --project-dir "<项目根>"
+> ```
+>
+> **修复背景注入**：复审施工队会拿到「本轮 diff 正在修哪些已裁决为真的 bug」（从裁决账本按 `auditCommit===HEAD` 且 `file∈变更文件` 提取），降低「建议改回会回归」的误报。无背景时不注入，不影响正常复审。
+
 输出 `<job-id>  [completed]`。
 
 ## Step 2: 读结果并列现状

@@ -7,8 +7,9 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { FIND_BUG_WORKERS, VERIFY_WORKERS } from "./models.mjs";
 import { isMainModule } from "./runner-core.mjs";
 import { verdictFromFindings, downgradeKnownLowRisk } from "./review-gate.mjs";
-import { acquireLock, releaseLock } from "./verdict-log.mjs";
-import { findProjectRoot, gitHead } from "./audit-baseline.mjs";
+import { acquireLock, releaseLock, getFixContext } from "./verdict-log.mjs";
+import { findProjectRoot, gitHead, gitDiffNames } from "./audit-baseline.mjs";
+import { buildFixContextSection } from "./review-prompts.mjs";
 import { normalizeFindingFile } from "./review-tools.mjs";
 
 export { normalizeFindingFile };
@@ -369,7 +370,7 @@ export function buildMeta(parsed) {
 
 export const AUDIT_WORKERS = FIND_BUG_WORKERS;
 
-export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null, persistFindingsFn = null, projectDir = null, findRoot = null, upsert = null, dedup = null }) {
+export async function runAudit({ file, dir, exts, diff = false, review, timeout = 900000, persistAuditLog = true, appendAudit = null, retries = 2, allowExternal = false, customPrompt = null, getFeedback = null, persistFindingsFn = null, projectDir = null, findRoot = null, upsert = null, dedup = null, resolveFixContext = null }) {
   if (!review) {
     ({ review } = await import("./review-runner.mjs"));
   }
@@ -381,6 +382,19 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
   const auditCommit = gitHead(resolvedProjectDir);
   const workerList = diff ? VERIFY_WORKERS : AUDIT_WORKERS;
   const controller = new AbortController();
+
+  // /verify 注入修复背景：把「本轮 diff 正在修哪些已裁决为真的 bug」发给复审施工队，降低误报。
+  // 同源保证：diff（getDiff 走 review 的 cwd）与修复背景（gitHead/gitDiffNames/loadVerdicts）都用 resolvedProjectDir。
+  let fixContext = "";
+  if (diff) {
+    const resolveFn = typeof resolveFixContext === "function" ? resolveFixContext : resolveFixContextSection;
+    fixContext = await resolveFn({
+      projectDir: resolvedProjectDir,
+      headCommit: auditCommit,
+      changedFiles: gitDiffNames(resolvedProjectDir),
+    });
+  }
+
   const workers = await Promise.all(
     workerList.map(async ({ backend, model }) => {
       try {
@@ -391,7 +405,7 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
         } else if (dir) {
           r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal });
         } else {
-          r = await review({ model, backend, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble });
+          r = await review({ model, backend, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble, fixContext, cwd: resolvedProjectDir });
         }
         return { backend, model, success: r.success, severity: r.severity, issues: r.issues, summary: r.summary, chainAnalysis: r.chainAnalysis ?? "", error: r.error ?? null };
       } catch (err) {
@@ -484,6 +498,20 @@ export function summarizeWorkers(workers) {
       return `${w.model}: ${status}`;
     })
     .join(" | ");
+}
+
+// 修复背景解析（/verify 注入）：读裁决账本 → getFixContext（auditCommit===head + file∈changed）→ 组段落。
+// 任何失败都 fail-closed 返回 ""（背景是参考，拿不到不阻断复审，绝不让半截背景误导施工队）。
+export async function resolveFixContextSection({ projectDir = process.cwd(), headCommit = null, changedFiles = null, load = null } = {}) {
+  if (headCommit == null) return "";
+  try {
+    const loadFn = load ?? (async () => (await import("./verdict-log.mjs")).loadVerdicts());
+    const log = await loadFn();
+    const findings = getFixContext(log, { projectDir, headCommit, changedFiles });
+    return buildFixContextSection(findings);
+  } catch {
+    return "";
+  }
 }
 
 async function defaultAppendAudit(workers, target) {
