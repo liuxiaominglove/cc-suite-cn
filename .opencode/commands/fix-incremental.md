@@ -51,8 +51,10 @@ node scripts/jobs.mjs --run-audit --file "<绝对路径>" --allow-external --pro
 > **critic 一次只审一个文件**：把 Step 1 累积的 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是项目根目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的变更文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3-coder-plus
 ```
+
+> **`--project-dir` 必传**：否则 qwen 补漏的 missed finding 落账 projectDir 会写成 cc-suite-cn 根目录，Step 3 裁决按项目根过滤时被漏掉。
 
 输出 `{verdicts:[{index, agree, reason}], missed:[...]}`：`verdicts` 判「反对」（假阳）的 Step 4 重点复核；`missed` 自动落账（`source=qwen-critic`）随 Step 3 一起裁决。
 

@@ -32,8 +32,10 @@ node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..." --p
 > **critic 一次只审一个文件**：把 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3-coder-plus
 ```
+
+> **`--project-dir` 必传**：否则 qwen 补漏的 missed finding 落账时 projectDir 会写成 cc-suite-cn 根目录，Step 3 裁决按项目根过滤时被漏掉。
 
 文件模式（`$ARGUMENTS` 是单文件）只有一组；目录模式按文件分组循环。无 findings 的文件跳过。
 
@@ -107,10 +109,11 @@ node scripts/evaluate-models.mjs --confirm /tmp/confirm.json
 
 > **可选**：若 bug 涉及 ≥2 个文件或跨模块，先列 3 行修复计划（改哪些文件 / 核心改法 / 影响面）再动手；单文件单行修复可跳过。
 
-对终审确认的真 bug，opencode 用 TDD 修。**动手前必做两件事（AGENTS.md 铁律 #7）**：
+对终审确认的真 bug，opencode 用 TDD 修。**动手前必做三件事（AGENTS.md 铁律 #7 + 本轮教训）**：
 
 1. **实测触发条件**：finding 可能「bug 是真的，触发条件写错了」（如把"argv 是相对路径"当触发，实测 argv 恒为绝对路径），修前先复现/验证触发条件，不默认 finding 措辞准确。
 2. **修复建议放所有调用点验证**：finding 给的 fix 照抄可能引入回归（如"限定项目根目录"会顺带砍掉外部项目审计），落地前把建议放到每个调用方验证，防照抄引入回归。
+3. **fix 建议是参考方向，非完整方案**：finding 的 `fix` 字段常省略细节（如"mirror showError"漏了 window.level / collectionBehavior，照抄一半导致全屏遮挡没修好）。照抄前先 grep 同类已有实现，逐项对照补齐。
 
 TDD 五步：
 
