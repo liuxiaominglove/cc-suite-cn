@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { gitHead, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs, findProjectRoot } from "./audit-baseline.mjs";
+import { gitHead, gitLatestTag, gitChangedFiles, gitDirty, loadBaseline, saveBaseline, detectAuditScope, parseSaveArgs, findProjectRoot } from "./audit-baseline.mjs";
 
 function fakeExec(handler) {
   return (cmd, opts) => {
@@ -29,6 +29,20 @@ describe("gitHead", () => {
   it("exec 返回空串时不抛错", () => {
     const exec = fakeExec((cmd) => (cmd.includes("rev-parse") ? "" : undefined));
     assert.equal(gitHead("/repo", exec), "");
+  });
+});
+
+describe("gitLatestTag", () => {
+  it("返回最近的 tag（trim 后）", () => {
+    const exec = fakeExec((cmd) => (cmd.includes("describe") ? "v5.5.4\n" : undefined));
+    assert.equal(gitLatestTag("/repo", exec), "v5.5.4");
+  });
+
+  it("无 tag 时返回 null", () => {
+    const exec = () => {
+      throw new Error("fatal: no names found, cannot describe anything");
+    };
+    assert.equal(gitLatestTag("/repo", exec), null);
   });
 });
 

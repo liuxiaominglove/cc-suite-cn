@@ -1969,17 +1969,17 @@ describe("criticize", () => {
   });
 
   it("buildMissedFindings 映射为 qwen-critic 条目（reason 存 chainAnalysis）", () => {
-    const missed = [{ file: "d.js", line: 4, finding: "漏报", reason: "为什么漏" }];
-    const entries = buildMissedFindings(missed, "fallback.js");
+    const missed = [{ file: "/p/d.js", line: 4, finding: "漏报", reason: "为什么漏" }];
+    const entries = buildMissedFindings(missed, "/p/fallback.js", { projectDir: "/p" });
     assert.equal(entries.length, 1);
-    assert.equal(entries[0].file, "d.js");
+    assert.equal(entries[0].file, "/p/d.js");
     assert.equal(entries[0].source, "qwen-critic");
     assert.equal(entries[0].chainAnalysis, "为什么漏");
     assert.deepEqual(entries[0].models, ["qwen3-coder-plus"]);
   });
 
   it("buildMissedFindings 模型参数化（不硬编码）", () => {
-    const entries = buildMissedFindings([{ finding: "f" }], "fb.js", { model: "custom-critic" });
+    const entries = buildMissedFindings([{ finding: "f" }], "/p/fb.js", { projectDir: "/p", model: "custom-critic" });
     assert.deepEqual(entries[0].models, ["custom-critic"]);
   });
 

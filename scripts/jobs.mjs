@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile, readdir, rename, unlink } from "node:fs/promises";
 import { openSync, closeSync } from "node:fs";
-import { join, resolve, dirname, sep } from "node:path";
+import { join, resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -9,6 +9,9 @@ import { isMainModule } from "./runner-core.mjs";
 import { verdictFromFindings, downgradeKnownLowRisk } from "./review-gate.mjs";
 import { acquireLock, releaseLock } from "./verdict-log.mjs";
 import { findProjectRoot, gitHead } from "./audit-baseline.mjs";
+import { normalizeFindingFile } from "./review-tools.mjs";
+
+export { normalizeFindingFile };
 
 const JOBS_SCRIPT = fileURLToPath(import.meta.url);
 
@@ -419,20 +422,6 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
 
   const downgraded = downgradeKnownLowRisk(workers);
   return { workers: downgraded, entries, verdict: verdictFromFindings(downgraded) };
-}
-
-function clampWithin(base, candidate) {
-  const prefix = base.endsWith(sep) ? base : base + sep;
-  return candidate === base || candidate.startsWith(prefix) ? candidate : base;
-}
-
-export function normalizeFindingFile(issueFile, { auditFile = null, projectDir = process.cwd() } = {}) {
-  const f = (issueFile ?? "").trim();
-  if (!f) return auditFile ?? "";
-  if (f.startsWith("/")) return f;                      // 绝对路径
-  if (f.includes("/")) return clampWithin(projectDir, resolve(projectDir, f));  // 相对带目录 → 拼项目根（防 .. 逃逸）
-  if (auditFile) return clampWithin(dirname(auditFile), join(dirname(auditFile), f));  // 裸文件名 → 拼被审文件目录
-  return clampWithin(projectDir, resolve(projectDir, f));
 }
 
 export function buildFindingEntries(workers, dedupFn, { projectDir = process.cwd(), auditFile = null, auditCommit = null } = {}) {

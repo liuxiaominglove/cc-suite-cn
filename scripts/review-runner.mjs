@@ -35,7 +35,7 @@ import {
   SourceTamperedError,
 } from "./review-source.mjs";
 import { criticize, parseCriticArgs, mapCriticVerdicts, buildMissedFindings } from "./review-critic.mjs";
-import { findProjectRoot } from "./audit-baseline.mjs";
+import { findProjectRoot, gitHead } from "./audit-baseline.mjs";
 
 export { setSpawn, RunnerError, TimeoutError, AuthError, SourceTamperedError };
 
@@ -358,8 +358,11 @@ if (isMainModule(import.meta.url)) {
     const { file, findingsFile } = parseCriticArgs(args);
     const backend = args.indexOf("--backend") !== -1 ? args[args.indexOf("--backend") + 1] : "qwen";
     const model = args.indexOf("--model") !== -1 ? args[args.indexOf("--model") + 1] : CRITIC_MODEL;
+    const projectDirIdx = args.indexOf("--project-dir");
+    const projectDir = projectDirIdx !== -1 && args[projectDirIdx + 1] && !args[projectDirIdx + 1].startsWith("--")
+      ? args[projectDirIdx + 1] : null;
     if (!file || !findingsFile) {
-      console.error("Usage: node review-runner.mjs --critic --file <path> --findings-file <json-file> [--backend qwen] [--model ...]");
+      console.error("Usage: node review-runner.mjs --critic --file <path> --findings-file <json-file> [--project-dir <dir>] [--backend qwen] [--model ...]");
       process.exit(1);
     }
     const { readFile } = await import("node:fs/promises");
@@ -375,7 +378,11 @@ if (isMainModule(import.meta.url)) {
       const { appendCritic, upsertFindings } = await import("./verdict-log.mjs");
       const criticEntries = mapCriticVerdicts(result.verdicts, findings);
       if (criticEntries.length) await appendCritic(criticEntries);
-      const missedFindings = buildMissedFindings(result.missed, file);
+      const resolvedProjectDir = projectDir ?? process.cwd();
+      const missedFindings = buildMissedFindings(result.missed, file, {
+        projectDir: resolvedProjectDir,
+        auditCommit: gitHead(resolvedProjectDir),
+      });
       if (missedFindings.length) await upsertFindings(missedFindings);
     } catch {
       // 落账失败不阻断批判输出

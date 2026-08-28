@@ -1,7 +1,7 @@
 import { buildCommand } from "./backends.mjs";
 import { CRITIC_MODEL } from "./models.mjs";
 import { CRITIC_PROMPT, SELF_CHECK_PROMPT } from "./review-prompts.mjs";
-import { frameCode, runModel, extractJson, DEFAULT_TIMEOUT } from "./review-tools.mjs";
+import { frameCode, runModel, extractJson, DEFAULT_TIMEOUT, normalizeFindingFile } from "./review-tools.mjs";
 import { buildLessonsSection } from "./review-context.mjs";
 
 export function buildCriticPrompt(findings, code, lessons = "") {
@@ -47,15 +47,16 @@ export function mapCriticVerdicts(verdicts, findings) {
     .filter(Boolean);
 }
 
-export function buildMissedFindings(missed, file, { projectDir = process.cwd(), model = CRITIC_MODEL } = {}) {
+export function buildMissedFindings(missed, file, { projectDir = process.cwd(), auditCommit = null, model = CRITIC_MODEL } = {}) {
   return (missed ?? []).map((m) => ({
-    file: m.file ?? file,
+    file: normalizeFindingFile(m.file, { auditFile: file, projectDir }),
     line: m.line ?? null,
     finding: m.finding ?? "",
     chainAnalysis: m.reason ?? "",
     source: "qwen-critic",
     models: [model],
     projectDir,
+    auditCommit,
   }));
 }
 

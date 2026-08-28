@@ -41,6 +41,15 @@ export function gitDirty(cwd = process.cwd(), exec = execSync) {
   }
 }
 
+/// 最近一个 tag（已发布版本）；无 tag / 非 git 返回 null。
+export function gitLatestTag(cwd = process.cwd(), exec = execSync) {
+  try {
+    return exec("git describe --tags --abbrev=0", { cwd, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
 function collectNames(output) {
   const names = [];
   for (const line of (output ?? "").split("\n")) {
@@ -111,18 +120,19 @@ export async function detectAuditScope(project, { cwd = process.cwd(), exec = ex
   const prev = baseline[project];
   const head = gitHead(cwd, exec);
   const dirty = gitDirty(cwd, exec);
+  const latestTag = head ? gitLatestTag(cwd, exec) : null;
   if (!head) {
-    return { isGit: false, changed: false, files: [], head: null, dirty };
+    return { isGit: false, changed: false, files: [], head: null, dirty, latestTag };
   }
   if (!prev || !prev.commit) {
-    return { isGit: true, changed: true, firstAudit: true, files: null, head, dirty };
+    return { isGit: true, changed: true, firstAudit: true, files: null, head, dirty, latestTag };
   }
   if (prev.commit === head) {
     const files = dirty ? gitChangedFiles(head, cwd, exec) : [];
-    return { isGit: true, changed: dirty, files, head, dirty };
+    return { isGit: true, changed: dirty, files, head, dirty, latestTag };
   }
   const files = gitChangedFiles(prev.commit, cwd, exec);
-  return { isGit: true, changed: true, firstAudit: false, files, baseCommit: prev.commit, head, dirty };
+  return { isGit: true, changed: true, firstAudit: false, files, baseCommit: prev.commit, head, dirty, latestTag };
 }
 
 export function parseSaveArgs(args) {

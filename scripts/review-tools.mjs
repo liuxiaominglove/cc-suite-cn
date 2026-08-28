@@ -1,4 +1,4 @@
-import { basename } from "node:path";
+import { basename, resolve, dirname, join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { jsonrepair } from "jsonrepair";
 import { runProcess, TimeoutError, RunnerError } from "./runner-core.mjs";
@@ -172,4 +172,24 @@ export function isNLArtifact(file) {
     bn === "agents.md" ||
     bn === "claude.md"
   );
+}
+
+// ── finding file 归一化（入账边界）──
+// 施工队（LLM）报的 file 可能是绝对路径 / 相对路径 / 裸文件名 / 空，落账前统一成绝对路径。
+// 放在叶子模块 review-tools，供 audit 主链路（jobs.mjs）与批判员（review-critic.mjs）共用，避免各写一份漂移。
+
+function clampWithin(base, candidate) {
+  const prefix = base.endsWith(sep) ? base : base + sep;
+  return candidate === base || candidate.startsWith(prefix) ? candidate : base;
+}
+
+export function normalizeFindingFile(issueFile, { auditFile = null, projectDir = process.cwd() } = {}) {
+  const f = (issueFile ?? "").trim();
+  // auditFile 可能是相对路径（如裸文件名），先归一化成绝对，避免 dirname 返回 "." 导致 clampWithin 失效
+  const auditAbs = auditFile && !auditFile.startsWith("/") ? resolve(projectDir, auditFile) : auditFile;
+  if (!f) return auditAbs ?? "";
+  if (f.startsWith("/")) return f;                      // 绝对路径
+  if (f.includes("/")) return clampWithin(projectDir, resolve(projectDir, f));  // 相对带目录 → 拼项目根（防 .. 逃逸）
+  if (auditAbs) return clampWithin(dirname(auditAbs), join(dirname(auditAbs), f));  // 裸文件名 → 拼被审文件目录
+  return clampWithin(projectDir, resolve(projectDir, f));
 }
