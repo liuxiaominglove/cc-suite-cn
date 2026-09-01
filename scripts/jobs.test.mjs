@@ -638,6 +638,19 @@ describe("runAudit", () => {
     }
   });
 
+  it("passes cwd: resolvedProjectDir to reviewFile（外部项目校验基准）", async () => {
+    const captured = [];
+    const review = async (opts) => {
+      captured.push(opts.cwd);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await runAudit({ file: "x.js", review, persistAuditLog: false, projectDir: "/ext/proj" });
+    assert.equal(captured.length, 2);
+    for (const c of captured) {
+      assert.equal(c, "/ext/proj", "应把 projectDir 作为 cwd 透传（无需 allowExternal）");
+    }
+  });
+
   it("passes per-model feedbackPreamble from getFeedback to review", async () => {
     const captured = {};
     const review = async (opts) => {

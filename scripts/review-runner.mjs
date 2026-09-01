@@ -192,11 +192,11 @@ export async function review({ model, code, customPrompt, timeout = DEFAULT_TIME
   };
 }
 
-export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0, feedbackPreamble = null, signal = null }) {
+export async function reviewFile({ model, backend, file, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFn = null, readFn = null, retries = 0, feedbackPreamble = null, signal = null, cwd = process.cwd() }) {
   const reviewFnUsed = reviewFn ?? review;
   const read = readFn ?? (async (f) => {
     const { readFile } = await import("node:fs/promises");
-    const resolved = validateFilePath(f, process.cwd(), { allowExternal });
+    const resolved = validateFilePath(f, cwd, { allowExternal });
     return readFile(resolved, "utf-8");
   });
 
@@ -204,19 +204,19 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
   try {
     code = await read(file);
   } catch (err) {
-    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal, retries, feedbackPreamble });
+    return reviewFnUsed({ model, backend, file, timeout, customPrompt, allowExternal, retries, feedbackPreamble, cwd });
   }
 
   const chunks = chunkCode(code, { chunkSize, overlap });
   if (chunks.length === 1) {
-    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble });
+    return reviewFnUsed({ model, backend, code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble, cwd });
   }
 
   const chunkResults = await Promise.all(
     chunks.map(async (chunk) => {
       if (signal?.aborted) return { startLine: chunk.startLine, result: { success: false, error: "cancelled by signal" } };
       try {
-        const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble });
+        const r = await reviewFnUsed({ model, backend, code: chunk.code, file, timeout, customPrompt, allowExternal, retries, fileName: file, feedbackPreamble, cwd });
         return { startLine: chunk.startLine, result: r };
       } catch (err) {
         if (err instanceof AuthError) throw err;
@@ -257,7 +257,7 @@ export async function reviewFile({ model, backend, file, chunkSize = 800, overla
 // 目录评审：逐文件串行审（每文件内部仍按 800 行分块），不再把所有文件拼成一个巨 payload。
 // 根因教训（2026-08-21）：--dir 模式曾把所有文件拼成单一 payload 一次性发给 codebuddy，
 // 项目一大（几十文件 / 几十万字符）就卡死超时；单文件模式有 800 行分块兜底，目录模式却没有。
-export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFileFn = null, collectFn = null, retries = 0, feedbackPreamble = null, cwd = process.cwd(), log = (msg) => process.stderr.write(msg), signal = null }) {
+export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chunkSize = 800, overlap = 10, timeout = DEFAULT_TIMEOUT, customPrompt = null, allowExternal = false, reviewFileFn = null, collectFn = null, retries = 0, feedbackPreamble = null, cwd = process.cwd(), log = (msg) => process.stderr.write(msg), signal = null, heartbeatMs = 60000 }) {
   const collect = collectFn ?? collectSourceFiles;
   const reviewFileUsed = reviewFileFn ?? reviewFile;
 
@@ -289,13 +289,19 @@ export async function reviewDir({ model, backend, dir, exts = DEFAULT_EXTS, chun
     if (signal?.aborted) break;
     const f = srcFiles[i];
     const relPath = relative(resolvedDir, f);
+    const started = Date.now();
     log(`[${model}] [${i + 1}/${total}] ${relPath}\n`);
+    const heartbeat = setInterval(() => {
+      log(`[${model}] [${i + 1}/${total}] ${relPath} 仍在评审中 (${Math.round((Date.now() - started) / 1000)}s)\n`);
+    }, heartbeatMs);
     try {
-      const r = await reviewFileUsed({ model, backend, file: f, chunkSize, overlap, timeout, customPrompt, allowExternal, retries, feedbackPreamble, signal });
+      const r = await reviewFileUsed({ model, backend, file: f, chunkSize, overlap, timeout, customPrompt, allowExternal, retries, feedbackPreamble, signal, cwd });
       fileResults.push({ file: relPath, absPath: f, result: r });
     } catch (err) {
       if (err instanceof AuthError) throw err;
       fileResults.push({ file: relPath, absPath: f, result: { success: false, error: err?.message ?? String(err) } });
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 

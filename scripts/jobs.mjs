@@ -401,9 +401,9 @@ export async function runAudit({ file, dir, exts, diff = false, review, timeout 
         const feedbackPreamble = getFeedback ? await getFeedback(model, file) : null;
         let r;
         if (file) {
-          r = await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal });
+          r = await reviewFile({ model, backend, file, timeout, reviewFn: review, retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal, cwd: resolvedProjectDir });
         } else if (dir) {
-          r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal });
+          r = await reviewDir({ model, backend, dir, exts, timeout, reviewFileFn: (opts) => reviewFile({ ...opts, reviewFn: review }), retries, allowExternal, customPrompt, feedbackPreamble, signal: controller.signal, cwd: resolvedProjectDir });
         } else {
           r = await review({ model, backend, diff, timeout, retries, allowExternal, customPrompt, feedbackPreamble, fixContext, cwd: resolvedProjectDir });
         }

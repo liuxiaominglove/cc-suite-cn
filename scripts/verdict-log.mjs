@@ -203,6 +203,9 @@ export function getFixContext(log, { projectDir = null, headCommit = null, chang
 }
 
 export function isVerdictStale(verdict, currentContent) {
+  if (currentContent === undefined || currentContent === null) {
+    throw new Error("isVerdictStale: currentContent 必传（缺参无法判断是否失效，禁止静默判 stale）");
+  }
   if (!verdict?.codeHash) return true;
   return hashContent(currentContent) !== verdict.codeHash;
 }

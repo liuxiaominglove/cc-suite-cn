@@ -1163,6 +1163,21 @@ describe("reviewFile", () => {
     const r = await reviewFile({ model: "m", backend: "b", file: "big.js", readFn, reviewFn, chunkSize: 800, overlap: 10 });
     assert.equal(r.chainAnalysis, "chunk1 analysis\nchunk3 analysis");
   });
+
+  it("用 cwd 作为校验基准审外部文件（无需 allowExternal）", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ext-proj-"));
+    const f = join(dir, "src", "a.js");
+    await mkdir(join(dir, "src"), { recursive: true });
+    await writeFile(f, "const x = 1;");
+    let capturedCwd = null;
+    const reviewFn = async (opts) => {
+      capturedCwd = opts.cwd;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const r = await reviewFile({ model: "m", backend: "b", file: f, cwd: dir, reviewFn });
+    assert.equal(r.success, true);
+    assert.equal(capturedCwd, dir, "reviewFile 应把 cwd 透传给 reviewFn（外部项目校验基准）");
+  });
 });
 
 describe("reviewDir", () => {
@@ -1271,6 +1286,32 @@ describe("reviewDir", () => {
       () => reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], allowExternal: true, reviewFileFn }),
       AuthError
     );
+  });
+
+  it("透传 cwd 给 reviewFileFn（外部项目校验基准，无需 allowExternal）", async () => {
+    const captured = [];
+    const reviewFileFn = async (opts) => {
+      captured.push(opts.cwd);
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    await reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], cwd: FIXTURES, reviewFileFn });
+    assert.ok(captured.length > 0, "应至少评审一个文件");
+    assert.ok(captured.every((c) => c === FIXTURES), "每个文件的 reviewFileFn 都应收到 cwd");
+  });
+
+  it("卡住的文件打心跳进度（可观测性）", async () => {
+    const logs = [];
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const reviewFileFn = async () => {
+      await gate;
+      return { success: true, severity: "low", issues: [], summary: "ok" };
+    };
+    const p = reviewDir({ model: "m", backend: "b", dir: `${FIXTURES}/swift-project`, exts: [".swift"], cwd: FIXTURES, reviewFileFn, heartbeatMs: 5, log: (m) => logs.push(m) });
+    await new Promise((r) => setTimeout(r, 40));
+    assert.ok(logs.some((l) => l.includes("仍在评审中")), "卡住期间应周期性打心跳，避免误判为挂死");
+    release();
+    await p;
   });
 });
 

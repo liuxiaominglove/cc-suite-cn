@@ -376,6 +376,13 @@ describe("isVerdictStale", () => {
   it("returns true when verdict has no codeHash (legacy)", () => {
     assert.equal(isVerdictStale({ verdict: "true" }, "anything"), true);
   });
+
+  it("throws when currentContent is missing (缺参 fail-closed)", () => {
+    const v = { codeHash: hashContent("old") };
+    assert.throws(() => isVerdictStale(v), /currentContent/);
+    assert.throws(() => isVerdictStale(v, undefined), /currentContent/);
+    assert.throws(() => isVerdictStale(v, null), /currentContent/);
+  });
 });
 
 describe("persistVerdicts 并发安全", () => {
