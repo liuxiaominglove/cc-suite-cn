@@ -28,11 +28,17 @@ node scripts/jobs.mjs --run-audit --file "<target>" --project-dir "<项目根>"
 
 ## Step 2: 批判员
 
-从 `<job-id>` 的 `result.entries` 读**去重后**的 findings 写到 `/tmp/findings.json`，然后：
+从 `<job-id>` 的 `result.entries` 读**去重后**的 findings（含 file/line/finding）。
+
+> **critic 一次只审一个文件**：把 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3.8-max
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3.8-max
 ```
+
+> **`--project-dir` 必传**：否则 qwen 补漏的 missed finding 落账时 projectDir 会写成 cc-suite-cn 根目录，Step 3 裁决按项目根过滤时被漏掉。
+
+文件模式（`$ARGUMENTS` 是单文件）只有一组；目录模式按文件分组循环。无 findings 的文件跳过。
 
 输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding, reason}]}`——qwen 逐条判同意/反对（落账 `critic` 字段）+ 补漏（落账 `source=qwen-critic`）。
 

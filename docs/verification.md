@@ -1055,4 +1055,44 @@ qwen+kimi 审 diff：qwen 1 条 medium + kimi 2 条 low。opencode 代码级终�
 
 ---
 
+# 4 施工队模型升级（2026-09-01）
+
+**动机**：4 个施工队模型全部落后一代，升级到各公司最新：glm-5.3、kimi-k3、qwen3.8-max、hy4-preview。DeepSeek（总指挥）已是 V4 Pro 最新代，不动。
+
+## 升级台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| ML-1: glm-5.2 → glm-5.3（找 bug） | `models.mjs` 改 model + `--run-audit --file demos/quick-demo.js` 实测 glm-5.3: OK(2) | 🟢 | 2026-09-01 |
+| ML-2: kimi-k2.7-code → kimi-k3（找 bug） | 实测 OK(3)；kimi CLI 的 `-m` 认 config.toml 别名（`moonshotai-cn/kimi-k3`），backends.mjs 补前缀 | 🟢 | 2026-09-01 |
+| ML-3: qwen3-coder-plus → qwen3.8-max（批判员） | `--critic` 完整流程实测：verdicts 3 + missed 2（补漏发现"db 未定义"真 bug） | 🟢 | 2026-09-01 |
+| ML-4: hy3 → hy4-preview（验证审计员） | 单条 `adjudicate` 实测：verdict=true，evidence 还识破"const 赋值会抛错" | 🟢 | 2026-09-01 |
+
+## 顺带修的 3 个隐藏 bug（都是"隐式依赖/硬编码"坑）
+
+| 结论 | 证据 | 置信度 |
+|------|------|--------|
+| ML-5: `adjudicate` 默认 model 硬编码 `"hy3"`（`VERIFIER_MODEL` 常量改了不生效） | evaluate-models.mjs 改 `model = VERIFIER_MODEL` 引用常量 | 🟢 |
+| ML-6: kimi/qwen 后端不传 model（models.mjs 的 model 字段对它们是死配置） | backends.mjs 加 `-m`（kimi 补 `moonshotai-cn/` 前缀，实测裸名报错） | 🟢 |
+| ML-7: qwen settings.json 缺 qwen3.8-max provider（--sandbox 下走 OPENAI_API_KEY 认证失败） | `~/.qwen/settings.json` 加 qwen3.8-max entry（`envKey=DASHSCOPE_API_KEY`），已备份 | 🟢 |
+
+## 复审（/verify diff，两轮）
+
+- **第一轮**：qwen3.8-max + kimi-k3 报 medium（漏改的模型名残留：audit.md 大写 `GLM-5.2`、AGENTS.md/README.md/evaluate.md/fix.md 等命令文件的 hy3 残留）。已全量修复。
+- **第二轮**：仍 medium，代码级终审：① audit-full.md:34 critic `--file` 目录问题 = 真但**历史遗留**（fix.md 已处理分组、audit-full 漏同步），**已修**（照抄 fix.md 分组逻辑）② backends.mjs `-m` 前缀/支持证据 = 假阳（已实测成功）③ models.mjs 历史 verdict 不迁移 / MODEL_ALIASES = 非 bug（历史数据不该迁移；canonicalModel 无真实调用方）④ verify.md rename 不完整 = 复审时改动前状态、已修复。真实 verdict=clean。
+
+## 副作用 + 待观察（如实标注）
+
+- 🟡 qwen3.8-max 默认 `reasoning_effort=xhigh`，diff 复审从旧模型更快变成 ~10 分钟。先观察，若持续伤效率再评估调低推理档位/回退。
+- 🟡 hy4-preview 是 preview，裁决质量待下次真实 `/fix` 积累终审数据后重测吻合率（对照旧 hy3 的 39%）。
+- 🟡 kimi-k3 是通用版（无 code 专线），找 bug 质量待观察。
+
+## 结果
+
+- `pnpm test:unit`：**979 全绿** + guard 通过。
+- commit `a9f380a`：24 文件 +143/-140。
+- 仓库外改动：`~/.qwen/settings.json`（已备份 `settings.json.backup.*`）。
+
+---
+
 <!-- report-required: begin -->
