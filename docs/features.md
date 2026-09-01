@@ -36,6 +36,9 @@
 | 28 | 目录评审逐文件分块 | `--dir` → `reviewDir()` | 审目录不再拼巨 payload，逐文件串行审（每文件按 800 行分块），issue 带相对路径 file，逐文件进度输出 | "目录评审逐文件分块" |
 | 29 | 真机必验打标 | `detectManualVerify` + `/evaluate --arbitrate` | 裁决后 UI/窗口/权限/快捷键 finding 带 `requiresManualVerify:true`，`appendVerdicts` 透传 | "P2/P3：真机打标 + /verify 注入修复背景" |
 | 30 | /verify 注入修复背景 | `/verify`、`--run-audit --diff` | 复审施工队拿到 `[修复背景]` 段（auditCommit===HEAD 且 file∈变更文件的 actionable finding），降低「建议改回会回归」误报 | "P2/P3：真机打标 + /verify 注入修复背景" |
+| 31 | 断点续跑（fix-state 状态机） | `/fix` 五步（`.cc-suite-cn/fix-state/`） | 中断重跑从第一个未 done 步继续，done 步跳过复用结果 | "fix-state 断点续跑" |
+| 32 | 评测驱动接线（回灌权重） | `computeFeedbackWeights` + `pickCounterExamples` 加权 | 高误报类型的 counter-example 排前注入（权重只用终审真值） | "评测驱动接线" |
+| 33 | hy3 吻合率统计 | `node scripts/progress.mjs` | 输出 hy3 判真/判假/拿不准三列吻合率（verdict vs 终审 final） | "hy3 裁决 vs 终审吻合率" |
 
 ## 三色判定
 

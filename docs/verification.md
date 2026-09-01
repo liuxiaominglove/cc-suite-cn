@@ -1001,4 +1001,58 @@
 - **P3 注入链路**：`buildFixContextSection`/`buildVerifyPrompt`（背景段前置 + 警告勿回归）+ `review()` `fixContext` 参数（diff 模式）+ `gitDiffNames` + `runAudit` diff 分支同源注入（`cwd=resolvedProjectDir`）。验证：`review-runner.test.mjs` 3 用例（注入/不注入/背景原文）+ `jobs.test.mjs` 4 用例（`resolveFixContextSection`）+ `audit-baseline.test.mjs` 3 用例（`gitDiffNames`）全绿 🟢。
 - **门禁**：`pnpm test:unit` 958 全绿 + drift guard pass 🟢。未做：`pnpm verify:e2e`/`self-audit`（release 门禁，不进编辑循环）。
 
+# openjiuwen 借鉴：可控协作 + 评测驱动（2026-09-01）
+
+**动机**：借鉴 openJiuwen（华为开源 Agent 平台）的 Ops 层（评测/观测/调优）+ 多 Agent 事件驱动思路，对比 cc-suite-cn 现状提炼 5 类不足，分阶段落地。核心方法论：**先测后决策**——每个"要不要自动化"的判断都先拿数据，不拍脑袋。
+
+## 落地结果（四阶段）
+
+| 阶段 | 主题 | 状态 |
+|------|------|------|
+| 1 | 断点续跑 | ✅ 完成 |
+| 2 | 评测驱动接线（回灌权重） | ✅ 完成 |
+| 3a | hy3 吻合率统计 | ✅ 完成 |
+| 3b | 高置信自动回灌 | ❌ 被数据否定 |
+| 4 | 能力资产化（worker-lessons 结构化） | ⏸️ 暂缓 |
+
+## 改动台账
+
+| 结论 | 证据 | 置信度 | 日期 |
+|------|------|--------|------|
+| OJ-1: `scripts/fix-state.mjs` 五步状态机（断点续跑） | `STEPS`/`createEmptyState`/`markStepDone`/`isStepDone`/`loadState`/`saveState`，损坏/缺失 fail-closed 回退空 state；`fix-state.test.mjs` 13 用例 + 命令实测往返（读空→标 step1→读 true→清理） | 🟢 | 2026-09-01 |
+| OJ-2: `eval-feedback.mjs` 回灌权重 + `pickCounterExamples` 加权 | `computeFeedbackWeights` 只用 `confirmed.final`（终审真值，**不碰 verdict**）；`pickCounterExamples` 权重主序 + recency 次序；`eval-feedback.test.mjs` 6 用例 + `feedback.test.mjs` 3 用例 | 🟢 | 2026-09-01 |
+| OJ-3: `computeAdjudicatorAgreement` 吻合率 + progressCli 输出 | verdict vs confirmed.final 三列吻合率（判真/判假/拿不准），无样本 null 不除零；`progress.test.mjs` 10 用例 | 🟢 | 2026-09-01 |
+| OJ-4: `fix.md` 断点续跑指令 | 加「断点续跑」段 + 读/标状态命令；命令语法实测往返正确（真实 /fix 五步中断续跑未完整跑，需下次 /fix 实测） | 🟡 | 2026-09-01 |
+
+## 关键发现：hy3 吻合率实测（否决 3b）
+
+```
+hy3 判真 吻合率：39%（一致 117/302）
+hy3 判假 吻合率：91%（一致 30/33）
+hy3 拿不准 中真 bug 占比：0%（真 0/8）
+```
+
+- **hy3 判真不可信（39%）**：判 true 的 302 条里 61% 是假阳，远低于 95% 自动化门槛 → **3b（高置信自动回灌）否决**。这正是「先测后决策」的价值：没这个数据，任何人都会倾向「hy3 看着挺准，自动吧」。
+- **红线固化进代码**：`computeFeedbackWeights` 只用终审真值 `confirmed.final`，把「评测驱动只能吃真值」从默认升成硬约束。
+- 🟡 uncertain 0% 样本仅 8，暂不作结论（不推翻 fix.md「uncertain 藏着真 bug」的判断）。
+
+## 阶段 4 暂缓（重估条件）
+
+worker-lessons 仅 12 条、全文注入约 2KB，结构化检索（json + tags + 渲染 + guard）收益≈0 且会引入 json/md 双形态漂移风险。**重估触发条件**（沿用 `known-risks.json` 的 `reassessWhen` 模式）：当教训条数上规模——全文注入开始超 token 预算、或 200 行 `maxLines` 截断开始丢教训——才重新评估「json 化 + tags 检索」。
+
+## token 预算砍掉（YAGNI 教训）
+
+阶段 1 曾把「断点续跑（有真实痛点）」与「token 预算（无痛点）」打包一起做，token 预算成了无调用方、无额度的死代码（`estimateTokens` 对中文还低估 4~6 倍）。复盘后砍掉 `estimateTokens`/`createBudget`/`BudgetError`/`runModel` budget 参数 + 7 测试。**重估触发条件**：当真实出现 token 失控（某次评审烧穿预算 / 账单异常）时再重新实现。**教训**：「可控协作三要素」痛点强度不同，不该打包做，应逐个按痛点评估。
+
+## 复审（/verify diff，clean）
+
+qwen+kimi 审 diff：qwen 1 条 medium + kimi 2 条 low。opencode 代码级终审：① qwen medium「`isStepDone` 逻辑反转」= **假阳**（`return !!state.done[step]` 语义正确，done→true，`fix-state.test.mjs` 明确断言；qwen 误读函数名）② kimi low「`saveState` tmp 名只用 `Date.now()`」= 真但**触发条件不成立**（/fix 串行单进程无并发写），记待办——重估条件：fix-state 被代码化并发调用时加 `randomBytes`（先例 `verdict-log.mjs`）③ kimi low「features.md 断点续跑标完成」= 属实观察（断点续跑为文档+手动命令，非代码自动接线，与 OJ-4 🟡 一致）。真实 verdict=clean。
+
+## 结果
+
+- `pnpm test:unit`：**979 全绿** + guard 通过（`fix-state.mjs`/`eval-feedback.mjs` 已登记 `CANONICAL_FILES`）。
+- 真实数据验证：`node scripts/progress.mjs` 产出吻合率；`computeFeedbackWeights` 真实账本产出各模型误报权重（qwen by-design 66.7% 最突出）。
+
+---
+
 <!-- report-required: begin -->

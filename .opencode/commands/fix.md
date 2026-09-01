@@ -16,6 +16,20 @@ agent: build
 
 跑 `node scripts/evaluate-models.mjs --preflight --project-dir "<项目根>"` 拿防坑清单，写一行「本阶段要防的教训 X/Y/Z + 完成验证 A/B/C」（见 AGENTS.md「阶段完成定义」），收尾对照。
 
+## 断点续跑（fix-state 状态机）
+
+`/fix` 五步结果落两个账本：Step 1 落 job 账本（`.cc-suite-cn/jobs/`）、Step 2-4 落裁决账本（`.cc-suite-cn/verdict-log.json`），天然幂等可续。opencode 用 `.cc-suite-cn/fix-state/` 状态机记住「哪步做过」：
+
+```bash
+# 读当前状态（每步 done 否）
+node --input-type=module -e "import('./scripts/fix-state.mjs').then(async m => console.log(JSON.stringify(await m.loadState('.cc-suite-cn/fix-state', '<项目根>'), null, 2)))"
+
+# 标记某步完成（step1~step5）
+node --input-type=module -e "import('./scripts/fix-state.mjs').then(async m => { const s = await m.loadState('.cc-suite-cn/fix-state', '<项目根>'); await m.saveState('.cc-suite-cn/fix-state', m.markStepDone(s, '<stepN>')); })"
+```
+
+**每步开头先读状态**：该步 `done: true` → 跳过执行、复用已有结果；`done` 缺失 → 执行并在完成后标记 done。中断重跑时从第一个未 done 的步骤继续；Step 3/4/5 本就幂等（`--arbitrate` 只裁未裁决、`getActionableFindings` 只筛 verdict=true），Step 1/2 靠状态跳过。
+
 ## Step 1: 找 bug（glm + kimi）
 
 ```

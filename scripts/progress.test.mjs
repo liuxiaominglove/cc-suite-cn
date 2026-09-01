@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { splitByBatch, fpRate, computeProgress, progressCli, computeMistakeBreakdown } from "./progress.mjs";
+import { splitByBatch, fpRate, computeProgress, progressCli, computeMistakeBreakdown, computeAdjudicatorAgreement } from "./progress.mjs";
 
 describe("splitByBatch", () => {
   it("空账本返回两个空数组", () => {
@@ -148,6 +148,26 @@ describe("progressCli", () => {
     assert.ok(out.includes("glm-5.2"), out);
     assert.ok(out.includes("↑"), out);
   });
+
+  it("有裁决+终审数据时打印 hy3 吻合率", async () => {
+    const log = [
+      { models: ["glm-5.2"], verdict: "true", confirmed: { final: "true", confirmedAt: "t" } },
+      { models: ["glm-5.2"], verdict: "false", confirmed: { final: "false", confirmedAt: "t" } },
+    ];
+    let out = "";
+    await progressCli({ load: async () => log, stdout: { write: (s) => { out += s; } } });
+    assert.ok(out.includes("吻合率"), out);
+  });
+
+  it("无 verdict 时判真/判假列显示无样本，不除零", async () => {
+    const log = [
+      { models: ["glm-5.2"], confirmed: { final: "true", confirmedAt: "t" } },
+    ];
+    let out = "";
+    await progressCli({ load: async () => log, stdout: { write: (s) => { out += s; } } });
+    assert.ok(out.includes("无样本"), out);
+    assert.ok(out.includes("拿不准"), out);
+  });
 });
 
 describe("computeMistakeBreakdown", () => {
@@ -187,5 +207,76 @@ describe("computeMistakeBreakdown", () => {
     assert.deepEqual(b.byType, { "by-design": 1 });
     assert.equal(b.unlabeled, 1, "非法类型应计入 unlabeled（fail-closed）");
     assert.equal(b.total, 1);
+  });
+});
+
+describe("computeAdjudicatorAgreement", () => {
+  it("空/null 账本返回全零、agreement 全 null", () => {
+    const a = computeAdjudicatorAgreement([]);
+    assert.equal(a.samples, 0);
+    assert.equal(a.verdictTrue.agreement, null);
+    assert.equal(a.verdictFalse.agreement, null);
+    assert.equal(a.uncertain.trueRate, null);
+  });
+
+  it("verdict=true 全对 → agreement 1", () => {
+    const log = [
+      { verdict: "true", confirmed: { final: "true" } },
+      { verdict: "true", confirmed: { final: "true" } },
+    ];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.verdictTrue.agreement, 1);
+    assert.equal(a.verdictTrue.total, 2);
+  });
+
+  it("verdict=true 里 1对1错 → agreement 0.5", () => {
+    const log = [
+      { verdict: "true", confirmed: { final: "true" } },
+      { verdict: "true", confirmed: { final: "false" } },
+    ];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.verdictTrue.agreement, 0.5);
+  });
+
+  it("verdict=false 全对 → agreement 1", () => {
+    const log = [{ verdict: "false", confirmed: { final: "false" } }];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.verdictFalse.agreement, 1);
+  });
+
+  it("verdict=false 判错（漏报）→ agreement 0", () => {
+    const log = [{ verdict: "false", confirmed: { final: "true" } }];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.verdictFalse.agreement, 0);
+  });
+
+  it("uncertain 里一半判真 → trueRate 0.5", () => {
+    const log = [
+      { verdict: "uncertain", confirmed: { final: "true" } },
+      { verdict: "uncertain", confirmed: { final: "false" } },
+    ];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.uncertain.trueRate, 0.5);
+    assert.equal(a.uncertain.trueCount, 1);
+  });
+
+  it("verdict 非 true/false（含 undefined/缺失）计入 uncertain", () => {
+    const log = [
+      { verdict: undefined, confirmed: { final: "true" } },
+      { confirmed: { final: "false" } },
+    ];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.uncertain.total, 2);
+  });
+
+  it("只统计已终审的 finding，未终审忽略", () => {
+    const log = [
+      { verdict: "true", confirmed: { final: "true" } },
+      { verdict: "true" },
+      { verdict: "true", confirmed: { final: "unconfirmed" } },
+    ];
+    const a = computeAdjudicatorAgreement(log);
+    assert.equal(a.verdictTrue.total, 1);
+    assert.equal(a.samples, 1);
   });
 });

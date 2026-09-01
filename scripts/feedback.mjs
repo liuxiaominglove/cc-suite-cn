@@ -1,4 +1,5 @@
 import { matchesModel, isConfirmed, isValidMistakeType } from "./verdict-log.mjs";
+import { computeFeedbackWeights } from "./eval-feedback.mjs";
 
 function byRecency(a, b) {
   const ta = a?.confirmed?.confirmedAt ?? a?.timestamp ?? "";
@@ -6,11 +7,22 @@ function byRecency(a, b) {
   return tb < ta ? -1 : tb > ta ? 1 : 0;
 }
 
-export function pickCounterExamples(log, model, { topN = 5 } = {}) {
+export function pickCounterExamples(log, model, { topN = 5, weights = null } = {}) {
   const n = Number.isInteger(topN) && topN > 0 ? topN : 5;
+  const w = weights?.[model] ?? null;
+  const weightOf = (v) => {
+    if (!w) return 0;
+    const t = v?.confirmed?.mistakeType;
+    return Number.isFinite(w[t]) ? w[t] : 0;
+  };
   return (log ?? [])
     .filter((v) => matchesModel(v, model) && isConfirmed(v, "false"))
-    .sort(byRecency)
+    .sort((a, b) => {
+      const wa = weightOf(a);
+      const wb = weightOf(b);
+      if (wa !== wb) return wb - wa;
+      return byRecency(a, b);
+    })
     .slice(0, n);
 }
 
@@ -28,8 +40,8 @@ export function formatFeedbackItem(v) {
   return `- ${loc || "(未知位置)"} — ${v?.finding ?? ""}${reason}`;
 }
 
-export function buildFeedbackPreamble(model, log, { topN = 5 } = {}) {
-  const counters = pickCounterExamples(log, model, { topN });
+export function buildFeedbackPreamble(model, log, { topN = 5, weights = null } = {}) {
+  const counters = pickCounterExamples(log, model, { topN, weights });
   const exemplars = pickExemplars(log, model, { topN });
   const parts = [];
   if (counters.length) {
@@ -169,9 +181,15 @@ export async function createFeedbackResolver({ load = null, loadMissed = null, t
   } catch {
     missed = [];
   }
+  let weights = {};
+  try {
+    weights = computeFeedbackWeights(log);
+  } catch {
+    weights = {};
+  }
   return (model, file) => {
     const parts = [];
-    const personal = buildFeedbackPreamble(model, log, { topN });
+    const personal = buildFeedbackPreamble(model, log, { topN, weights });
     if (personal) parts.push(personal);
     const missedP = buildMissedPreamble(missed, { file: file ?? null, projectDir, topN: missedTopN });
     if (missedP) parts.push(missedP);

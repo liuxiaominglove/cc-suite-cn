@@ -54,6 +54,31 @@ describe("pickCounterExamples", () => {
   });
 });
 
+describe("pickCounterExamples 加权排序", () => {
+  const log = [
+    { file: "a.js", finding: "by-design 旧", model: "glm-5.2", confirmed: { final: "false", mistakeType: "by-design", confirmedAt: "2026-01-01T00:00:00Z" } },
+    { file: "b.js", finding: "path-normalized 新", model: "glm-5.2", confirmed: { final: "false", mistakeType: "path-normalized", confirmedAt: "2026-01-02T00:00:00Z" } },
+    { file: "c.js", finding: "无类型", model: "glm-5.2", confirmed: { final: "false", confirmedAt: "2026-01-03T00:00:00Z" } },
+  ];
+
+  it("权重高的类型排前（即使更旧）", () => {
+    const weights = { "glm-5.2": { "by-design": 0.9, "path-normalized": 0.1 } };
+    const out = pickCounterExamples(log, "glm-5.2", { weights });
+    assert.equal(out[0].finding, "by-design 旧");
+  });
+
+  it("无 mistakeType 权重 0 排最后", () => {
+    const weights = { "glm-5.2": { "by-design": 0.5, "path-normalized": 0.5 } };
+    const out = pickCounterExamples(log, "glm-5.2", { weights });
+    assert.equal(out[out.length - 1].finding, "无类型");
+  });
+
+  it("不传 weights 时退化按 recency（向后兼容）", () => {
+    const out = pickCounterExamples(log, "glm-5.2");
+    assert.equal(out[0].finding, "无类型");
+  });
+});
+
 describe("pickExemplars", () => {
   it("只挑终审判 true 的样本", () => {
     const log = [
