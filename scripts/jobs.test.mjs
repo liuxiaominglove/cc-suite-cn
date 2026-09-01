@@ -504,7 +504,7 @@ describe("runAudit", () => {
     assert.equal(calls.length, 2);
     assert.deepEqual(
       result.workers.map((w) => w.model).sort(),
-      ["qwen3-coder-plus", "kimi-k2.7-code"].sort()
+      ["qwen3.8-max", "kimi-k3"].sort()
     );
     assert.deepEqual(
       result.workers.map((w) => w.backend).sort(),
@@ -531,7 +531,7 @@ describe("runAudit", () => {
 
   it("verdict 消费已知低风险：result.workers 降级 + verdict clean + 落库保持原始", async () => {
     const review = async ({ model }) => {
-      if (model === "qwen3-coder-plus") {
+      if (model === "qwen3.8-max") {
         return { success: true, severity: "medium", issues: [{ file: "scripts/evaluate-models.mjs", line: 1, finding: "lessons not sanitized for prompt injection" }], summary: "x" };
       }
       return { success: true, severity: "low", issues: [], summary: "x" };
@@ -539,17 +539,17 @@ describe("runAudit", () => {
     let persistedWorkers = null;
     const result = await runAudit({ diff: true, review, persistAuditLog: false, persistFindingsFn: (workers) => { persistedWorkers = workers; return []; } });
     assert.equal(result.verdict, "clean");
-    const qwenResult = result.workers.find((w) => w.model === "qwen3-coder-plus");
+    const qwenResult = result.workers.find((w) => w.model === "qwen3.8-max");
     assert.equal(qwenResult.severity, "low", "result.workers 应降级");
     assert.equal(qwenResult.downgraded, true, "result.workers 应带 downgraded 标记");
-    const qwenPersisted = persistedWorkers.find((w) => w.model === "qwen3-coder-plus");
+    const qwenPersisted = persistedWorkers.find((w) => w.model === "qwen3.8-max");
     assert.equal(qwenPersisted.severity, "medium", "落库应保持原始 severity");
     assert.ok(!("downgraded" in qwenPersisted), "落库不应带 downgraded 标记");
   });
 
   it("混报不降：qwen 报真 bug 时 verdict 保持 medium", async () => {
     const review = async ({ model }) => {
-      if (model === "qwen3-coder-plus") {
+      if (model === "qwen3.8-max") {
         return {
           success: true, severity: "medium",
           issues: [
@@ -567,11 +567,11 @@ describe("runAudit", () => {
 
   it("captures a failing worker without rejecting", async () => {
     const review = async ({ model }) => {
-      if (model === "kimi-k2.7-code") throw new Error("kimi down");
+      if (model === "kimi-k3") throw new Error("kimi down");
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
     const result = await runAudit({ file: "x.js", review });
-    const kimi = result.workers.find((w) => w.model === "kimi-k2.7-code");
+    const kimi = result.workers.find((w) => w.model === "kimi-k3");
     assert.equal(kimi.success, false);
     assert.ok(kimi.error.includes("kimi down"));
     assert.equal(result.workers.filter((w) => w.success).length, 1);
@@ -579,7 +579,7 @@ describe("runAudit", () => {
 
   it("认证失败 fail-fast：AuthError 上抛不吞成 success:false", async () => {
     const review = async ({ model }) => {
-      if (model === "kimi-k2.7-code") throw new AuthError();
+      if (model === "kimi-k3") throw new AuthError();
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
     await assert.rejects(
@@ -605,11 +605,11 @@ describe("runAudit", () => {
 
   it("worker reject null/undefined 时标记失败而非整体崩溃", async () => {
     const review = async ({ model }) => {
-      if (model === "kimi-k2.7-code") return Promise.reject(null);
+      if (model === "kimi-k3") return Promise.reject(null);
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
     const result = await runAudit({ file: "x.js", review, persistAuditLog: false });
-    const kimi = result.workers.find((w) => w.model === "kimi-k2.7-code");
+    const kimi = result.workers.find((w) => w.model === "kimi-k3");
     assert.equal(kimi.success, false, "null 拒绝不得让整个审计崩溃");
     assert.equal(result.workers.filter((w) => w.success).length, 1);
   });
@@ -657,10 +657,10 @@ describe("runAudit", () => {
       captured[opts.model] = opts.feedbackPreamble;
       return { success: true, severity: "low", issues: [], summary: "ok" };
     };
-    const getFeedback = async (model) => (model === "glm-5.2" ? "[你的历史误报]" : "");
+    const getFeedback = async (model) => (model === "glm-5.3" ? "[你的历史误报]" : "");
     await runAudit({ file: "x.js", review, getFeedback, persistAuditLog: false });
-    assert.equal(captured["glm-5.2"], "[你的历史误报]");
-    assert.equal(captured["kimi-k2.7-code"], "");
+    assert.equal(captured["glm-5.3"], "[你的历史误报]");
+    assert.equal(captured["kimi-k3"], "");
   });
 
   it("omits feedback when getFeedback is null (default)", async () => {

@@ -81,7 +81,7 @@ export function computeMistakeBreakdown(log) {
   return { byType, total, unlabeled };
 }
 
-// hy3 裁决 vs opencode 终审 吻合率：只统计「已终审」的 finding，对照 verdict 与 confirmed.final。
+// 验证审计员 裁决 vs opencode 终审 吻合率：只统计「已终审」的 finding，对照 verdict 与 confirmed.final。
 // verdict=true 判对 = final=true；verdict=false 判对 = final=false；uncertain（含 verdict 非 true/false）判真 = final=true。
 // agreement / trueRate 无样本时返回 null（除零 → 不拍脑袋）。这是阶段 3 启用「高置信自动回灌」前的数据门槛。
 export function computeAdjudicatorAgreement(log) {
@@ -133,12 +133,12 @@ export async function progressCli({ load = null, stdout = process.stdout } = {})
   stdout.write("（↓=退步 ↑=进步 —=持平；误报率越低越好）\n");
 
   const agreement = computeAdjudicatorAgreement(log);
-  stdout.write("\nhy3 裁决 vs 终审吻合率（一致 = hy3 与 opencode 终审相符）\n");
+  stdout.write("\n验证审计员 裁决 vs 终审吻合率（一致 = 验证审计员 与 opencode 终审相符）\n");
   const fmtAgree = (agree, total) => (total === 0 ? "无样本" : `${((agree / total) * 100).toFixed(0)}%（一致 ${agree}/${total}）`);
   const fmtUnc = (trueCount, total) => (total === 0 ? "无样本" : `${((trueCount / total) * 100).toFixed(0)}%（真 ${trueCount}/${total}）`);
-  stdout.write(`hy3 判真 吻合率：${fmtAgree(agreement.verdictTrue.agree, agreement.verdictTrue.total)}\n`);
-  stdout.write(`hy3 判假 吻合率：${fmtAgree(agreement.verdictFalse.agree, agreement.verdictFalse.total)}\n`);
-  stdout.write(`hy3 拿不准 中真 bug 占比：${fmtUnc(agreement.uncertain.trueCount, agreement.uncertain.total)}\n`);
+  stdout.write(`验证审计员 判真 吻合率：${fmtAgree(agreement.verdictTrue.agree, agreement.verdictTrue.total)}\n`);
+  stdout.write(`验证审计员 判假 吻合率：${fmtAgree(agreement.verdictFalse.agree, agreement.verdictFalse.total)}\n`);
+  stdout.write(`验证审计员 拿不准 中真 bug 占比：${fmtUnc(agreement.uncertain.trueCount, agreement.uncertain.total)}\n`);
   return 0;
 }
 

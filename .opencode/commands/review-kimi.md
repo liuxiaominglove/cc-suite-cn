@@ -22,13 +22,13 @@ agent: build
 用 Bash 运行（单壳、只读）：
 
 ```
-node scripts/review-runner.mjs --backend kimi --model kimi-k2.7-code --file "<target>"
+node scripts/review-runner.mjs --backend kimi --model kimi-k3 --file "<target>"
 ```
 
 目录模式：
 
 ```
-node scripts/review-runner.mjs --backend kimi --model kimi-k2.7-code --dir "<target>" --exts ".js,.ts,.py,.swift,..."
+node scripts/review-runner.mjs --backend kimi --model kimi-k3 --dir "<target>" --exts ".js,.ts,.py,.swift,..."
 ```
 
 （`--exts` 列表匹配目录里发现的文件类型；默认超时 900s，超大文件会自动分块）

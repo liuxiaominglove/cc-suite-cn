@@ -1,6 +1,6 @@
 # cc-suite-cn
 
-Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥) and the fixer (修 bug). Four worker models each play a distinct role: glm+kimi **找 bug**（audit）, qwen **批判员**（critic）, hy3 **验证审计员**（verifier）. Different models have different training data, so they catch different classes of bugs.
+Multi-model code orchestration — opencode (DeepSeek V4 Pro) is the orchestrator (总指挥) and the fixer (修 bug). Four worker models each play a distinct role: glm+kimi **找 bug**（audit）, qwen **批判员**（critic）, hy4-preview **验证审计员**（verifier）. Different models have different training data, so they catch different classes of bugs.
 
 > 给人看的大白话总览见 **`README.md`**；本文是给 AI/opencode 看的机器指令（保持精简，大白话解释放 README）。
 
@@ -12,13 +12,13 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
   └─ 施工队（独立第三方 · 只读）
        ├─ 找 bug (audit):     glm(codebuddy CLI) + kimi(Moonshot 直连)（scripts/review-runner.mjs，参数化 backend）
        ├─ 批判员 (critic):    qwen（只读 + --sandbox）
-       └─ 验证审计员 (verifier): hy3（scripts/evaluate-models.mjs，裁决 finding 真假）
+       └─ 验证审计员 (verifier): hy4-preview（scripts/evaluate-models.mjs，裁决 finding 真假）
 ```
 
 - **opencode**: 总指挥 + 修 bug — interactive coding assistant (DeepSeek V4 Pro)
 - **找 bug** (`/audit`): glm + kimi 只读评审，产出 finding
 - **批判员** (`/review-qwen`): qwen 独立第二意见（只读 + `--sandbox`）
-- **验证审计员** (`/evaluate`): hy3 逐条裁决 finding 真假，聚合"谁找得多、谁找得准"
+- **验证审计员** (`/evaluate`): hy4-preview 逐条裁决 finding 真假，聚合"谁找得多、谁找得准"
 - **review-runner.mjs**: 只读评审（参数化 backend，超时/错误/JSON 解析/结果聚合）
 - **evaluate-models.mjs**: finding 归一化/共识分类/裁决/多维度评估
 - **cc-review skill**: Defines the review workflow (`.opencode/skills/cc-review/SKILL.md`)
@@ -28,9 +28,9 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 | Requirement | Version/Details |
 |-------------|-----------------|
 | Node.js | >= 18.0 |
-| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.2 + hy3 网关，走平台账号登录态） |
+| CodeBuddy CLI | `npm install -g @tencent-ai/codebuddy-code`（glm-5.3 + hy4-preview 网关，走平台账号登录态） |
 | `DASHSCOPE_API_KEY` | Set in `~/.zshrc` — 阿里云百炼，**Qwen（施工队批判员）** 用（qwen CLI 走阿里百炼通道）；**施工队找 bug 的 glm 走 codebuddy CLI 平台账号，无需此 key** |
-| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`kimi-k2.7-code`，走 Moonshot 官方直连） |
+| `MOONSHOT_API_KEY` | Set in `~/.zshrc` — 月之暗面 Moonshot，Kimi 用（`kimi-k3`，走 Moonshot 官方直连） |
 | 平台 | macOS / Linux 专用（**不支持 Windows**——guard 路径比较走 POSIX `/` 分隔，`/dev/tty`、`~/.config/opencode` 等均 Unix 约定） |
 
 ## Setup
@@ -41,7 +41,7 @@ opencode (DeepSeek V4 Pro)  →  总指挥 + 修 bug（唯一发起方、最终�
 npm install -g @tencent-ai/codebuddy-code @moonshot-ai/kimi-code @qwen-code/qwen-code  # worker CLIs
 export DASHSCOPE_API_KEY=your-dashscope-key   # Qwen（阿里百炼），写入 ~/.zshrc 持久化
 export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
-# codebuddy 走平台账号登录态（GLM-5.2 + Hy3），无需单独 key；自检：pnpm preflight
+# codebuddy 走平台账号登录态（GLM-5.3 + Hy4-Preview），无需单独 key；自检：pnpm preflight
 ```
 
 ## Commands
@@ -53,11 +53,11 @@ export MOONSHOT_API_KEY=your-moonshot-key     # Kimi（月之暗面）
 | `pnpm test:e2e` | Run end-to-end tests |
 | `pnpm verify:e2e` | 一键重跑 4 施工队只读 + 真后台真取消 |
 | `/audit <path>` | glm+kimi 找 bug（`--run-audit`，记入任务账本 + audit-log） |
-| `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy3) |
+| `/audit-full <path>` | 完整审计：找 bug(glm+kimi) + 批判员(qwen) + 裁决(hy4-preview) |
 | `/fix <path>` | 修复闭环五步：找 → 批判 → 裁 → 修 bug(TDD) → 验证（含 /verify 只审 diff） |
 | `/fix-incremental <project-dir>` | 增量修复闭环：只对自基线以来变更的文件跑五步，修完自动更新基线 |
 | `/review-kimi <path>` / `/review-qwen <path>` | 单壳只读评审 / 批判员（必须先 /audit，只判 finding） |
-| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） |
+| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy4-preview 裁决） |
 | `/verify` | diff 审查（只发 `git diff HEAD`，记账本） |
 | `/jobs` / `/result <id>` / `/cancel <id>` | 查任务账本 / 看结果 / 取消 |
 | `/review <path>` | Same as `/audit` |
@@ -177,7 +177,7 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `scripts/review-critic.mjs` | 批判员子流程（criticize/selfCheck + mapCriticVerdicts/buildMissedFindings） |
 | `scripts/review-prompts.mjs` | 评审/批判/自检/验证提示词单一数据源 |
 | `scripts/review-gate.mjs` | commit 复审门禁单一真源（markReviewed/stageHashes/decide + isCodeFile，`.githooks/pre-commit` 硬拦未复审/high） |
-| `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy3 验证审计员） |
+| `scripts/evaluate-models.mjs` | finding 归一化/共识/裁决/多维度评估（hy4-preview 验证审计员） |
 | `scripts/runner-core.mjs` | 共享 spawn 原语（runProcess/collectStream/错误类） |
 | `scripts/models.mjs` | 4 施工队单一数据源（WORKERS + 角色常量 FIND_BUG_WORKERS/CRITIC_MODEL/VERIFIER_MODEL + canonicalModel） |
 | `scripts/backends.mjs` | 3 个 backend 的 CLI 命令构建（resolveCli 绝对路径防 PATH 劫持 + 只读护栏） |
@@ -197,4 +197,4 @@ Scripts and skill assets live in **one** canonical location — this git repo. T
 | `docs/verification.md` | 验证台账（三色置信度 + 证据锚点） |
 | `docs/trust-boundary.md` | 信任边界风险台账（人读视图，由 `scripts/known-risks.json` 渲染） |
 | `docs/features.md` | 功能基线清单（每次总结"触达功能"对照的单一数据源） |
-| `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.2/hy3 走 codebuddy 平台账号，无需本地 endpoint） |
+| `~/.codebuddy/models.json` | codebuddy 自定义 model endpoint（仅 DeepSeek/Qwen；glm-5.3/hy4-preview 走 codebuddy 平台账号，无需本地 endpoint） |

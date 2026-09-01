@@ -10,10 +10,10 @@ agent: build
 
 | 施工队 | backend | model |
 |--------|---------|-------|
-| GLM-5.2 | codebuddy | `glm-5.2` |
-| Kimi | kimi | `kimi-k2.7-code` |
+| GLM-5.3 | codebuddy | `glm-5.3` |
+| Kimi | kimi | `kimi-k3` |
 
-> 完整 4 角色流程见 `/audit-full`（找 bug + 批判员 qwen + 验证审计员 hy3 裁决）。
+> 完整 4 角色流程见 `/audit-full`（找 bug + 批判员 qwen + 验证审计员 hy4-preview 裁决）。
 
 ## Step 0: 基线检测（增量审查，若项目是 git 仓库）
 
@@ -92,7 +92,7 @@ node scripts/jobs.mjs --get "<job-id>"
 ## 共识（glm 和 kimi 都发现）
 - {issue}
 
-## glm-5.2 单独发现
+## glm-5.3 单独发现
 - {issue}
 
 ## kimi 单独发现

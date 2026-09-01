@@ -1,14 +1,14 @@
 ---
 name: cc-review
 description: |
-  Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy3 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review, /review-kimi, /review-qwen, /evaluate, /fix, /fix-incremental, /verify, /trace.
+  Multi-model code review — glm+kimi 找 bug, qwen 批判员, hy4-preview 验证审计员裁决, opencode 修 bug. Load for /audit, /audit-full, /review, /review-kimi, /review-qwen, /evaluate, /fix, /fix-incremental, /verify, /trace.
   <example>
   Context: User runs /audit src/file.ts
   assistant: Run glm+kimi read-only review, report consensus + per-model findings.
   </example>
   <example>
   Context: User runs /evaluate --arbitrate
-  assistant: hy3 adjudicates each finding true/false, computes per-model precision.
+  assistant: hy4-preview adjudicates each finding true/false, computes per-model precision.
   </example>
 scope: global
 ---
@@ -19,9 +19,9 @@ I orchestrate a **four-role code review** across multiple models, each with a di
 
 | 角色 | 模型 | 干什么 | 入口 |
 |------|------|--------|------|
-| 找 bug | glm-5.2 + kimi-k2.7-code | 只读评审，产出 finding | `/audit`（`--run-audit`） |
-| 批判员 | qwen3-coder-plus | 独立第二意见（只读 + `--sandbox`） | `/review-qwen` |
-| 验证审计员 | hy3 | 逐条裁决 finding 真假 | `/evaluate --arbitrate` |
+| 找 bug | glm-5.3 + kimi-k3 | 只读评审，产出 finding | `/audit`（`--run-audit`） |
+| 批判员 | qwen3.8-max | 独立第二意见（只读 + `--sandbox`） | `/review-qwen` |
+| 验证审计员 | hy4-preview | 逐条裁决 finding 真假 | `/evaluate --arbitrate` |
 | 修 bug | opencode（总指挥） | TDD 修 bug | `/fix` |
 
 Different models have different training data, so they catch different classes of bugs — what one misses, the others often find.
@@ -39,7 +39,7 @@ Load this skill when the user:
 ```
 1. 找 bug（glm + kimi）      → 产出 finding 池
 2. 批判员（qwen）            → 独立第二意见，追加漏报
-3. 裁决（hy3）              → 初筛：逐条判真假，verdict 落库 + codeHash【修 bug 前置硬门槛】
+3. 裁决（hy4-preview）              → 初筛：逐条判真假，verdict 落库 + codeHash【修 bug 前置硬门槛】
 4. 终审 + 修 bug（opencode） → 两步终审（步骤1盲判 → 步骤2对比上游理由）对 verdict=true 的做代码级核实 + TDD 修
 5. 验证                     → 编译测试 + /verify 只审 diff + 真机/UI
 ```
@@ -62,15 +62,15 @@ Load this skill when the user:
    - The被审项目's `AGENTS.md` / `CLAUDE.md` rules are injected into the review prompt (project-specific rules avoid false positives).
    - Transient failures auto-retry; worker OK/FAIL is shown in the summary.
 3. Critic (qwen) second opinion: `/review-qwen` — judge each finding 同意/反对 + 补漏（read-only + sandbox）.
-4. Adjudicate findings: `/evaluate --arbitrate` — hy3 judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-cn/` 裁决账本).
+4. Adjudicate findings: `/evaluate --arbitrate` — hy4-preview judges each deduplicated finding true/false, computes per-model precision, and **persists each verdict (with codeHash) via `scripts/verdict-log.mjs`** (落库到 `.cc-suite-cn/` 裁决账本).
 5. Fix real bugs: `/fix` — opencode fixes with TDD (RED → GREEN → REFACTOR), never commits automatically.
 6. Verify: `/verify` — compile+test + review `git diff HEAD`（只审 diff，唯一复审）+ 真机/UI 点验.
 
 ## Critical Rules
 
 - **谁都不批自己**: 找 bug / 批判 / 裁决 / 修 bug 是四个独立角色，修 bug 只由 opencode（最了解项目 + TDD）亲自做。
-- **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy3 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy3 看到修好的代码、误判成假阳。**终审既补假阴、也滤假阳**：hy3 判 false 的真 bug（假阴）和 hy3 判 true 实为 by-design 或触发条件错的 finding（假阳）都要靠 opencode 代码级核实兜住，不默认 hy3 结论或 finding 措辞准确。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
-- 施工队（glm/kimi/qwen/hy3）全部只读，不写代码。
+- **审计前置两道闸门**: opencode 修代码前必须通过两道审计——① hy4-preview 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。修 bug 前必须先 `/evaluate --arbitrate` 落库 verdict；只修 hy4-preview 判 `true` 且 codeHash 未失效的 finding。`codeHash 未失效` = 该文件内容自裁决后没变（裁决时算 sha256，修前重算对比；变了就判 verdict 作废、须重新裁决）。跳过裁决 = "先修后验"，会让 hy4-preview 看到修好的代码、误判成假阳。**终审既补假阴、也滤假阳**：hy4-preview 判 false 的真 bug（假阴）和 hy4-preview 判 true 实为 by-design 或触发条件错的 finding（假阳）都要靠 opencode 代码级核实兜住，不默认 hy4-preview 结论或 finding 措辞准确。Override 出口（客观标准）：仅当 opencode 用**代码级证据**确认「hy4-preview 判 false 但这是真 bug」（假阴）时可跳过裁决直接修，须在台账标"未经裁决" + 附代码级证据；不得以"紧急/小 bug"这类模糊理由跳过。
+- 施工队（glm/kimi/qwen/hy4-preview）全部只读，不写代码。
 - **复审门控**: 修 bug 后必须跑 `/verify` 只审 diff（**唯一复审**，qwen+kimi 审改动行）；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。
 - **窗口/权限/快捷键真机必验**: 涉及 `NSWindow`/`NSPanel`/`NSScreen`/`NSView`、权限请求（`TCC`/辅助功能/屏幕录制/摄像头/输入监控）、`CGEvent`/`NSEvent`/`keyDown`/`addGlobalMonitor`/`CGEventTap` 的改动，单测覆盖不到，Step 5 必须真机点验，**非 🟢 不 commit**；编译/单测通过不能替代。
 - **复审 vs 门禁别混**: `/verify`（斜杠命令 = 修 bug 后唯一复审，每次改完必跑）与 `pnpm verify:e2e`（终端 = release 门禁，仅 release/推前跑）是两回事。别拿「门禁不进编辑循环」当不跑 `/verify` 的借口——那条只约束 `pnpm verify:e2e`。

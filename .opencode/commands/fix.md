@@ -1,5 +1,5 @@
 ---
-description: 修复闭环 — 找 bug → 批判(qwen) → 裁决(hy3) → 终审修(opencode) → 验证（含 /verify 只审 diff）
+description: 修复闭环 — 找 bug → 批判(qwen) → 裁决(hy4-preview) → 终审修(opencode) → 验证（含 /verify 只审 diff）
 argument-hint: <path>
 agent: build
 ---
@@ -46,7 +46,7 @@ node scripts/jobs.mjs --run-audit --dir "<path>" --exts ".js,.ts,.swift,..." --p
 > **critic 一次只审一个文件**：把 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3.8-max
 ```
 
 > **`--project-dir` 必传**：否则 qwen 补漏的 missed finding 落账时 projectDir 会写成 cc-suite-cn 根目录，Step 3 裁决按项目根过滤时被漏掉。
@@ -56,22 +56,22 @@ node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --fi
 输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding, reason}]}`：
 
 - **verdicts**：qwen 逐条判「同意/反对」——判「反对」（假阳）的，Step 4 终审重点复核。
-- **missed**：qwen 补漏的真 bug（含 reason）——自动落进统一账本（`source=qwen-critic`），随 Step 3 裁决一起被 hy3 判真假。
+- **missed**：qwen 补漏的真 bug（含 reason）——自动落进统一账本（`source=qwen-critic`），随 Step 3 裁决一起被 hy4-preview 判真假。
 
 > **批判是盲评**：qwen 拿到的清单只有 file/line/finding（不给 fix/chain_analysis/上游结论），必须只凭代码独立判断。
 
-## Step 3: 裁决（hy3，强制前置，不可跳过）
+## Step 3: 裁决（hy4-preview，强制前置，不可跳过）
 
 ```
 node scripts/evaluate-models.mjs --arbitrate --project-dir "<项目根>"
 ```
 
-（若 hy3 不可用或 `--arbitrate` 报错 → 停下报告用户，**不许静默跳过**——裁决是硬门槛。）
+（若 hy4-preview 不可用或 `--arbitrate` 报错 → 停下报告用户，**不许静默跳过**——裁决是硬门槛。）
 
-hy3 逐条裁决统一账本里**尚未裁决**的 finding（含 `source=audit` 和 `source=qwen-critic`），并把每条 `verdict/evidence/codeHash` 追加到 `.cc-suite-cn/verdict-log.json`。输出「已裁决 N 条（真 X / 假 Y / 不确定 Z）」。
+hy4-preview 逐条裁决统一账本里**尚未裁决**的 finding（含 `source=audit` 和 `source=qwen-critic`），并把每条 `verdict/evidence/codeHash` 追加到 `.cc-suite-cn/verdict-log.json`。输出「已裁决 N 条（真 X / 假 Y / 不确定 Z）」。
 
-> **这是硬门槛**：没裁决过的 finding 不在待修清单里，opencode 不能修。跳过本步直接修，就是"先修后验"，会导致 hy3 看到的是修好的代码、误判成假阳。
-> **盲评**：hy3 裁决时只拿到 finding + 代码，不给 qwen 的批判结论、不给 glm/kimi 的 fix/chain_analysis，独立判真假。
+> **这是硬门槛**：没裁决过的 finding 不在待修清单里，opencode 不能修。跳过本步直接修，就是"先修后验"，会导致 hy4-preview 看到的是修好的代码、误判成假阳。
+> **盲评**：hy4-preview 裁决时只拿到 finding + 代码，不给 qwen 的批判结论、不给 glm/kimi 的 fix/chain_analysis，独立判真假。
 
 ## Step 4: 终审 + 修 bug（opencode 亲自，严格 TDD）
 
@@ -83,7 +83,7 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 
 待修清单 = `verdict === "true"` 且 `projectDir === "<项目根>"` 的 finding。
 
-> **真机打标（requiresManualVerify）**：裁决时 hy3 对 UI/窗口/权限/快捷键类 finding 自动打 `requiresManualVerify: true`（扫描 finding/fix/file 的 token：`NSWindow`/`NSAlert`/`NSScreen`/`NSView`、`permission`/`authorization`/`TCC`/`accessibility`、`CGEvent`/`NSEvent`/`keyDown`/`hotkey`/`shortcut`/`addGlobalMonitor`、`SwiftUI`/`AppKit`/`UIKit` 等）。带此标记的 finding，修完 Step 5 必须真机点验（🟢），非 🟢 不 commit。
+> **真机打标（requiresManualVerify）**：裁决时 hy4-preview 对 UI/窗口/权限/快捷键类 finding 自动打 `requiresManualVerify: true`（扫描 finding/fix/file 的 token：`NSWindow`/`NSAlert`/`NSScreen`/`NSView`、`permission`/`authorization`/`TCC`/`accessibility`、`CGEvent`/`NSEvent`/`keyDown`/`hotkey`/`shortcut`/`addGlobalMonitor`、`SwiftUI`/`AppKit`/`UIKit` 等）。带此标记的 finding，修完 Step 5 必须真机点验（🟢），非 🟢 不 commit。
 
 **不确定清单（别漏）**：`--arbitrate` 判 `uncertain`（及账本里 `verdict` 非 true/false 的）finding 也要逐条代码级终审，用：
 
@@ -91,22 +91,22 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => console.log(JSON.stringify(m.getUncertainFindings(await m.loadVerdicts(), { projectDir: \"<项目根>\" }), null, 2)))"
 ```
 
-`uncertain` 不是"没事"——它是 hy3 拿不准（错误上下文/大文件截断），真 bug 常藏在这里，必须 opencode 亲自核实，判真就修、判假就落账 false。
+`uncertain` 不是"没事"——它是 hy4-preview 拿不准（错误上下文/大文件截断），真 bug 常藏在这里，必须 opencode 亲自核实，判真就修、判假就落账 false。
 
 - **按轮次隔离（auditCommit）**：每条 finding 落库时带 `auditCommit`（审计时的 git HEAD）。想只看本轮 finding，读取账本后调用方手动 `.filter(v => v.auditCommit === "<本次 git HEAD>")`，避免历史残留混入（暂无内置 helper，需调用方自行过滤）。
 
 - **清单为空** → 报告"未发现真 bug"并**停止**，不进入修复。
-- 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy3 是 LLM 判断、会看走眼——既可能**假阴**（漏真 bug），也可能**假阳**（判 true 实为 by-design 或触发条件写错）。终审要同时兜住这两种。
+- 对每条做**代码级终审**（opencode 亲自读源码核实），因为 hy4-preview 是 LLM 判断、会看走眼——既可能**假阴**（漏真 bug），也可能**假阳**（判 true 实为 by-design 或触发条件写错）。终审要同时兜住这两种。
 - **codeHash 校验**：修前确认该文件自裁决后没被改过；若 `isVerdictStale` 为 true（代码已变），须重新 `/evaluate --arbitrate` 再修。
 - **修前分级**：对待修清单按影响**分级**——high（安全/崩溃/数据损坏）先修，low（边界/措辞类）可后置并在 `docs/verification.md` 标注"后置"；不必对每条平均用力。
 
 ### 4.2 终审写回（两步终审，全量打标，错题本）
 
-终审对**每条** finding（不只是 verdict=true 的，含 hy3 判 false 的）分**两步**独立判断，最后落成 JSON 数组跑 `--confirm` 写回裁决账本——这是"每个员工的错题本"，下次 /audit 会自动回灌个人误报、`progress.mjs` 据此算进步。
+终审对**每条** finding（不只是 verdict=true 的，含 hy4-preview 判 false 的）分**两步**独立判断，最后落成 JSON 数组跑 `--confirm` 写回裁决账本——这是"每个员工的错题本"，下次 /audit 会自动回灌个人误报、`progress.mjs` 据此算进步。
 
 **两步终审（盲判 → 对比）**：
 
-1. **步骤 1 盲判**：先**不看**裁决账本里 hy3 的 `verdict/evidence`、qwen 的 `agree/reason`、glm/kimi 的 `chain_analysis`——只读源码本身，独立判断这条 finding 是真是假，写下你自己的依据。
+1. **步骤 1 盲判**：先**不看**裁决账本里 hy4-preview 的 `verdict/evidence`、qwen 的 `agree/reason`、glm/kimi 的 `chain_analysis`——只读源码本身，独立判断这条 finding 是真是假，写下你自己的依据。
 2. **步骤 2 对比终判**：再打开 `.cc-suite-cn/verdict-log.json` 翻出上游所有理由，跟步骤 1 自己的依据对照，确认「一致」或「分歧」，做最终 `final=true/false` 判定。
 
 **`reason` 是终判依据，必须非空**（`--confirm` 会拒绝空 reason）。总结报告里显式写清两步：「步骤 1 独立判 X / 步骤 2 对比后终判 Y / 与上游一致或分歧」。
@@ -165,11 +165,11 @@ TDD 五步：
 ## Critical Rules
 
 - **修 bug 只由 opencode**（最了解项目 + TDD）
-- **审计前置两道闸门**：opencode 修代码前，必须通过两道审计——① hy3 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。
-- **裁决前置**：只修 hy3 判 `true` 且 codeHash 未失效的 finding；跳过裁决 = 违规
+- **审计前置两道闸门**：opencode 修代码前，必须通过两道审计——① hy4-preview 裁决（verdict=true）② opencode 代码级终审。未过闸门不得修。
+- **裁决前置**：只修 hy4-preview 判 `true` 且 codeHash 未失效的 finding；跳过裁决 = 违规
 - **复审门控**：`/verify` 只审 diff 是**唯一复审**，修 bug 后必做；没做成（git diff 空 / 真机需用户）必须显式标「⏸️ 尚未复审」，禁止用「已修复」「全流程完成」掩盖。**施工队空输出/超时/error = 门没关上，必须重试到非空结论（job 内已重试 2 次，仍空就重跑一次），重试耗尽才允许标 ⏸️；非 🟢 一律不 commit。**
-- **Override 出口（客观标准）**：仅当 opencode 用**代码级证据**确认「hy3 判 false 但这是真 bug」（假阴）时，可跳过裁决直接修；必须满足两条——① 在 `docs/verification.md` 台账标"未经裁决" ② 附代码级证据 + 🟢 测试。不得以"紧急/小 bug"这类模糊理由跳过。
-- hy3 是 LLM 判断，只当**初筛**；opencode 的代码级核实 + 🟢 测试才是 ground truth
+- **Override 出口（客观标准）**：仅当 opencode 用**代码级证据**确认「hy4-preview 判 false 但这是真 bug」（假阴）时，可跳过裁决直接修；必须满足两条——① 在 `docs/verification.md` 台账标"未经裁决" ② 附代码级证据 + 🟢 测试。不得以"紧急/小 bug"这类模糊理由跳过。
+- hy4-preview 是 LLM 判断，只当**初筛**；opencode 的代码级核实 + 🟢 测试才是 ground truth
 - 写后不自动合并；**验证后问 commit，用户同意才 commit**（只审 diff 没做成就要求 commit 时，须显式标「⏸️ 尚未复审」）
 - 能力动词逐个测：声称"修好了 A/B/C"，就分别有 A/B/C 的 🟢 证据
 - **窗口/权限/快捷键改动真机必验**：涉及 `NSWindow`/`NSPanel`/`NSScreen`/`NSView`、权限请求（`TCC`/辅助功能/屏幕录制/摄像头/输入监控）、`CGEvent`/`NSEvent`/`keyDown`/`addGlobalMonitor`/`CGEventTap` 的改动，单测覆盖不到，Step 5 必须真机点验（🟢），非 🟢 不 commit；编译/单测通过不算数。

@@ -58,9 +58,9 @@ describe("AGENTS.md 文档（WI-3）", () => {
     assert.match(c, /VERIFIER_MODEL/, "应写 VERIFIER_MODEL");
   });
 
-  it("models.json 描述澄清（glm-5.2/hy3 走平台，不属自定义 endpoint）", () => {
+  it("models.json 描述澄清（glm-5.3/hy4-preview 走平台，不属自定义 endpoint）", () => {
     const c = readFileSync(join(ROOT, "AGENTS.md"), "utf8");
-    assert.match(c, /glm-5\.2\/hy3 走 codebuddy 平台/, "models.json 描述未澄清 glm-5.2/hy3 走平台");
+    assert.match(c, /glm-5\.3\/hy4-preview 走 codebuddy 平台/, "models.json 描述未澄清 glm-5.3/hy4-preview 走平台");
   });
 
   it("阶段完成定义含「本阶段要防的教训」+ 指向 --preflight", () => {

@@ -20,25 +20,25 @@ describe("buildCommand", () => {
   };
 
   it("codebuddy 用绝对路径 + --model + 只读 denylist，prompt 走 stdin", () => {
-    const cmd = buildCommand("codebuddy", { model: "glm-5.2", prompt: "review this" }, { which: WHICH.codebuddy });
+    const cmd = buildCommand("codebuddy", { model: "glm-5.3", prompt: "review this" }, { which: WHICH.codebuddy });
     assert.equal(cmd.command, "/usr/local/bin/codebuddy");
-    assert.deepEqual(cmd.args, ["--model", "glm-5.2", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
+    assert.deepEqual(cmd.args, ["--model", "glm-5.3", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
     assert.equal(cmd.stdin, "review this");
   });
 
-  it("kimi 用绝对路径 + --agent-file 只读护栏，prompt 走 -p，无 stdin", () => {
-    const cmd = buildCommand("kimi", { model: "kimi-k2.7-code", prompt: "review this" }, { which: WHICH.kimi });
+  it("kimi 用绝对路径 + --agent-file 只读护栏 + -m 显式指定模型，prompt 走 -p，无 stdin", () => {
+    const cmd = buildCommand("kimi", { model: "kimi-k3", prompt: "review this" }, { which: WHICH.kimi });
     assert.equal(cmd.command, "/usr/local/bin/kimi");
     assert.equal(cmd.args[0], "--agent-file");
     assert.match(cmd.args[1], /kimi-readonly-agent\.md$/, "应指向只读 agent 定义文件");
-    assert.deepEqual(cmd.args.slice(2), ["-p", "review this"]);
+    assert.deepEqual(cmd.args.slice(2), ["-m", "moonshotai-cn/kimi-k3", "-p", "review this"]);
     assert.equal(cmd.stdin, null);
   });
 
-  it("qwen 用绝对路径 + --safe-mode + --sandbox，无 -y", () => {
-    const cmd = buildCommand("qwen", { model: "qwen3-coder-plus", prompt: "review this" }, { which: WHICH.qwen });
+  it("qwen 用绝对路径 + --safe-mode + --sandbox + -m 显式指定模型，无 -y", () => {
+    const cmd = buildCommand("qwen", { model: "qwen3.8-max", prompt: "review this" }, { which: WHICH.qwen });
     assert.equal(cmd.command, "/usr/local/bin/qwen");
-    assert.deepEqual(cmd.args, ["--safe-mode", "--sandbox", "-p", "review this"]);
+    assert.deepEqual(cmd.args, ["--safe-mode", "--sandbox", "-m", "qwen3.8-max", "-p", "review this"]);
     assert.ok(!cmd.args.includes("-y"), "qwen must stay read-only (no -y)");
     assert.equal(cmd.stdin, null);
   });

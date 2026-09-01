@@ -3,6 +3,7 @@ import { buildCommand } from "./backends.mjs";
 import { frameCode, extractJson, withRetry } from "./review-tools.mjs";
 import { collectProjectRules, collectImportContext, collectStackContext, collectWorkerLessons, buildLessonsSection } from "./review-context.mjs";
 import { hashContent, confirmVerdict, modelsOf } from "./verdict-log.mjs";
+import { VERIFIER_MODEL } from "./models.mjs";
 import { buildOrchestratorPreflight } from "./feedback.mjs";
 import { dirname } from "node:path";
 
@@ -184,7 +185,7 @@ async function mapLimit(items, limit, fn) {
 
 export const ADJUDICATE_MAX_CTX_LINES = 800;
 
-export async function adjudicate({ finding, code, line = null, contextLines = 40, model = "hy3", backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", stackContext = "", retries = 0, lessons = "" }) {
+export async function adjudicate({ finding, code, line = null, contextLines = 40, model = VERIFIER_MODEL, backend = "codebuddy", timeout = ADJUDICATE_TIMEOUT, spawn = null, rules = "", relatedCode = "", stackContext = "", retries = 0, lessons = "" }) {
   const lineCount = code ? String(code).split("\n").length : 0;
   const ctx = line && lineCount > ADJUDICATE_MAX_CTX_LINES ? extractContext(code, line, { contextLines }) : code;
   const prompt = buildAdjudicatorPrompt(finding, ctx, rules, relatedCode, stackContext, lessons);
@@ -574,7 +575,7 @@ export async function cli(args = process.argv.slice(2), { load = loadAudits, std
         `${model.padEnd(20)}  ${runs.padStart(2)}  ${avg.padStart(6)}  ${cons.padStart(6)}  ${prec.padStart(8)}  ${ut.padStart(6)}  ${insufficient}\n`
       );
     }
-    stdout.write(`\n(样本阈值 ${minSamples} run/模型；precision = 账本中 hy3 判定为真的比例，仅统计有模型归属且已裁决的 finding)\n`);
+    stdout.write(`\n(样本阈值 ${minSamples} run/模型；precision = 账本中验证审计员判定为真的比例，仅统计有模型归属且已裁决的 finding)\n`);
     return 0;
   } catch (err) {
     stderr.write(err.message + "\n");

@@ -335,7 +335,7 @@ describe("parseVerdict", () => {
 });
 
 describe("adjudicate", () => {
-  it("uses hy3 and returns the verdict", async () => {
+  it("uses hy4-preview and returns the verdict", async () => {
     let captured = null;
     setSpawn((cmd, args, opts) => {
       captured = { cmd, args, opts };
@@ -343,7 +343,7 @@ describe("adjudicate", () => {
     });
     const r = await adjudicate({ finding: "SQL injection", code: "const q = 'x'" });
     assert.deepEqual(r, { verdict: "false", evidence: "already parameterized" });
-    assert.ok(captured.args.includes("hy3"), "must adjudicate with hy3");
+    assert.ok(captured.args.includes("hy4-preview"), "must adjudicate with hy4-preview");
   });
 
   it("returns uncertain when the model fails", async () => {

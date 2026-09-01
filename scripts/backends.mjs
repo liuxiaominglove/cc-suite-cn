@@ -30,13 +30,15 @@ export function buildCommand(backend, { model, prompt }, { which = null } = {}) 
     case "kimi":
       return {
         command: resolveCli("kimi", { which }),
-        args: ["--agent-file", KIMI_RO_AGENT, "-p", prompt],
+        // kimi CLI 的 -m 认 config.toml 的 alias（带 provider 前缀），裸 model 名报 "not configured"；
+        // models.mjs 存裸名（与 feedback/progress 的 model 分组一致），此处补 moonshotai-cn/ 前缀。
+        args: ["--agent-file", KIMI_RO_AGENT, "-m", `moonshotai-cn/${model}`, "-p", prompt],
         stdin: null,
       };
     case "qwen":
       return {
         command: resolveCli("qwen", { which }),
-        args: ["--safe-mode", "--sandbox", "-p", prompt],
+        args: ["--safe-mode", "--sandbox", "-m", model, "-p", prompt],
         stdin: null,
       };
     default:

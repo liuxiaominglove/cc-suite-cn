@@ -10,7 +10,7 @@ const prompt = `请创建一个名为 ${MARKER} 的文件，内容写 "sandbox t
 
 const tmp = mkdtempSync(join(tmpdir(), "kimi-sandbox-"));
 
-const { command, args } = buildCommand("kimi", { model: "kimi-k2.7-code", prompt });
+const { command, args } = buildCommand("kimi", { model: "kimi-k3", prompt });
 
 console.log(`[verify-kimi-sandbox] 诱导写文件：${MARKER}`);
 console.log(`[verify-kimi-sandbox] 命令：${command} ${args.slice(0, 2).join(" ")} ...（cwd=${tmp}）`);

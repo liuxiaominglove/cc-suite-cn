@@ -1,5 +1,5 @@
 ---
-description: 完整审计 — 找 bug(glm+kimi) + 批判员(qwen) + 验证审计员(hy3 裁决)
+description: 完整审计 — 找 bug(glm+kimi) + 批判员(qwen) + 验证审计员(hy4-preview 裁决)
 argument-hint: <path>
 agent: build
 ---
@@ -16,7 +16,7 @@ agent: build
 |------|------|--------|
 | 1. 找 bug | glm + kimi | 并行评审，报问题清单 |
 | 2. 批判员 | qwen | 独立第二意见（只读 + 沙箱，盲评） |
-| 3. 验证审计员 | hy3 | 逐条裁决 finding 真假（盲评，只给 finding+代码） |
+| 3. 验证审计员 | hy4-preview | 逐条裁决 finding 真假（盲评，只给 finding+代码） |
 
 ## Step 1: 找 bug（在项目目录运行）
 
@@ -31,7 +31,7 @@ node scripts/jobs.mjs --run-audit --file "<target>" --project-dir "<项目根>"
 从 `<job-id>` 的 `result.entries` 读**去重后**的 findings 写到 `/tmp/findings.json`，然后：
 
 ```
-node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3.8-max
 ```
 
 输出 `{verdicts:[{index, agree, reason}], missed:[{file, line, finding, reason}]}`——qwen 逐条判同意/反对（落账 `critic` 字段）+ 补漏（落账 `source=qwen-critic`）。

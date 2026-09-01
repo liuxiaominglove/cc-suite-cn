@@ -32,7 +32,7 @@ node scripts/jobs.mjs --get <job-id>
 用 Bash：
 
 ```
-node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/findings.json --backend qwen --model qwen3.8-max
 ```
 
 ## Step 3: 展示批判结果
@@ -47,4 +47,4 @@ node scripts/review-runner.mjs --critic --file "<target>" --findings-file /tmp/f
 - **必须先 audit**：没有 finding 清单不批判（不回退成独立评审）
 - 批判员只批判清单，不重新扫代码
 - 批判员只读 + sandbox，不修代码
-- 批判结果供 hy3 裁决和 opencode 终审参考，本身不是终审
+- 批判结果供 hy4-preview 裁决和 opencode 终审参考，本身不是终审

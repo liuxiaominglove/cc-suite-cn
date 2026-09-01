@@ -51,14 +51,14 @@ node scripts/jobs.mjs --run-audit --file "<绝对路径>" --allow-external --pro
 > **critic 一次只审一个文件**：把 Step 1 累积的 findings 按 `file` 分组，逐文件跑（`--file` 收的是**单个文件的绝对路径**，不是项目根目录）。每组 findings 写成该文件对应的 `/tmp/findings-<序号>.json`，然后对每个有 findings 的变更文件：
 
 ```
-node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3-coder-plus
+node scripts/review-runner.mjs --critic --file "<该文件的绝对路径>" --findings-file /tmp/findings-<序号>.json --project-dir "<项目根目录>" --backend qwen --model qwen3.8-max
 ```
 
 > **`--project-dir` 必传**：否则 qwen 补漏的 missed finding 落账 projectDir 会写成 cc-suite-cn 根目录，Step 3 裁决按项目根过滤时被漏掉。
 
 输出 `{verdicts:[{index, agree, reason}], missed:[...]}`：`verdicts` 判「反对」（假阳）的 Step 4 重点复核；`missed` 自动落账（`source=qwen-critic`）随 Step 3 一起裁决。
 
-## Step 3: 裁决（hy3，只裁本次变更文件）
+## Step 3: 裁决（hy4-preview，只裁本次变更文件）
 
 ```
 node scripts/evaluate-models.mjs --arbitrate --files "<变更文件绝对路径,逗号分隔>" --project-dir "<项目根目录>"
@@ -77,7 +77,7 @@ node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m =>
 ```
 
 - 清单为空 → 报告「未发现真 bug」并停（但仍走 Step 收尾更新基线）。
-- **不确定清单（别漏）**：`getUncertainFindings`（verdict 非 true/false，含 `uncertain`）也要按变更文件过滤后逐条代码级终审——`uncertain` 是 hy3 拿不准，真 bug 常藏在这里，判真就修、判假就落账 false。过滤方式同待修清单（调用方 `filter(v => changed.has(v.file))`）：
+- **不确定清单（别漏）**：`getUncertainFindings`（verdict 非 true/false，含 `uncertain`）也要按变更文件过滤后逐条代码级终审——`uncertain` 是 hy4-preview 拿不准，真 bug 常藏在这里，判真就修、判假就落账 false。过滤方式同待修清单（调用方 `filter(v => changed.has(v.file))`）：
 
 ```
 node --input-type=module -e "import('./scripts/verdict-log.mjs').then(async m => { const changed = new Set(JSON.parse(process.argv[1])); const all = m.getUncertainFindings(await m.loadVerdicts(), { projectDir: \"<项目根目录>\" }); console.log(JSON.stringify(all.filter(v => changed.has(v.file)), null, 2)); })" '["<变更文件1绝对路径>","<变更文件2绝对路径>", ...]'

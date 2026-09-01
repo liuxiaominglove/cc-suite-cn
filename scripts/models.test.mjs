@@ -7,7 +7,7 @@ describe("WORKERS", () => {
     assert.equal(WORKERS.length, 4);
     assert.deepEqual(
       WORKERS.map((w) => `${w.backend}/${w.model}`),
-      ["codebuddy/glm-5.2", "codebuddy/hy3", "kimi/kimi-k2.7-code", "qwen/qwen3-coder-plus"]
+      ["codebuddy/glm-5.3", "codebuddy/hy4-preview", "kimi/kimi-k3", "qwen/qwen3.8-max"]
     );
   });
 
@@ -19,20 +19,20 @@ describe("WORKERS", () => {
 
 describe("canonicalModel", () => {
   it("maps legacy alias to canonical name", () => {
-    assert.equal(canonicalModel("custom-local:qwen-coder-plus"), "qwen3-coder-plus");
-    assert.equal(canonicalModel("qwen-coder-plus"), "qwen3-coder-plus");
+    assert.equal(canonicalModel("custom-local:qwen-coder-plus"), "qwen3.8-max");
+    assert.equal(canonicalModel("qwen-coder-plus"), "qwen3.8-max");
   });
 
   it("returns canonical names unchanged", () => {
-    assert.equal(canonicalModel("qwen3-coder-plus"), "qwen3-coder-plus");
-    assert.equal(canonicalModel("glm-5.2"), "glm-5.2");
+    assert.equal(canonicalModel("qwen3.8-max"), "qwen3.8-max");
+    assert.equal(canonicalModel("glm-5.3"), "glm-5.3");
   });
 });
 
 describe("isWorkerModel", () => {
   it("recognizes canonical worker models", () => {
-    assert.equal(isWorkerModel("glm-5.2"), true);
-    assert.equal(isWorkerModel("qwen3-coder-plus"), true);
+    assert.equal(isWorkerModel("glm-5.3"), true);
+    assert.equal(isWorkerModel("qwen3.8-max"), true);
   });
 
   it("rejects non-worker models", () => {
@@ -45,13 +45,13 @@ describe("role constants", () => {
   it("defines find-bug workers as glm + kimi", () => {
     assert.deepEqual(
       FIND_BUG_WORKERS.map((w) => `${w.backend}/${w.model}`),
-      ["codebuddy/glm-5.2", "kimi/kimi-k2.7-code"]
+      ["codebuddy/glm-5.3", "kimi/kimi-k3"]
     );
   });
 
   it("defines critic and verifier models", () => {
-    assert.equal(CRITIC_MODEL, "qwen3-coder-plus");
-    assert.equal(VERIFIER_MODEL, "hy3");
+    assert.equal(CRITIC_MODEL, "qwen3.8-max");
+    assert.equal(VERIFIER_MODEL, "hy4-preview");
   });
 
   it("keeps roles mutually exclusive", () => {

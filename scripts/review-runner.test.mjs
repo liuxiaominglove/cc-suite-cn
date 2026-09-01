@@ -2075,7 +2075,7 @@ describe("criticize", () => {
     assert.equal(entries[0].file, "/p/d.js");
     assert.equal(entries[0].source, "qwen-critic");
     assert.equal(entries[0].chainAnalysis, "为什么漏");
-    assert.deepEqual(entries[0].models, ["qwen3-coder-plus"]);
+    assert.deepEqual(entries[0].models, ["qwen3.8-max"]);
   });
 
   it("buildMissedFindings 模型参数化（不硬编码）", () => {

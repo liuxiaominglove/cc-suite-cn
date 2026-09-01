@@ -6,7 +6,7 @@ agent: build
 
 # 变更追溯
 
-查 `$ARGUMENTS`（finding 关键词、或 `file:line`）对应的完整链路：谁报的 → hy3 怎么裁决的 → 是否已修 → 测试证据。
+查 `$ARGUMENTS`（finding 关键词、或 `file:line`）对应的完整链路：谁报的 → hy4-preview 怎么裁决的 → 是否已修 → 测试证据。
 
 > 空参数 → 提示用户「请给 finding 关键词或 `file:line`，如 `/trace scripts/jobs.mjs:25`」。
 
@@ -31,7 +31,7 @@ console.log(JSON.stringify(hits, null, 2));
 | 字段 | 含义 |
 |------|------|
 | `file:line` | bug 位置 |
-| `verdict` | hy3 裁决：true（真 bug）/ false（假阳）/ uncertain |
+| `verdict` | hy4-preview 裁决：true（真 bug）/ false（假阳）/ uncertain |
 | `evidence` | 裁决理由（一句证据） |
 | `codeHash` | 裁决时的代码快照（可对照 `isVerdictStale` 判断代码是否已变） |
 | `fixed` | 若已修：`{commit, testEvidence, fixedAt}`；空 = 尚未修复 |

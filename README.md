@@ -2,7 +2,7 @@
 
 > 受 [李笑来 cc-suite](https://github.com/xiaolai/cc-suite) 启发重写的**中国大陆版**——opencode 当总指挥，五个**国产大模型**各司其职，交叉查代码、**谁都不批自己**。
 
-**English TL;DR** — A mainland-China rework of [Li Xiaolai's cc-suite](https://github.com/xiaolai/cc-suite): multi-model code review orchestration running on opencode. DeepSeek orchestrates and fixes; GLM + Kimi find bugs, Qwen critiques, Hy3 verifies — all domestic Chinese models, no VPN needed. Five models, four independent roles, and **nobody reviews their own work**.
+**English TL;DR** — A mainland-China rework of [Li Xiaolai's cc-suite](https://github.com/xiaolai/cc-suite): multi-model code review orchestration running on opencode. DeepSeek orchestrates and fixes; GLM + Kimi find bugs, Qwen critiques, Hy4-Preview verifies — all domestic Chinese models, no VPN needed. Five models, four independent roles, and **nobody reviews their own work**.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-green.svg)](https://nodejs.org)
@@ -31,7 +31,7 @@
 
 ## 一、这是什么
 
-一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy3 当裁判判真假，DeepSeek 亲自修。**
+一句话：**你当老板，opencode 当工头兼施工队长，GLM/Kimi 负责找 bug，Qwen 当批判员挑毛病，Hy4-Preview 当裁判判真假，DeepSeek 亲自修。**
 
 以前用 AI 写代码，你只能指望**一个 AI** 干活，它错了你未必知道。这套系统：
 
@@ -51,7 +51,7 @@
 | 维度 | 原版 cc-suite | 本版 cc-suite-cn |
 |------|---------------|------------------|
 | 中心 CLI | Claude Code | **opencode** |
-| 模型 | 海外为主（Claude / Grok） | **全国产**（DeepSeek / GLM / Kimi / Qwen / Hy3），大陆直连、无需 VPN |
+| 模型 | 海外为主（Claude / Grok） | **全国产**（DeepSeek / GLM / Kimi / Qwen / Hy4-Preview），大陆直连、无需 VPN |
 | 聚焦方向 | 跨 CLI 桥接与互相委派 | **多模型交叉代码审查**（找 bug → 批判 → 裁决 → 修） |
 
 ---
@@ -61,10 +61,10 @@
 | 模型 | 公司 | 角色 | 干什么 | 为什么是它 |
 |------|------|------|--------|-----------|
 | **DeepSeek V4 Pro** | 深度求索 | 总指挥 + 修 bug | 最懂项目，带 TDD 亲自修 | 逻辑强、代码能力顶尖 |
-| **GLM-5.2** | 智谱 AI | 找 bug | 广撒网，报得多 | 覆盖面广 |
-| **Kimi K2.7 Code** | 月之暗面 | 找 bug | 报得准，质量高 | 长上下文、代码理解强 |
-| **Qwen3 Coder Plus** | 阿里（通义） | 批判员 | 独立第二意见（只读 + 沙箱） | 独立视角挑刺 |
-| **Hy3** | 腾讯混元 | 验证审计员 | 逐条判 finding 真假（只读） | 公正裁决 |
+| **GLM-5.3** | 智谱 AI | 找 bug | 广撒网，报得多 | 覆盖面广、漏洞发现强化 |
+| **Kimi K3** | 月之暗面 | 找 bug | 报得准，质量高 | 1M 上下文、长程代码理解强 |
+| **Qwen3.8-Max** | 阿里（通义） | 批判员 | 独立第二意见（只读 + 沙箱） | 旗舰推理强、独立视角挑刺 |
+| **Hy4-Preview** | 腾讯混元 | 验证审计员 | 逐条判 finding 真假（只读） | 公正裁决 |
 
 > **核心原则：谁都不批自己。** 找 bug 的不判真假，判真假的不找 bug，修 bug 的（opencode/DeepSeek）最了解项目但只负责修。
 
@@ -83,7 +83,7 @@
        │                │                │
    找 bug（audit）   批判员（critic）   验证审计员（verifier）
        │                │                │
-   GLM + Kimi        Qwen             Hy3
+   GLM + Kimi        Qwen             Hy4-Preview
    （只读评审）     （只读 + 沙箱）    （只读，判 finding 真假）
 ```
 
@@ -93,7 +93,7 @@
 |------|--------|------|
 | **找 bug（audit）** | glm+kimi 审代码，报问题清单 | 两个监理一起巡楼，记问题 |
 | **批判员（critic）** | qwen 独立挑毛病，给"第二意见" | 另请的第三方顾问，专挑刺 |
-| **验证审计员（verifier）** | hy3 逐条判"这条是不是真 bug" | 裁判，只判真假、不找新问题 |
+| **验证审计员（verifier）** | hy4-preview 逐条判"这条是不是真 bug" | 裁判，只判真假、不找新问题 |
 | **job 账本** | 每个任务记一笔账（状态+结果） | 外卖订单系统，能查单、退单 |
 | **真后台** | 任务在后台独立进程跑，关了终端也不断 | 你下单后不用站店门口干等 |
 | **单一数据源** | 脚本/配置只存一份，别处只"指路"不复制 | 原件存保险柜，别处只放快捷方式 |
@@ -175,7 +175,7 @@ echo 'export MOONSHOT_API_KEY=你的月之暗面key' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-> `codebuddy` CLI 走**平台账号登录态**（GLM-5.2 + Hy3 网关），第一次跑时按提示登录即可，不需要单独 key。
+> `codebuddy` CLI 走**平台账号登录态**（GLM-5.3 + Hy4-Preview 网关），第一次跑时按提示登录即可，不需要单独 key。
 
 ### 安装本仓库
 
@@ -213,7 +213,7 @@ opencode
 | `/fix-incremental <项目根目录>` | 增量修复：只审/修自上次以来变更的文件，修完自动更新基线 | 只复诊有新症状的 |
 | `/review-kimi <文件>` | 只叫 Kimi 审 | 单医生看诊 |
 | `/review-qwen <文件>` | 只叫 Qwen 审（批判员） | 单医生看诊 |
-| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy3 裁决） | 赛后统计 MVP |
+| `/evaluate` | 评估谁找得多、谁找得准（`--arbitrate` 让 hy4-preview 裁决） | 赛后统计 MVP |
 | `/verify` | diff 审查（只发改动区域，省 tokens） | 复查刚改的地方 |
 | `/jobs` | 查任务账本（审计自动记账） | 看订单列表 |
 | `/result <job-id>` | 看某任务详细结果 | 点进订单看详情 |
@@ -241,14 +241,14 @@ opencode
 ```
 $ /audit src/utils.ts
 
-🤖 两个监理开始巡楼：GLM-5.2 + Kimi K2.7 Code
+🤖 两个监理开始巡楼：GLM-5.3 + Kimi K3
 
-[GLM-5.2] 发现 3 处
+[GLM-5.3] 发现 3 处
   - src/utils.ts:42   潜在空指针：getUser().name 未判空
   - src/utils.ts:87   竞态条件：两个协程同时修改 mutableList
   - src/utils.ts:120  拼写错误：recieve → receive
 
-[Kimi K2.7 Code] 发现 2 处
+[Kimi K3] 发现 2 处
   - src/utils.ts:42   空指针（与 GLM 共识）
   - src/utils.ts:155  资源未关闭：文件流未在 finally 中关闭
 
@@ -259,7 +259,7 @@ $ /audit src/utils.ts
 ```
 
 接着你可以：
-- `/audit-full src/utils.ts` → 加上 qwen 批判员 + hy3 裁决，出「真 bug / 假阳」结论；
+- `/audit-full src/utils.ts` → 加上 qwen 批判员 + hy4-preview 裁决，出「真 bug / 假阳」结论；
 - `/fix <bug 描述>` → opencode 用 TDD 亲自修。
 
 ---
@@ -279,13 +279,13 @@ A：漏了 `npm install`，回到安装第 ② 步补上。
 A：大陆网络访问 GitHub 不稳定，建议走镜像或代理。
 
 **Q5：`codebuddy` 提示未登录？**
-A：GLM/Hy3 走平台账号登录态，第一次跑 `codebuddy` 时按提示完成登录即可。
+A：GLM/Hy4-Preview 走平台账号登录态，第一次跑 `codebuddy` 时按提示完成登录即可。
 
-**Q6：Hy3 没额度了怎么办？**
-A：Hy3（验证审计员）走 `codebuddy` 平台账号（`codebuddy --model hy3`），用的是 codebuddy 平台额度，没额度了去 codebuddy 平台充值/领额度即可。
+**Q6：Hy4-Preview 没额度了怎么办？**
+A：Hy4-Preview（验证审计员）走 `codebuddy` 平台账号（`codebuddy --model hy4-preview`），用的是 codebuddy 平台额度，没额度了去 codebuddy 平台充值/领额度即可。
 
 **Q7：kimi 明明是月之暗面的，为什么以前见过它走阿里通道？**
-A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`kimi-k2.7-code`）。
+A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归属。本项目 Kimi 已改为 **Moonshot 官方直连**（`kimi-k3`）。
 
 ---
 
@@ -322,10 +322,10 @@ A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归
 
 ## 十一、安全底线
 
-1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy3）互相独立，判真假的人不找 bug。
+1. **谁都不批自己**：找 bug 的（glm/kimi）、批判员（qwen）、验证审计员（hy4-preview）互相独立，判真假的人不找 bug。
 2. **施工队只读 + 硬隔离**：qwen 批判员用 `--sandbox` + 不传 `-y`（只读）；kimi 用 `--agent-file`（`disallowedTools` 锁写工具）+ 子进程 cwd 隔离双保险，误写也落 temp 而非项目。
 3. **修 bug 只由 opencode**：它最了解项目、带 TDD，写后不自动合并，`git diff` 审、`git checkout` 回退。
-4. **⚠️ 验证审计员 hy3 的判断是 LLM 判断**：`/evaluate` 的 precision = "hy3 判定为真的比例"，不是客观准确率，报告会如实标注。
+4. **⚠️ 验证审计员 hy4-preview 的判断是 LLM 判断**：`/evaluate` 的 precision = "hy4-preview 判定为真的比例"，不是客观准确率，报告会如实标注。
 
 ---
 
@@ -334,7 +334,7 @@ A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归
 1. **大文件自动分块**：超过 800 行自动切成块（每块重叠 10 行防漏），逐块审，行号自动偏移回原文件。
 2. **超时统一 900s**：找 bug / 批判员 / 验证审计员三个环节都 900 秒，慢 AI（如 kimi）不再被误杀。
 3. **finding 统一英文**：施工队输出统一英文，修复了"glm 报英文、kimi 报中文 → 共识率恒 0"的跨语言匹配问题。
-4. **验证审计员只看上下文**：hy3 裁决时只传 finding 附近 ±40 行，不整文件塞，更精准、更省 token。
+4. **验证审计员只看上下文**：hy4-preview 裁决时只传 finding 附近 ±40 行，不整文件塞，更精准、更省 token。
 
 ---
 
@@ -343,7 +343,7 @@ A：`alibaba-cn/` 前缀只代表「走阿里 API 通道」，不代表模型归
 | 依赖 | 用途 |
 |------|------|
 | opencode | 总指挥 + 修 bug（宿主） |
-| CodeBuddy CLI | glm/hy3 的网关（找 bug + 验证审计员） |
+| CodeBuddy CLI | glm/hy4-preview 的网关（找 bug + 验证审计员） |
 | kimi CLI / qwen CLI | 独立评审壳 |
 | `DASHSCOPE_API_KEY` | 阿里百炼，Qwen（批判员） |
 | `MOONSHOT_API_KEY` | 月之暗面 Moonshot，Kimi（走 Moonshot 直连，非阿里） |
