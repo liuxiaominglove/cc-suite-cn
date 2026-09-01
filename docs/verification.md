@@ -1087,6 +1087,10 @@ qwen+kimi 审 diff：qwen 1 条 medium + kimi 2 条 low。opencode 代码级终�
 - 🟡 hy4-preview 是 preview，裁决质量待下次真实 `/fix` 积累终审数据后重测吻合率（对照旧 hy3 的 39%）。
 - 🟡 kimi-k3 是通用版（无 code 专线），找 bug 质量待观察。
 
+## self-audit 门禁跳过留痕
+
+模型升级后 glm-5.3/kimi-k3 审复杂脚本（`review-runner.mjs` 466 行，含大量正则/反引号处理逻辑）慢到 120s 超时（glm-5.3 实测 TimeoutError，非限流——codebuddy 基本响应 6.8s 正常），self-audit 48 分钟 0/15、卡在首个脚本反复重试。经用户授权跳过 self-audit 门禁先 push。**重估条件**：优化 self-audit（大脚本单独分块 / 超时调优 / 脚本列表瘦身）后重跑。
+
 ## 结果
 
 - `pnpm test:unit`：**979 全绿** + guard 通过。
