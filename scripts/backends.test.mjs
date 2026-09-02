@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { buildCommand, READ_ONLY_DECLARATION, resolveCli } from "./backends.mjs";
+import { VERIFIER_MODEL } from "./models.mjs";
 
 describe("resolveCli", () => {
   it("解析到绝对路径（防 PATH 劫持）", () => {
@@ -19,11 +20,22 @@ describe("buildCommand", () => {
     qwen: () => "/usr/local/bin/qwen",
   };
 
-  it("codebuddy 用绝对路径 + --model + 只读 denylist，prompt 走 stdin", () => {
+  it("codebuddy 用绝对路径 + --model + --effort + 只读 denylist，prompt 走 stdin", () => {
     const cmd = buildCommand("codebuddy", { model: "glm-5.3", prompt: "review this" }, { which: WHICH.codebuddy });
     assert.equal(cmd.command, "/usr/local/bin/codebuddy");
-    assert.deepEqual(cmd.args, ["--model", "glm-5.3", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
+    assert.deepEqual(cmd.args, ["--model", "glm-5.3", "--effort", "low", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
     assert.equal(cmd.stdin, "review this");
+  });
+
+  it("hy4-preview（验证审计员）不降档，保持默认推理（裁决是修 bug 门槛）", () => {
+    const cmd = buildCommand("codebuddy", { model: VERIFIER_MODEL, prompt: "adjudicate" }, { which: WHICH.codebuddy });
+    assert.deepEqual(cmd.args, ["--model", VERIFIER_MODEL, "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
+    assert.equal(cmd.stdin, "adjudicate");
+  });
+
+  it("未知模型保守不降档（fail-closed，防未来新增模型被静默降档）", () => {
+    const cmd = buildCommand("codebuddy", { model: "some-future-model", prompt: "x" }, { which: WHICH.codebuddy });
+    assert.deepEqual(cmd.args, ["--model", "some-future-model", "--print", "--output-format", "text", "--disallowedTools", "Edit Write Bash"]);
   });
 
   it("kimi 用绝对路径 + --agent-file 只读护栏 + -m 显式指定模型，prompt 走 -p，无 stdin", () => {

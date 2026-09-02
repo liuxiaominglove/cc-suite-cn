@@ -1087,9 +1087,24 @@ qwen+kimi 审 diff：qwen 1 条 medium + kimi 2 条 low。opencode 代码级终�
 - 🟡 hy4-preview 是 preview，裁决质量待下次真实 `/fix` 积累终审数据后重测吻合率（对照旧 hy3 的 39%）。
 - 🟡 kimi-k3 是通用版（无 code 专线），找 bug 质量待观察。
 
+## 调档解决「慢」（降低推理深度）
+
+新模型慢的根因 = 默认深度推理（glm-5.3/kimi-k3 默认 `max`、qwen3.8-max 默认 `xhigh`，且思考模式关不掉）。三后端均支持调低推理档位：
+
+| 后端 | 模型 | 调档方式 | 改动 |
+|------|------|---------|------|
+| codebuddy | glm-5.3（找 bug） | `--effort low` | `backends.mjs` 加参数（TDD） |
+| codebuddy | hy4-preview（裁决） | 保持默认（不降档） | 裁决是修 bug 门槛；`backends.mjs` 只对找 bug 模型降档（枚举式，其余 fail-closed 不降） |
+| kimi | kimi-k3（找 bug） | `default_effort = "low"` | `~/.kimi-code/config.toml` |
+| qwen | qwen3.8-max（批判员） | `generationConfig.reasoning.effort = "low"` | `~/.qwen/settings.json` |
+
+实测（审 `demos/quick-demo.js`，2 个已知真 bug：赋值认证绕过 + SQL 注入）：glm-5.3 19s / kimi-k3 39s / qwen3.8-max 23.6s，三模型均全抓到 2 个 bug。此前 glm-5.3 max 档审 `review-runner.mjs` 900s 超时、low 档 242s 完成。
+
+🟡 诚实标注：① 「质量不降」仅基于 1 个简单 demo（quick-demo.js）的 2 个 bug，需更多真实评审样本验证；② self-audit 卡住根因理论上已解决，但完整 self-audit 待重跑验证；③ kimi/qwen 调档在全局 config（仓库外），不可版本控制。
+
 ## self-audit 门禁跳过留痕
 
-模型升级后 glm-5.3/kimi-k3 审复杂脚本（`review-runner.mjs` 466 行，含大量正则/反引号处理逻辑）慢到 120s 超时（glm-5.3 实测 TimeoutError，非限流——codebuddy 基本响应 6.8s 正常），self-audit 48 分钟 0/15、卡在首个脚本反复重试。经用户授权跳过 self-audit 门禁先 push。**重估条件**：优化 self-audit（大脚本单独分块 / 超时调优 / 脚本列表瘦身）后重跑。
+模型升级后 glm-5.3/kimi-k3 审复杂脚本（`review-runner.mjs` 466 行，含大量正则/反引号处理逻辑）慢到 120s 超时（glm-5.3 实测 TimeoutError，非限流——codebuddy 基本响应 6.8s 正常），self-audit 48 分钟 0/15、卡在首个脚本反复重试。经用户授权跳过 self-audit 门禁先 push（**历史记录**；调档已落地解决根因，见上一节）。**重估条件**：self-audit 重跑验证（待下次 release 前做）。
 
 ## 结果
 
